@@ -372,6 +372,20 @@ canvas#radar {
   width: 100%;
   overflow-y: auto;
 }
+/* === FONDO DEL MAPA DEL PERÚ === */
+#mapa-fondo{
+  position: absolute;
+  inset: 0;
+  background: url('https://wallace6699.github.io/PRUBAS-DE-SIMULACION/mapa.svg') center/contain no-repeat;
+  opacity: 0.25;   /* controla transparencia */
+  z-index: 0;      /* detrás del radar */
+}
+
+/* radar por encima del mapa */
+#radar{
+  position: relative;
+  z-index: 1;
+}
 
 </style>
 </head>
@@ -2334,4 +2348,5 @@ document.getElementById('radar').addEventListener('click', function(e){
 </body>
 </html>
 by wallace
+
 
