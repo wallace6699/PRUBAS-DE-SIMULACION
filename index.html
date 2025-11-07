@@ -388,7 +388,7 @@ canvas#radar {
     id="reportPartialBtn"
     class="btn focusable"
     style="margin-left:10px;"
-    onclick="window.open('https://wallace6699.github.io/odi-simulador-2025/reporte.html', '_blank')">
+    onclick="window.open('https://wallace6699.github.io/PRUBAS-DE-SIMULACION/reporte.html', '_blank')">
     📄 Ver / Imprimir Informe Parcial
   </button>
 
@@ -442,10 +442,11 @@ canvas#radar {
   </aside>
 
   <main id="center" class="panel">
-    <canvas id="radar"></canvas>
-    <div id="hud" class="mini"></div>
-    <div id="status">FPS: <span id="fps">0</span> • Estado: <span id="simstate">PAUSA</span></div>
-  </main>
+  <div id="mapa-fondo"></div>
+  <canvas id="radar"></canvas>
+  <div id="hud" class="mini"></div>
+  <div id="status">FPS: <span id="fps">0</span> • Estado: <span id="simstate">PAUSA</span></div>
+</main>
 
   <aside id="right">
     <section class="panel" id="pStudent">
@@ -2333,3 +2334,4 @@ document.getElementById('radar').addEventListener('click', function(e){
 </body>
 </html>
 by wallace
+
