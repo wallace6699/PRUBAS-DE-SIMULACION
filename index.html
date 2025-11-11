@@ -2661,56 +2661,81 @@ document.getElementById('radar').addEventListener('click', function(e){
 })();
 </script>
 
-  <!-- //=== PARCHE LOCAL PARA MODO ANALÓGICO / DIGITAL === -->
+<!-- === PARCHE DEFINITIVO MODO LOCAL ANALÓGICO / DIGITAL === -->
 <script>
-(function() {
-  // Esperar a que todo esté listo
-  window.addEventListener('load', function() {
-    const analogBtn  = document.getElementById('modeAnalog');
-    const digitalBtn = document.getElementById('modeDigital');
+(function(){
+  // Ejecutar cuando todo esté listo
+  window.addEventListener('load', () => {
+    const btnAnalog  = document.getElementById('modeAnalog');
+    const btnDigital = document.getElementById('modeDigital');
 
-    if (!analogBtn || !digitalBtn) {
-      console.warn('Parche local: botones no encontrados');
+    if(!btnAnalog || !btnDigital){
+      console.warn('Botones de modo no encontrados');
       return;
     }
 
     // Guardar el modo local actual
     st.modeLocal = st.mode;
 
-    // === Forzar que los botones solo afecten localmente ===
-    analogBtn.addEventListener('click', (e) => {
+    // === 1️⃣ Botones solo locales (NO sincronizan) ===
+    btnAnalog.onclick = (e)=>{
       e.stopPropagation();
-      st.mode = 'analog';
       st.modeLocal = 'analog';
-      flash(analogBtn);
-      console.log('[LOCAL] Modo analógico activado — no se sincroniza con la nube');
-      // No llamamos a scheduleSync() ni _SETCA_SYNC.push()
-    }, true);
+      st.mode = 'analog';
+      flash(btnAnalog);
+      console.log('[LOCAL] Analógico activado solo localmente');
+    };
 
-    digitalBtn.addEventListener('click', (e) => {
+    btnDigital.onclick = (e)=>{
       e.stopPropagation();
-      st.mode = 'digital';
       st.modeLocal = 'digital';
-      flash(digitalBtn);
-      console.log('[LOCAL] Modo digital activado — no se sincroniza con la nube');
-    }, true);
+      st.mode = 'digital';
+      flash(btnDigital);
+      console.log('[LOCAL] Digital activado solo localmente');
+    };
 
-    // === Interceptar cambios que vengan desde Firebase ===
-    // Cada 300 ms, si detecta que Firebase sobreescribió el modo, lo restaura.
-    setInterval(() => {
-      if (st.mode !== st.modeLocal) {
-        console.log('[LOCAL] Firebase intentó cambiar el modo, restaurando:', st.modeLocal);
-        st.mode = st.modeLocal;
-      }
-    }, 300);
+    // === 2️⃣ Bloquear sincronización con Firebase (lectura y escritura) ===
+    const _push = window._SETCA_SYNC && window._SETCA_SYNC.push;
+    if (_push) {
+      window._SETCA_SYNC.push = function(local){
+        // Clonamos el objeto sin el modo
+        const copy = Object.assign({}, local);
+        delete copy.mode; // no subir modo
+        return _push.call(window._SETCA_SYNC, copy);
+      };
+    }
 
-    console.log('✅ Parche de modo analógico/digital local activo.');
+    // === 3️⃣ Interceptar datos entrantes: ignorar "mode" remoto ===
+    const db = window.db;
+    if (db && typeof firebase !== 'undefined') {
+      try {
+        // Redefinir temporalmente la función onValue
+        const originalOnValue = firebase.database().ref().constructor.prototype.on;
+        if (originalOnValue) {
+          firebase.database().ref().constructor.prototype.on = function(event, callback, ...rest){
+            const wrapped = (snap)=>{
+              const v = snap.val();
+              if(v && 'mode' in v){
+                delete v.mode; // ignorar completamente el modo remoto
+              }
+              callback && callback(snap);
+            };
+            return originalOnValue.call(this, event, wrapped, ...rest);
+          };
+          console.log('[LOCAL] Listener remoto interceptado: el modo no se recibe desde la nube.');
+        }
+      }catch(e){ console.warn('No se pudo interceptar Firebase:', e); }
+    }
+
+    console.log('✅ Parche DEFINITIVO: modo analógico/digital 100% local activo');
   });
 })();
 </script>
-<!-- === /FIN PARCHE LOCAL === -->
+<!-- === /FIN PARCHE DEFINITIVO === -->
+
 
   
 </body>
 </html>
 by wallace
+
