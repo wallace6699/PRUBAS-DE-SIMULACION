@@ -1,3 +1,4 @@
+ESTE SIMULADOR SE ENCUENTRA EN TRABAJO / FASE DE PRUEBA - PUEDEN OCURRIR ERRORES DURANTE EL FUNCIONAMIENTO 
 <!DOCTYPE html>
 <html lang="es">
 <head>
@@ -372,19 +373,32 @@ canvas#radar {
   width: 100%;
   overflow-y: auto;
 }
-/* === FONDO DEL MAPA DEL PERÚ === */
-#mapa-fondo{
-  position: absolute;
-  inset: 0;
-  background: url('https://wallace6699.github.io/PRUBAS-DE-SIMULACION/mapa.svg') center/contain no-repeat;
-  opacity: 0.25;   /* controla transparencia */
-  z-index: 0;      /* detrás del radar */
+
+/* ===== Ajuste de tamaño para casilleros del panel de navegación ===== */
+#navCards input,
+#navCards select,
+#navCards button {
+  width: 60px;       /* cambia este número para hacerlos más grandes o más chicos */
+  height: 20px;      /* altura de cada casillero */
+  font-size: 12px;   /* tamaño del texto dentro */
+  padding: 2px 3px;  /* espacio interno */
+  margin: 1px;       /* separación entre casillas */
+  text-align: center;
+  border-radius: 4px;
+}
+/* ===== Habilita zoom táctil con dos dedos en el radar ===== */
+canvas#radar {
+  touch-action: none;           /* evita el zoom/pan del navegador */
+  -webkit-user-select: none;    /* evita selección accidental en iPhone/iPad */
+  user-select: none;            /* evita selección en Android y PC */
 }
 
-/* radar por encima del mapa */
-#radar{
-  position: relative;
-  z-index: 1;
+/* tus estilos anteriores... */
+
+/* ===== Color negro exclusivo para el reporte táctico ===== */
+#reportContent, 
+#reportContent * {
+  color: #000000 !important;
 }
 
 </style>
@@ -402,7 +416,7 @@ canvas#radar {
     id="reportPartialBtn"
     class="btn focusable"
     style="margin-left:10px;"
-    onclick="window.open('https://wallace6699.github.io/PRUBAS-DE-SIMULACION/reporte.html', '_blank')">
+    onclick="window.open('https://wallace6699.github.io/odi-simulador-2025/reporte.html', '_blank')">
     📄 Ver / Imprimir Informe Parcial
   </button>
 
@@ -451,16 +465,15 @@ canvas#radar {
 
     <section class="panel" id="pNav">
       <div class="panel-header"><h3>Panel de Navegación</h3><span class="toggle" data-target="#pNavBody">▾</span></div>
-      <div id="pNavBody" class="panel-body" style="max-height:38vh;overflow:auto"><div id="navCards" class="col"></div></div>
+      <div id="pNavBody" class="panel-body" style="max-height:70vh;overflow:auto; font-size:14px;"><div id="navCards" class="col"></div></div>
     </section>
   </aside>
 
   <main id="center" class="panel">
-  <div id="mapa-fondo"></div>
-  <canvas id="radar"></canvas>
-  <div id="hud" class="mini"></div>
-  <div id="status">FPS: <span id="fps">0</span> • Estado: <span id="simstate">PAUSA</span></div>
-</main>
+    <canvas id="radar"></canvas>
+    <div id="hud" class="mini"></div>
+    <div id="status">FPS: <span id="fps">0</span> • Estado: <span id="simstate">PAUSA</span></div>
+  </main>
 
   <aside id="right">
     <section class="panel" id="pStudent">
@@ -609,7 +622,8 @@ function basePlane(name,x,y,hdg){
   const alt = 12000 + Math.random()*16000;
   return { name, id:'F-'+Math.random().toString(36).slice(2,6).toUpperCase(), x,y, hdg, spd, tgtSpd:spd, alt, tgtAlt:alt, tgtHdg:hdg, turn:2, ghosts:[], kills:0, fuel:100, jamming:false };
 }
-// === FORMATION GENERATORS (all independent; no leader requirement) ===
+
+// === FORMATION GENERATORS (FORMACIONES INDEPENDIENTES SIN REQUERIMIENTO DE LIDER)  ===
 const GenForm = {
   LINEABREAST2(center){ // two-ship spread
     const s = randNM(FORM.LA_MIN_NM, FORM.LA_MAX_NM);
@@ -739,10 +753,24 @@ const timerEl=$('#timer'),stateChip=$('#stateChip'),fpsEl=$('#fps'),simStateEl=$
 function tickTimer(){const now=new Date();const s=String(now.getSeconds()).padStart(2,'0');const m=String(now.getMinutes()).padStart(2,'0');const h=String(now.getHours()).padStart(2,'0');const d=String(now.getDate()).padStart(2,'0');const mo=String(now.getMonth()+1).padStart(2,'0');const y=now.getFullYear();timerEl.textContent=`${d}-${mo}-${y} ${h}:${m}:${s}`;}
 setInterval(tickTimer,1000);tickTimer();
 
-/* ===== Zoom ===== */
-const MIN_Z=0.02,MAX_Z=6;
-cvs.addEventListener('wheel',e=>{e.preventDefault();const f=e.deltaY<0?1.12:1/1.12;zoom=Math.min(MAX_Z,Math.max(MIN_Z,zoom*f));},{passive:false});
+/* ===== Zoom ultra preciso y extendido de rueda de mouse (suave) ===== */
+const MIN_Z = 0.02, MAX_Z = 15; // más alcance de acercamiento
+cvs.addEventListener('wheel', e => {
+  e.preventDefault();
 
+  // Base muy fina (más cerca a 1 => más suave)
+  const BASE = 1.01;
+
+  // Normaliza deltaY y calcula un factor exponencial suave:
+  // deltaY < 0 => f > 1 (acerca), deltaY > 0 => f < 1 (aleja)
+  const dy = Math.max(-240, Math.min(240, e.deltaY || 0));
+  const f = Math.pow(BASE, -dy / 100);
+
+  // Aplica y limita
+  zoom = Math.min(MAX_Z, Math.max(MIN_Z, zoom * f));
+}, { passive: false });
+
+  
 /* ===== Pan con botón derecho ===== */
 let panning=false, panStart=null, offStart=null;
 cvs.addEventListener('contextmenu',e=>e.preventDefault());
@@ -1057,27 +1085,205 @@ function paintAlerts(){
 }
 
 /* ===== Telemetría y Reporte ===== */
-const tel={rows:[],evts:[]}; function fmt(ms){if(ms<0)ms=0;const s=Math.floor(ms/1000);return `${String(Math.floor(s/60)).padStart(2,'0')}:${String(s%60).padStart(2,'0')}`;}
-function logTel(){ if(st.paused) return; tel.rows.push({t:st.elapsed,planes:st.planes.map(p=>({id:p.id,name:p.name,alt:p.alt,spd:p.spd}))});}
-function logEvent(txt){ tel.evts.push({t:st.elapsed,txt});}
-let telTick=0;
-function renderReport(){
-  const cont=$('#reportContent');const fecha=new Date().toLocaleString();const lanz=tel.evts.filter(e=>e.txt.includes('LANZAMIENTO')).length;const hits=tel.evts.filter(e=>e.txt.includes('SPLASH')).length;const tasa=lanz?((hits/lanz)*100).toFixed(1)+'%':'N/A';
-  let html=`<h2>Reporte Táctico</h2><div class="row" style="justify-content:space-between"><span><b>Fecha:</b> ${fecha}</span><span><b>Duración:</b> ${fmt(st.elapsed)}</span></div>
-  <div class="row" style="justify-content:flex-end;gap:8px"><button onclick="window.print()">🖨️ Imprimir</button></div>
-  <h3>Estado Final de Aeronaves</h3><table><thead><tr><th>Nombre</th><th>Rol</th><th>Estado</th><th>Derribos</th><th>Vel</th><th>Alt</th></tr></thead><tbody>`;
-  st.planes.forEach(p=>{const stt=p._hit?'<b style="color:red">DESTRUIDO</b>':'Activo';const vel=st.metric?`${p.spd.toFixed(0)} km/h`:`${(p.spd*KMH2KTS).toFixed(0)} kts`;const alt=st.metric?`${(p.alt*FT2M|0)} m`:`${p.alt|0} ft`;html+=`<tr><td>${p.name}</td><td>${st.roles[p.id]||'N/A'}</td><td>${stt}</td><td>${p.kills||0}</td><td>${vel}</td><td>${alt}</td></tr>`;}); html+=`</tbody></table>`;
-  html+=`<h3>Gráficos</h3><div class="charts"><div><canvas id="altChart"></canvas></div><div><canvas id="spdChart"></canvas></div></div>`;
-  html+=`<h3>Eventos</h3><table>`; [...tel.evts].reverse().forEach(e=>{let s=''; if(e.txt.includes('SPLASH')||e.txt.includes('FALLA')) s='style="color:red;font-weight:700"'; if(e.txt.includes('LANZAMIENTO')) s='style="color:#e67e00;font-weight:700"'; html+=`<tr><td style="width:60px">[${fmt(e.t)}]</td><td ${s}>${e.txt}</td></tr>`;}); html+=`</table>`;
-  cont.innerHTML=html;
-  if(tel.rows.length>1){const labels=tel.rows.map(r=>fmt(r.t));const ids=[...new Set(tel.rows.flatMap(r=>r.planes.map(p=>p.id)))];
-    const colors=['#2ee74f','#35ff79','#9bffb0','#c6ffd6','#88ffa0','#eaffea','#a8ffcb','#7fffb5','#56ff9c','#12e45a'];
-    const altDS=ids.map((id,i)=>({label:(st.planes.find(p=>p.id===id)?.name)||id,data:tel.rows.map(r=>{const p=r.planes.find(x=>x.id===id);return p?(st.metric?p.alt*FT2M:p.alt):null;}),borderColor:colors[i%colors.length],fill:false,tension:.1,pointRadius:2}));
-    const spdDS=ids.map((id,i)=>({label:(st.planes.find(p=>p.id===id)?.name)||id,data:tel.rows.map(r=>{const p=r.planes.find(x=>x.id===id);return p?(st.metric?p.spd:p.spd*KMH2KTS):null;}),borderColor:colors[i%colors.length],fill:false,tension:.1,pointRadius:2}));
-    new Chart($('#altChart').getContext('2d'),{type:'line',data:{labels,datasets:altDS},options:{responsive:true,maintainAspectRatio:false,plugins:{title:{display:true,text:`Altitud (${st.metric?'m':'ft'})`}}}});
-    new Chart($('#spdChart').getContext('2d'),{type:'line',data:{labels,datasets:spdDS},options:{responsive:true,maintainAspectRatio:false,plugins:{title:{display:true,text:`Velocidad (${st.metric?'km/h':'kts'})`}}}});
+// ======================================================
+// === FUNCIÓN MEJORADA: GENERADOR DE REPORTE TÁCTICO ===
+// ======================================================
+const tel = { rows: [], evts: [] };
+
+function fmt(ms) {
+  if (ms < 0) ms = 0;
+  const s = Math.floor(ms / 1000);
+  return `${String(Math.floor(s / 60)).padStart(2, '0')}:${String(s % 60).padStart(2, '0')}`;
+}
+
+function logTel() {
+  if (st.paused) return;
+  tel.rows.push({
+    t: st.elapsed,
+    planes: st.planes.map(p => ({
+      id: p.id,
+      name: p.name,
+      alt: p.alt,
+      spd: p.spd
+    }))
+  });
+}
+
+function logEvent(txt) {
+  tel.evts.push({ t: st.elapsed, txt });
+}
+
+let telTick = 0;
+
+function renderReport() {
+  const cont = $('#reportContent');
+  const fecha = new Date().toLocaleString();
+  const lanz = tel.evts.filter(e => e.txt.includes('LANZAMIENTO')).length;
+  const hits = tel.evts.filter(e => e.txt.includes('SPLASH')).length;
+  const tasa = lanz ? ((hits / lanz) * 100).toFixed(1) + '%' : 'N/A';
+
+  // === ENCABEZADO ===
+  let html = `
+  <h2 style="color:#000; margin-bottom:6px;">REPORTE TÁCTICO</h2>
+  <div class="row" style="justify-content:space-between; font-size:13px; color:#000;">
+    <span><b>Fecha:</b> ${fecha}</span>
+    <span><b>Duración:</b> ${fmt(st.elapsed)}</span>
+    <span><b>Tasa de acierto:</b> ${tasa}</span>
+  </div>
+  <div class="row" style="justify-content:flex-end;gap:8px; margin:5px 0;">
+    <button onclick="window.print()" style="padding:4px 8px;font-size:12px;">🖨️ Imprimir</button>
+  </div>`;
+
+  // === ESTADO FINAL DE AERONAVES ===
+  html += `
+  <h3 style="color:#000; margin:4px 0;">Estado Final de Aeronaves</h3>
+  <table style="width:100%; border-collapse:collapse; font-size:12px; color:#000;">
+    <thead>
+      <tr style="background:#e6e6e6;">
+        <th style="border:1px solid #999; padding:3px;">Nombre</th>
+        <th style="border:1px solid #999; padding:3px;">Rol</th>
+        <th style="border:1px solid #999; padding:3px;">Estado</th>
+        <th style="border:1px solid #999; padding:3px;">Derribos</th>
+        <th style="border:1px solid #999; padding:3px;">Velocidad</th>
+        <th style="border:1px solid #999; padding:3px;">Altitud</th>
+      </tr>
+    </thead>
+    <tbody>`;
+
+  st.planes.forEach(p => {
+    const stt = p._hit
+      ? '<b style="color:red;">DESTRUIDO</b>'
+      : '<span style="color:#000;">Activo</span>';
+    const vel = st.metric
+      ? `${p.spd.toFixed(0)} km/h`
+      : `${(p.spd * KMH2KTS).toFixed(0)} kts`;
+    const alt = st.metric
+      ? `${(p.alt * FT2M | 0)} m`
+      : `${p.alt | 0} ft`;
+    html += `
+      <tr>
+        <td style="border:1px solid #999; padding:3px;">${p.name}</td>
+        <td style="border:1px solid #999; padding:3px;">${st.roles[p.id] || 'N/A'}</td>
+        <td style="border:1px solid #999; padding:3px;">${stt}</td>
+        <td style="border:1px solid #999; padding:3px;">${p.kills || 0}</td>
+        <td style="border:1px solid #999; padding:3px;">${vel}</td>
+        <td style="border:1px solid #999; padding:3px;">${alt}</td>
+      </tr>`;
+  });
+
+  html += `</tbody></table>`;
+
+  // === GRÁFICOS ===
+  html += `
+  <h3 style="color:#000; margin:6px 0;">Gráficos</h3>
+  <div class="charts" style="display:flex;gap:10px;justify-content:center;">
+    <div style="width:48%;height:220px;"><canvas id="altChart"></canvas></div>
+    <div style="width:48%;height:220px;"><canvas id="spdChart"></canvas></div>
+  </div>`;
+
+  // === EVENTOS ===
+  html += `
+  <h3 style="color:#000; margin:6px 0;">Eventos</h3>
+  <table style="width:100%; border-collapse:collapse; font-size:12px;">
+    <tbody>`;
+  [...tel.evts].reverse().forEach(e => {
+    let s = '';
+    if (e.txt.includes('SPLASH') || e.txt.includes('FALLA'))
+      s = 'style="color:red;font-weight:700"';
+    if (e.txt.includes('LANZAMIENTO'))
+      s = 'style="color:#ff6600;font-weight:700"';
+    html += `<tr><td style="width:60px;border-bottom:1px solid #ddd;">[${fmt(e.t)}]</td><td ${s}>${e.txt}</td></tr>`;
+  });
+  html += `</tbody></table>`;
+
+  cont.innerHTML = html;
+
+  // === GRAFICAR ===
+  if (tel.rows.length > 1) {
+    const labels = tel.rows.map(r => fmt(r.t));
+    const ids = [...new Set(tel.rows.flatMap(r => r.planes.map(p => p.id)))];
+
+    // Paleta de colores más distinguible (para múltiples aeronaves)
+    const palette = [
+      '#e6194b', '#3cb44b', '#ffe119', '#4363d8', '#f58231',
+      '#911eb4', '#46f0f0', '#f032e6', '#bcf60c', '#fabebe',
+      '#008080', '#e6beff', '#9a6324', '#800000', '#808000'
+    ];
+
+    // Dataset ALTITUD
+    const altDS = ids.map((id, i) => ({
+      label: (st.planes.find(p => p.id === id)?.name) || id,
+      data: tel.rows.map(r => {
+        const p = r.planes.find(x => x.id === id);
+        return p ? (st.metric ? p.alt * FT2M : p.alt) : null;
+      }),
+      borderColor: palette[i % palette.length],
+      fill: false,
+      tension: 0.15,
+      pointRadius: 0
+    }));
+
+    // Dataset VELOCIDAD
+    const spdDS = ids.map((id, i) => ({
+      label: (st.planes.find(p => p.id === id)?.name) || id,
+      data: tel.rows.map(r => {
+        const p = r.planes.find(x => x.id === id);
+        return p ? (st.metric ? p.spd : p.spd * KMH2KTS) : null;
+      }),
+      borderColor: palette[(i + 3) % palette.length], // desplazado para distinguir
+      fill: false,
+      tension: 0.15,
+      pointRadius: 0
+    }));
+
+    // Gráfico de Altitud
+    new Chart($('#altChart').getContext('2d'), {
+      type: 'line',
+      data: { labels, datasets: altDS },
+      options: {
+        responsive: true,
+        maintainAspectRatio: false,
+        plugins: {
+          legend: { display: true, labels: { color: '#000', font: { size: 11 } } },
+          title: {
+            display: true,
+            text: `Altitud (${st.metric ? 'm' : 'ft'})`,
+            color: '#000',
+            font: { size: 13, weight: 'bold' }
+          }
+        },
+        scales: {
+          x: { ticks: { color: '#000' }, grid: { color: '#ccc' } },
+          y: { ticks: { color: '#000' }, grid: { color: '#ddd' } }
+        }
+      }
+    });
+
+    // Gráfico de Velocidad
+    new Chart($('#spdChart').getContext('2d'), {
+      type: 'line',
+      data: { labels, datasets: spdDS },
+      options: {
+        responsive: true,
+        maintainAspectRatio: false,
+        plugins: {
+          legend: { display: true, labels: { color: '#000', font: { size: 11 } } },
+          title: {
+            display: true,
+            text: `Velocidad (${st.metric ? 'km/h' : 'kts'})`,
+            color: '#000',
+            font: { size: 13, weight: 'bold' }
+          }
+        },
+        scales: {
+          x: { ticks: { color: '#000' }, grid: { color: '#ccc' } },
+          y: { ticks: { color: '#000' }, grid: { color: '#ddd' } }
+        }
+      }
+    });
   }
 }
+
 
 /* ===== UI repaint ===== */
 function repaintPlanesList(){
@@ -1096,15 +1302,49 @@ function repaintNav(){
     const c=document.createElement('div');c.className='card';
     c.innerHTML=`<div class="row" style="justify-content:space-between">
         <input id="nm-${id}" class="ghost focusable focusAlt" type="text" value="${p.name}" style="flex:1"><span class="pill">${p.hdg.toFixed(0)}°</span></div>
-      <div class="row"><span class="mini">Rumbo</span><input id="hdg-${id}" class="ghost focusable focusAlt" type="number" value="${p.tgtHdg.toFixed(0)}"> <button class="mini btn focusable" data-hdg="-10" data-id="${id}">-10</button> <button class="mini btn focusable" data-hdg="+10" data-id="${id}">+10</button></div>
-      <div class="row"><span class="mini">Vel</span><input id="spd-${id}" class="ghost focusable focusAlt" type="number" value="${st.metric?p.tgtSpd.toFixed(0):(p.tgtSpd*KMH2KTS).toFixed(0)}"></div>
-      <div class="row"><span class="mini">Alt</span><input id="alt-${id}" class="ghost focusable focusAlt" type="number" value="${st.metric?(p.tgtAlt*FT2M|0):(p.tgtAlt|0)}"></div>
-      <div class="row"><span class="mini">Giro °/s</span><input id="tr-${id}" class="ghost focusable focusAlt" type="number" step="0.1" value="${p.turn.toFixed(1)}"></div>
-      <div class="row"><span class="mini">Rol</span>
-        <select id="role-${id}" class="ghost focusable focusAlt">
-          <option>Friend</option><option>Bandit</option><option>Neutral</option><option>Civilian</option>
-        </select></div>
-      <div class="row"><span class="mini">OBJ</span><select id="tgt-${id}" class="ghost focusable focusAlt" style="flex:1"></select></div>
+      
+<!-- ===== BLOQUE DE CONTROLES CON BOTONES ===== -->
+<div class="row">
+  <span class="mini">Rumbo</span>
+  <input id="hdg-${id}" class="ghost focusable focusAlt" type="number" value="${p.tgtHdg.toFixed(0)}">
+  <button class="mini btn focusable" data-hdg="-10" data-id="${id}">-10</button>
+  <button class="mini btn focusable" data-hdg="+10" data-id="${id}">+10</button>
+</div>
+
+<div class="row">
+  <span class="mini">Vel</span>
+  <input id="spd-${id}" class="ghost focusable focusAlt" type="number"
+         value="${st.metric?p.tgtSpd.toFixed(0):(p.tgtSpd*KMH2KTS).toFixed(0)}">
+  <button class="mini btn focusable" data-spd="-50" data-id="${id}">-50</button>
+  <button class="mini btn focusable" data-spd="+50" data-id="${id}">+50</button>
+</div>
+
+<div class="row">
+  <span class="mini">Alt</span>
+  <input id="alt-${id}" class="ghost focusable focusAlt" type="number"
+         value="${st.metric?(p.tgtAlt*FT2M|0):(p.tgtAlt|0)}">
+  <button class="mini btn focusable" data-alt="-100" data-id="${id}">-100</button>
+  <button class="mini btn focusable" data-alt="+100" data-id="${id}">+100</button>
+</div>
+
+<div class="row">
+  <span class="mini">Giro °/s</span>
+  <input id="tr-${id}" class="ghost focusable focusAlt" type="number" step="0.1"
+         value="${p.turn.toFixed(1)}">
+  <button class="mini btn focusable" data-turn="-1" data-id="${id}">-1</button>
+  <button class="mini btn focusable" data-turn="+1" data-id="${id}">+1</button>
+</div>
+
+<div class="row">
+  <span class="mini">Rol</span>
+  <select id="role-${id}" class="ghost focusable focusAlt">
+    <option>Friend</option>
+    <option>Bandit</option>
+    <option>Neutral</option>
+    <option>Civilian</option>
+  </select>
+</div>
+   <div class="row"><span class="mini">OBJ</span><select id="tgt-${id}" class="ghost focusable focusAlt" style="flex:1"></select></div>
       <div class="row">
         <button class="mini btn focusable" data-m="AMRAAM" data-id="${id}">AMRAAM</button>
         <button class="mini btn focusable" data-m="R77" data-id="${id}">R-77</button>
@@ -1115,18 +1355,64 @@ function repaintNav(){
     focusables.forEach(el=>{el.addEventListener('focus',()=>el.classList.add('focusGlow'));el.addEventListener('blur',()=>el.classList.remove('focusGlow'));el.addEventListener('click',()=>flash(el));});
     c.querySelector('#nm-'+id).onchange=e=>p.name=e.target.value;
     
-      c.querySelectorAll('button[data-hdg]').forEach(btn=>{
-        btn.onclick = ()=>{
-          const delta = btn.getAttribute('data-hdg')==='+10'?10:-10;
-          p.tgtHdg = ((p.tgtHdg + delta) % 360 + 360) % 360;
-          repaintNav();
-        };
-      });
+     // --- BOTONES DE RUMBO ---
+c.querySelectorAll('button[data-hdg]').forEach(btn=>{
+  btn.onclick = ()=>{
+    const delta = parseFloat(btn.getAttribute('data-hdg')) || 0; // +10 o -10
+    p.tgtHdg = ((p.tgtHdg + delta) % 360 + 360) % 360;           // mantiene dentro de 0–360°
+    repaintNav();
+  };
+});
 
-    c.querySelector('#hdg-'+id).onchange=e=>p.tgtHdg=parseFloat(e.target.value)||0;
-    c.querySelector('#spd-'+id).onchange=e=>p.tgtSpd=st.metric?(+e.target.value||0):((+e.target.value||0)*KTS2KMH);
-    c.querySelector('#alt-'+id).onchange=e=>p.tgtAlt=st.metric?((+e.target.value||0)/FT2M):(+e.target.value||0);
-    c.querySelector('#tr-'+id).onchange=e=>p.turn=+e.target.value||2;
+// --- BOTONES DE VELOCIDAD ---
+c.querySelectorAll('button[data-spd]').forEach(btn=>{
+  btn.onclick = ()=>{
+    const delta = parseFloat(btn.getAttribute('data-spd')) || 0; // +50 o -50
+    const cambio = st.metric ? delta : delta * KTS2KMH;          // convierte si está en nudos
+    p.tgtSpd = Math.max(0, (p.tgtSpd || 0) + cambio);
+    repaintNav();
+  };
+});
+
+// --- BOTONES DE ALTITUD ---
+c.querySelectorAll('button[data-alt]').forEach(btn=>{
+  btn.onclick = ()=>{
+    const delta = parseFloat(btn.getAttribute('data-alt')) || 0; // +100 o -100
+    const cambio = st.metric ? (delta / FT2M) : delta;           // convierte si usa metros
+    p.tgtAlt = Math.max(0, (p.tgtAlt || 0) + cambio);
+    repaintNav();
+  };
+});
+
+// --- BOTONES DE GIRO ---
+c.querySelectorAll('button[data-turn]').forEach(btn=>{
+  btn.onclick = ()=>{
+    const delta = parseFloat(btn.getAttribute('data-turn')) || 0; // +1 o -1
+    p.turn = Math.max(0, (p.turn || 0) + delta);
+    repaintNav();
+  };
+});
+
+// --- CAMBIOS MANUALES EN LOS CAMPOS ---
+c.querySelector('#hdg-'+id).onchange = e => {
+  p.tgtHdg = parseFloat(e.target.value) || 0;
+};
+
+c.querySelector('#spd-'+id).onchange = e => {
+  const val = +e.target.value || 0;
+  p.tgtSpd = st.metric ? val : val * KTS2KMH;
+};
+
+c.querySelector('#alt-'+id).onchange = e => {
+  const val = +e.target.value || 0;
+  p.tgtAlt = st.metric ? (val / FT2M) : val;
+};
+
+c.querySelector('#tr-'+id).onchange = e => {
+  p.turn = +e.target.value || 2;
+};
+
+
     const role=c.querySelector('#role-'+id); role.value=st.roles[id]||'Neutral'; role.onchange=e=>st.roles[id]=e.target.value;
     const tgt=c.querySelector('#tgt-'+id); tgt.innerHTML=`<option value="">Seleccionar...</option>`+st.planes.filter(x=>x.id!==id).map(x=>`<option value="${x.id}">${x.name}</option>`).join('');
     c.querySelectorAll('button[data-m]').forEach(b=>b.onclick=ev=>{const mid=ev.currentTarget.dataset.id;const tg=c.querySelector('#tgt-'+mid).value;if(tg) launch(mid,tg,ev.currentTarget.dataset.m); else alert('Seleccione objetivo'); flash(ev.currentTarget);});
@@ -1223,8 +1509,18 @@ $('#windSpd').onchange=e=>{ st.windKmh = st.metric?(+e.target.value||0):((+e.tar
 $('#windDir').onchange=e=>{ st.windDir = +e.target.value||0; flash(e.target); };
 $('#failRadar').onclick=e=>{ st.radarFail=!st.radarFail; e.currentTarget.classList.toggle('hi',st.radarFail); flash(e.currentTarget); };
 $('#toggleSweep').onclick=e=>{ st.sweep=!st.sweep; e.currentTarget.classList.toggle('hi',st.sweep); flash(e.currentTarget); };
-$('#modeAnalog').onclick=()=>{ st.mode='analog'; flash($('#modeAnalog')); };
-$('#modeDigital').onclick=()=>{ st.mode='digital'; flash($('#modeDigital')); };
+// === SOLO LOCAL: Botones de modo Analógico / Digital (sin sincronizar) ===
+$('#modeAnalog').onclick = () => {
+  st.mode = 'analog';
+  flash($('#modeAnalog'));
+  console.log('Modo analógico cambiado localmente — no sincroniza con la nube');
+};
+
+$('#modeDigital').onclick = () => {
+  st.mode = 'digital';
+  flash($('#modeDigital'));
+  console.log('Modo digital cambiado localmente — no sincroniza con la nube');
+};  
 $('#predPlus').onclick=()=>{ st.predMin=Math.min(60,st.predMin+1); $('#predVal').textContent=st.predMin; flash($('#predPlus')); };
 $('#predMinus').onclick=()=>{ st.predMin=Math.max(0,st.predMin-1); $('#predVal').textContent=st.predMin; flash($('#predMinus')); };
 $('#addFighter').onclick=()=>{
@@ -1432,30 +1728,40 @@ $$('#pFormations button[data-form]').forEach(btn=>{
     setInterval(()=>{ overlay.style.display = (st.modoAlumno && st.radarFailNet) ? 'flex' : 'none'; }, 200);
   }catch(e){ console.warn('Falla Radar overlay patch:', e); }
 
-  // Pinch-zoom -> simulate wheel
-  try{
-    const cvs = document.getElementById('radar');
-    if(cvs){
-      let d0=null, z0=1;
-      function dist(e){const dx=e.touches[0].clientX-e.touches[1].clientX, dy=e.touches[0].clientY-e.touches[1].clientY;return Math.hypot(dx,dy);}
-      cvs.addEventListener('touchstart', (e)=>{ if(e.touches.length===2){ e.preventDefault(); d0 = dist(e); z0 = 1; }}, {passive:false});
-      cvs.addEventListener('touchmove', (e)=>{
-        if(e.touches.length===2 && d0){
-          e.preventDefault();
-          const d = dist(e);
-          const scale = d/d0;
-          const dy = (scale>z0) ? -0.3 : 0.3;
-          const midx = (e.touches[0].clientX + e.touches[1].clientX)/2;
-          const midy = (e.touches[0].clientY + e.touches[1].clientY)/2;
-          const evt = new WheelEvent('wheel', {deltaY: dy, clientX: midx, clientY: midy, bubbles: true, cancelable: true});
-          cvs.dispatchEvent(evt);
-          z0 = scale;
-        }
-      }, {passive:false});
-      cvs.addEventListener('touchend', ()=>{ d0=null; z0=1; }, {passive:true});
-    }
-  }catch(e){ console.warn('Pinch-zoom patch:', e); }
+// ===== Pinch-zoom táctil nativo (2 dedos) =====
+(function(){
+  const cvs = document.getElementById('radar');
+  if(!cvs) return;
 
+  let pinch = null;
+  const MIN_Z = 0.02, MAX_Z = 15;
+
+  function dist(e){
+    const dx = e.touches[0].clientX - e.touches[1].clientX;
+    const dy = e.touches[0].clientY - e.touches[1].clientY;
+    return Math.hypot(dx, dy);
+  }
+
+  cvs.addEventListener('touchstart', (e)=>{
+    if(e.touches.length === 2){
+      e.preventDefault();
+      pinch = {d0: dist(e), z0: zoom};
+    }
+  }, {passive:false});
+
+  cvs.addEventListener('touchmove', (e)=>{
+    if(pinch && e.touches.length === 2){
+      e.preventDefault();
+      const scale = dist(e) / pinch.d0;
+      zoom = Math.min(MAX_Z, Math.max(MIN_Z, pinch.z0 * scale));
+    }
+  }, {passive:false});
+
+  cvs.addEventListener('touchend', ()=>{
+    pinch = null;
+  }, {passive:true});
+})();
+  
   // Missile sync: call scheduleSync after launch
   try{
     const origLaunch = window.launch;
@@ -2348,5 +2654,3 @@ document.getElementById('radar').addEventListener('click', function(e){
 </body>
 </html>
 by wallace
-
-
