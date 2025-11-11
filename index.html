@@ -2669,8 +2669,114 @@ document.getElementById('radar').addEventListener('click', function(e){
   setTimeout(fitRadar, 150);
 })();
 </script>
+
+<!-- === PARCHE DEFINITIVO ANALÓGICO/DIGITAL LOCAL === -->
+<script>
+(function() {
+  // Esperar que todo esté cargado
+  window.addEventListener('load', function() {
+
+    // 1️⃣ Reforzar botones locales
+    const btnAnalog  = document.getElementById('modeAnalog');
+    const btnDigital = document.getElementById('modeDigital');
+
+    if (!btnAnalog || !btnDigital || !window.st) {
+      console.warn('Parche local: no se encontró el estado o botones.');
+      return;
+    }
+
+    // Guardar modo local
+    st.modeLocal = st.mode;
+
+    // Botón ANALÓGICO
+    btnAnalog.addEventListener('click', (e)=>{
+      e.stopPropagation();
+      st.mode = 'analog';
+      st.modeLocal = 'analog';
+      flash(btnAnalog);
+      repaintNav && repaintNav();
+      repaintStudent && repaintStudent();
+      repaintAlt && repaintAlt();
+      repaintPairs && repaintPairs();
+      console.log('[LOCAL] Analógico activado — sin sincronizar');
+    }, true);
+
+    // Botón DIGITAL
+    btnDigital.addEventListener('click', (e)=>{
+      e.stopPropagation();
+      st.mode = 'digital';
+      st.modeLocal = 'digital';
+      flash(btnDigital);
+      repaintNav && repaintNav();
+      repaintStudent && repaintStudent();
+      repaintAlt && repaintAlt();
+      repaintPairs && repaintPairs();
+      console.log('[LOCAL] Digital activado — sin sincronizar');
+    }, true);
+
+
+    // 2️⃣ Interceptar sincronización HACIA Firebase (no subir el campo mode)
+    const origPush = window._SETCA_SYNC?.push;
+    if (typeof origPush === 'function') {
+      window._SETCA_SYNC.push = function(local) {
+        const clone = structuredClone(local);
+        delete clone.mode; // evitar subir el modo
+        return origPush.call(this, clone);
+      };
+      console.log('[LOCAL] Sincronización de "mode" bloqueada hacia la nube.');
+    }
+
+    // 3️⃣ Interceptar sincronización DESDE Firebase (no aplicar mode remoto)
+    const origApplyRemote = window.onValue;
+    if (typeof firebase !== 'undefined' && typeof getDatabase === 'function') {
+      try {
+        const db = getDatabase();
+        const origHandler = (snap)=>{
+          const v = snap.val();
+          if (!v) return;
+          // 🔒 Bloquear solo el campo mode
+          if ('mode' in v) delete v.mode;
+          // Dejar que el resto del sistema procese normalmente
+        };
+        // Redefinir temporalmente el listener global
+        const stateRef = firebase.database().ref(`rooms/${(typeof getRoomId==='function'?getRoomId():'sala-default')}/state`);
+        stateRef.off(); // quitar listeners anteriores
+        stateRef.on('value', (snap)=>{
+          const v = snap.val();
+          if (!v) return;
+          if ('mode' in v) delete v.mode; // nunca aplicar el modo remoto
+          // aplicar manualmente lo demás
+          try{
+            if (Array.isArray(v.planes)) st.planes = v.planes;
+            if (v.roles) st.roles = v.roles;
+            if (v.pairs) st.pairs = v.pairs;
+            if (v.drawings) st.drawings = v.drawings;
+            if (typeof v.metric === 'boolean') st.metric = v.metric;
+            if (v.altUnit) st.altUnit = v.altUnit;
+            if (v.missiles) st.missiles = v.missiles;
+            repaintPlanesList && repaintPlanesList();
+            repaintNav && repaintNav();
+            repaintAlt && repaintAlt();
+            repaintPairs && repaintPairs();
+            repaintStudent && repaintStudent();
+          }catch(e){ console.warn('Error aplicando estado remoto filtrado', e); }
+        });
+        console.log('[LOCAL] Listener remoto reemplazado (campo mode ignorado).');
+      } catch(e){
+        console.warn('No se pudo interceptar onValue remoto:', e);
+      }
+    }
+
+    console.log('✅ Parche local analógico/digital aplicado exitosamente.');
+  });
+})();
+</script>
+<!-- === /FIN PARCHE DEFINITIVO === -->
+
+  
 </body>
 </html>
 by wallace
+
 
 
