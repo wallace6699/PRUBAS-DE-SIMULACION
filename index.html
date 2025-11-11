@@ -420,6 +420,43 @@ canvas#radar {
     📄 Ver / Imprimir Informe Parcial
   </button>
 
+  
+  
+
+  
+  <div style="margin-left:20px; position:relative;">
+    <select id="roomSelect" class="btn mini" style="background:#0e2b17;color:#eaffea;border:1px solid #2a6;border-radius:6px;">
+      <option value="alpha">Sala Alpha</option>
+      <option value="bravo">Sala Bravo</option>
+      <option value="charlie">Sala Charlie</option>
+      <option value="delta">Sala Delta</option>
+    </select>
+    <span id="roomLabel" style="margin-left:12px;font-size:13px;color:#b6f3b6;">Usted está en la sala Alpha</span>
+  </div>
+  <script>
+    function setRoomFromHash(){
+      const h = (location.hash || '#alpha').replace(/^#/, '').trim();
+      const sel = document.getElementById('roomSelect');
+      const label = document.getElementById('roomLabel');
+      if(sel && label){
+        sel.value = h || 'alpha';
+        label.textContent = 'Usted está en la sala ' + sel.options[sel.selectedIndex].text.split(' ')[1];
+      }
+    }
+    function changeRoom(){
+      const sel = document.getElementById('roomSelect');
+      const val = sel.value;
+      const base = location.origin + location.pathname;
+      location.href = base + '#' + val;
+      location.reload();
+    }
+    document.addEventListener('DOMContentLoaded', ()=>{
+      const sel = document.getElementById('roomSelect');
+      if(sel){ sel.addEventListener('change', changeRoom); }
+      setRoomFromHash();
+    });
+  </script>
+
   <span id="stateChip" class="pill">Pausada</span>
   <span id="timer" class="timer"></span>
 </header>
@@ -1509,28 +1546,8 @@ $('#windSpd').onchange=e=>{ st.windKmh = st.metric?(+e.target.value||0):((+e.tar
 $('#windDir').onchange=e=>{ st.windDir = +e.target.value||0; flash(e.target); };
 $('#failRadar').onclick=e=>{ st.radarFail=!st.radarFail; e.currentTarget.classList.toggle('hi',st.radarFail); flash(e.currentTarget); };
 $('#toggleSweep').onclick=e=>{ st.sweep=!st.sweep; e.currentTarget.classList.toggle('hi',st.sweep); flash(e.currentTarget); };
-// === SOLO LOCAL: Botones de modo Analógico / Digital (sin sincronizar) ===
-// === BOTONES DE MODO (locales, igual que Métrico/Imperial/Pred) ===
-// SOLO LOCAL: no se llama scheduleSync() ni se sube a la nube
-$('#modeAnalog').onclick = () => {
-  st.mode = 'analog';
-  flash($('#modeAnalog'));
-  repaintNav && repaintNav();
-  repaintStudent && repaintStudent();
-  repaintAlt && repaintAlt();
-  repaintPairs && repaintPairs();
-  console.log('[LOCAL] Analógico (solo local)');
-};
-
-$('#modeDigital').onclick = () => {
-  st.mode = 'digital';
-  flash($('#modeDigital'));
-  repaintNav && repaintNav();
-  repaintStudent && repaintStudent();
-  repaintAlt && repaintAlt();
-  repaintPairs && repaintPairs();
-  console.log('[LOCAL] Digital (solo local)');
-};
+$('#modeAnalog').onclick=()=>{ st.mode='analog'; flash($('#modeAnalog')); };
+$('#modeDigital').onclick=()=>{ st.mode='digital'; flash($('#modeDigital')); };
 $('#predPlus').onclick=()=>{ st.predMin=Math.min(60,st.predMin+1); $('#predVal').textContent=st.predMin; flash($('#predPlus')); };
 $('#predMinus').onclick=()=>{ st.predMin=Math.max(0,st.predMin-1); $('#predVal').textContent=st.predMin; flash($('#predMinus')); };
 $('#addFighter').onclick=()=>{
@@ -1609,7 +1626,8 @@ $$('#pFormations button[data-form]').forEach(btn=>{
     const now = performance.now();
     if(now - lastSync < 200) return; // 5 veces por segundo
     lastSync = now;
-    window._SETCA_SYNC && window._SETCA_SYNC.push();
+    // Local analog/digital sync disabled
+//window._SETCA_SYNC && window._SETCA_SYNC.push();
   }
 
   // Conectar con los botones
@@ -1635,7 +1653,8 @@ $$('#pFormations button[data-form]').forEach(btn=>{
     const now = performance.now();
     if(now - _lastSync < 100) return;
     _lastSync = now;
-    window._SETCA_SYNC && window._SETCA_SYNC.push();
+    // Local analog/digital sync disabled
+//window._SETCA_SYNC && window._SETCA_SYNC.push();
   }
   // Hook to existing controls if present
   ['#addFighter','#addCom','#delLast','#pause','#start','#uMetric','#uImperial'].forEach(id=>{
@@ -1738,31 +1757,26 @@ $$('#pFormations button[data-form]').forEach(btn=>{
     setInterval(()=>{ overlay.style.display = (st.modoAlumno && st.radarFailNet) ? 'flex' : 'none'; }, 200);
   }catch(e){ console.warn('Falla Radar overlay patch:', e); }
 
-// ===== Pinch-zoom táctil nativo (2 dedos) acercar alejar con los dedos=====
+// ===== Pinch-zoom táctil nativo (2 dedos) =====
 (function(){
   const cvs = document.getElementById('radar');
   if(!cvs) return;
 
-  let pinch = null;
   const MIN_Z = 0.02, MAX_Z = 15;
+  let pinch = null;
+  let targetZoom = typeof zoom !== 'undefined' ? zoom : 1;
+  let smoothZoom = targetZoom;
 
-  // --- función para calcular distancia entre dos dedos ---
   function dist(e){
     const dx = e.touches[0].clientX - e.touches[1].clientX;
     const dy = e.touches[0].clientY - e.touches[1].clientY;
     return Math.hypot(dx, dy);
   }
 
-  // --- interpolador suave ---
-  function lerp(a, b, t){ return a + (b - a) * t; }
-
-  // --- velocidad de transición del zoom (ajustable) ---
-  const SMOOTHNESS = 0.12; // cuanto menor, más suave (0.08–0.15 es ideal)
-
   cvs.addEventListener('touchstart', (e)=>{
     if(e.touches.length === 2){
       e.preventDefault();
-      pinch = {d0: dist(e), z0: zoom};
+      pinch = {d0: dist(e), z0: targetZoom};
     }
   }, {passive:false});
 
@@ -1770,17 +1784,25 @@ $$('#pFormations button[data-form]').forEach(btn=>{
     if(pinch && e.touches.length === 2){
       e.preventDefault();
       const scale = dist(e) / pinch.d0;
-      const targetZoom = Math.min(MAX_Z, Math.max(MIN_Z, pinch.z0 * scale));
-      // en lugar de cambiar de golpe, se acerca progresivamente
-      zoom = lerp(zoom, targetZoom, SMOOTHNESS);
+      const newTarget = pinch.z0 * scale;
+      // limitamos rango
+      targetZoom = Math.min(MAX_Z, Math.max(MIN_Z, newTarget));
     }
   }, {passive:false});
 
   cvs.addEventListener('touchend', ()=>{
     pinch = null;
   }, {passive:true});
-})();
 
+  // interpolación suave entre el zoom actual y el objetivo
+  function animate(){
+    // cuanto más pequeño el factor (0.08), más suave
+    smoothZoom += (targetZoom - smoothZoom) * 0.08;
+    zoom = smoothZoom; // actualiza la variable global usada por el radar
+    requestAnimationFrame(animate);
+  }
+  animate();
+})();
   
   // Missile sync: call scheduleSync after launch
   try{
@@ -2670,10 +2692,7 @@ document.getElementById('radar').addEventListener('click', function(e){
   setTimeout(fitRadar, 150);
 })();
 </script>
+
 </body>
 </html>
 by wallace
-
-
-
-
