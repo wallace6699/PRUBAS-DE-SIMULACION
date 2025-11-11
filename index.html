@@ -1728,7 +1728,7 @@ $$('#pFormations button[data-form]').forEach(btn=>{
     setInterval(()=>{ overlay.style.display = (st.modoAlumno && st.radarFailNet) ? 'flex' : 'none'; }, 200);
   }catch(e){ console.warn('Falla Radar overlay patch:', e); }
 
-// ===== Pinch-zoom táctil nativo (2 dedos) =====
+// ===== Pinch-zoom táctil nativo (2 dedos) acercar alejar con los dedos=====
 (function(){
   const cvs = document.getElementById('radar');
   if(!cvs) return;
@@ -1736,11 +1736,18 @@ $$('#pFormations button[data-form]').forEach(btn=>{
   let pinch = null;
   const MIN_Z = 0.02, MAX_Z = 15;
 
+  // --- función para calcular distancia entre dos dedos ---
   function dist(e){
     const dx = e.touches[0].clientX - e.touches[1].clientX;
     const dy = e.touches[0].clientY - e.touches[1].clientY;
     return Math.hypot(dx, dy);
   }
+
+  // --- interpolador suave ---
+  function lerp(a, b, t){ return a + (b - a) * t; }
+
+  // --- velocidad de transición del zoom (ajustable) ---
+  const SMOOTHNESS = 0.12; // cuanto menor, más suave (0.08–0.15 es ideal)
 
   cvs.addEventListener('touchstart', (e)=>{
     if(e.touches.length === 2){
@@ -1753,7 +1760,9 @@ $$('#pFormations button[data-form]').forEach(btn=>{
     if(pinch && e.touches.length === 2){
       e.preventDefault();
       const scale = dist(e) / pinch.d0;
-      zoom = Math.min(MAX_Z, Math.max(MIN_Z, pinch.z0 * scale));
+      const targetZoom = Math.min(MAX_Z, Math.max(MIN_Z, pinch.z0 * scale));
+      // en lugar de cambiar de golpe, se acerca progresivamente
+      zoom = lerp(zoom, targetZoom, SMOOTHNESS);
     }
   }, {passive:false});
 
@@ -1761,6 +1770,7 @@ $$('#pFormations button[data-form]').forEach(btn=>{
     pinch = null;
   }, {passive:true});
 })();
+
   
   // Missile sync: call scheduleSync after launch
   try{
@@ -2651,6 +2661,56 @@ document.getElementById('radar').addEventListener('click', function(e){
 })();
 </script>
 
+  <!-- //=== PARCHE LOCAL PARA MODO ANALÓGICO / DIGITAL === -->
+<script>
+(function() {
+  // Esperar a que todo esté listo
+  window.addEventListener('load', function() {
+    const analogBtn  = document.getElementById('modeAnalog');
+    const digitalBtn = document.getElementById('modeDigital');
+
+    if (!analogBtn || !digitalBtn) {
+      console.warn('Parche local: botones no encontrados');
+      return;
+    }
+
+    // Guardar el modo local actual
+    st.modeLocal = st.mode;
+
+    // === Forzar que los botones solo afecten localmente ===
+    analogBtn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      st.mode = 'analog';
+      st.modeLocal = 'analog';
+      flash(analogBtn);
+      console.log('[LOCAL] Modo analógico activado — no se sincroniza con la nube');
+      // No llamamos a scheduleSync() ni _SETCA_SYNC.push()
+    }, true);
+
+    digitalBtn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      st.mode = 'digital';
+      st.modeLocal = 'digital';
+      flash(digitalBtn);
+      console.log('[LOCAL] Modo digital activado — no se sincroniza con la nube');
+    }, true);
+
+    // === Interceptar cambios que vengan desde Firebase ===
+    // Cada 300 ms, si detecta que Firebase sobreescribió el modo, lo restaura.
+    setInterval(() => {
+      if (st.mode !== st.modeLocal) {
+        console.log('[LOCAL] Firebase intentó cambiar el modo, restaurando:', st.modeLocal);
+        st.mode = st.modeLocal;
+      }
+    }, 300);
+
+    console.log('✅ Parche de modo analógico/digital local activo.');
+  });
+})();
+</script>
+<!-- === /FIN PARCHE LOCAL === -->
+
+  
 </body>
 </html>
 by wallace
