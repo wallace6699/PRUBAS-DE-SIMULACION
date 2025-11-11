@@ -1510,17 +1510,26 @@ $('#windDir').onchange=e=>{ st.windDir = +e.target.value||0; flash(e.target); };
 $('#failRadar').onclick=e=>{ st.radarFail=!st.radarFail; e.currentTarget.classList.toggle('hi',st.radarFail); flash(e.currentTarget); };
 $('#toggleSweep').onclick=e=>{ st.sweep=!st.sweep; e.currentTarget.classList.toggle('hi',st.sweep); flash(e.currentTarget); };
 // === SOLO LOCAL: Botones de modo Analógico / Digital (sin sincronizar) ===
+// === BOTONES DE MODO (locales, igual que Métrico/Imperial/Pred) ===
 $('#modeAnalog').onclick = () => {
   st.mode = 'analog';
   flash($('#modeAnalog'));
-  console.log('Modo analógico cambiado localmente — no sincroniza con la nube');
+  repaintNav();
+  repaintStudent();
+  repaintAlt();
+  repaintPairs();
+  console.log('[LOCAL] Modo analógico activado (sin sincronizar con la nube)');
 };
 
 $('#modeDigital').onclick = () => {
   st.mode = 'digital';
   flash($('#modeDigital'));
-  console.log('Modo digital cambiado localmente — no sincroniza con la nube');
-};  
+  repaintNav();
+  repaintStudent();
+  repaintAlt();
+  repaintPairs();
+  console.log('[LOCAL] Modo digital activado (sin sincronizar con la nube)');
+};
 $('#predPlus').onclick=()=>{ st.predMin=Math.min(60,st.predMin+1); $('#predVal').textContent=st.predMin; flash($('#predPlus')); };
 $('#predMinus').onclick=()=>{ st.predMin=Math.max(0,st.predMin-1); $('#predVal').textContent=st.predMin; flash($('#predMinus')); };
 $('#addFighter').onclick=()=>{
@@ -2660,82 +2669,8 @@ document.getElementById('radar').addEventListener('click', function(e){
   setTimeout(fitRadar, 150);
 })();
 </script>
-
-<!-- === PARCHE DEFINITIVO MODO LOCAL ANALÓGICO / DIGITAL === -->
-<script>
-(function(){
-  // Ejecutar cuando todo esté listo
-  window.addEventListener('load', () => {
-    const btnAnalog  = document.getElementById('modeAnalog');
-    const btnDigital = document.getElementById('modeDigital');
-
-    if(!btnAnalog || !btnDigital){
-      console.warn('Botones de modo no encontrados');
-      return;
-    }
-
-    // Guardar el modo local actual
-    st.modeLocal = st.mode;
-
-    // === 1️⃣ Botones solo locales (NO sincronizan) ===
-    btnAnalog.onclick = (e)=>{
-      e.stopPropagation();
-      st.modeLocal = 'analog';
-      st.mode = 'analog';
-      flash(btnAnalog);
-      console.log('[LOCAL] Analógico activado solo localmente');
-    };
-
-    btnDigital.onclick = (e)=>{
-      e.stopPropagation();
-      st.modeLocal = 'digital';
-      st.mode = 'digital';
-      flash(btnDigital);
-      console.log('[LOCAL] Digital activado solo localmente');
-    };
-
-    // === 2️⃣ Bloquear sincronización con Firebase (lectura y escritura) ===
-    const _push = window._SETCA_SYNC && window._SETCA_SYNC.push;
-    if (_push) {
-      window._SETCA_SYNC.push = function(local){
-        // Clonamos el objeto sin el modo
-        const copy = Object.assign({}, local);
-        delete copy.mode; // no subir modo
-        return _push.call(window._SETCA_SYNC, copy);
-      };
-    }
-
-    // === 3️⃣ Interceptar datos entrantes: ignorar "mode" remoto ===
-    const db = window.db;
-    if (db && typeof firebase !== 'undefined') {
-      try {
-        // Redefinir temporalmente la función onValue
-        const originalOnValue = firebase.database().ref().constructor.prototype.on;
-        if (originalOnValue) {
-          firebase.database().ref().constructor.prototype.on = function(event, callback, ...rest){
-            const wrapped = (snap)=>{
-              const v = snap.val();
-              if(v && 'mode' in v){
-                delete v.mode; // ignorar completamente el modo remoto
-              }
-              callback && callback(snap);
-            };
-            return originalOnValue.call(this, event, wrapped, ...rest);
-          };
-          console.log('[LOCAL] Listener remoto interceptado: el modo no se recibe desde la nube.');
-        }
-      }catch(e){ console.warn('No se pudo interceptar Firebase:', e); }
-    }
-
-    console.log('✅ Parche DEFINITIVO: modo analógico/digital 100% local activo');
-  });
-})();
-</script>
-<!-- === /FIN PARCHE DEFINITIVO === -->
-
-
-  
 </body>
 </html>
 by wallace
+
 
