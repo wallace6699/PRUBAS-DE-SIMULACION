@@ -2687,131 +2687,128 @@ document.getElementById('radar').addEventListener('click', function(e){
     cvs.width = w;
     cvs.height = w;
   }
-  window.addEventListener('resize', fitRadar);
-  window.addEventListener('orientationchange', fitRadar);
-  document.addEventListener('DOMContentLoaded', fitRadar);
-  setTimeout(fitRadar, 150);
-})();
+  <script>
+window.addEventListener('resize', fitRadar);
+window.addEventListener('orientationchange', fitRadar);
+document.addEventListener('DOMContentLoaded', fitRadar);
+setTimeout(fitRadar, 150);
 </script>
+
 <script>
-/* === PATCH: Exportar / Importar Formaciones === */
+/* === PATCH: Exportar / Importar Formaciones (corregido: se monta cuando el DOM está listo y el panel exista) === */
 (function(){
-  // Crear botones
-  const panel = document.querySelector('#pFormations .panel-body');
-  if(!panel) return;
-  const row = document.createElement('div');
-  row.className = 'row';
-  row.innerHTML = `
-    <button id="exportFormBtn" class="btn mini focusable">💾 Exportar</button>
-    <button id="importFormBtn" class="btn mini focusable">📂 Cargar</button>
-    <input type="file" id="formFileInput" accept=".json" style="display:none">
-  `;
-  panel.appendChild(row);
+  function montarExportImport(){
+    const panel = document.querySelector('#pFormations .panel-body');
+    if(!panel){ requestAnimationFrame(montarExportImport); return; }
 
-  // === EXPORTAR ===
-  document.getElementById('exportFormBtn').onclick = ()=>{
-    if(!window.st || !Array.isArray(st.planes) || st.planes.length===0){
-      alert('No hay formaciones para exportar.');
-      return;
-    }
-    const data = {
-      version: 'SETCA-Form-1.0',
-      timestamp: new Date().toISOString(),
-      planes: st.planes,
-      roles: st.roles
-    };
-    const blob = new Blob([JSON.stringify(data,null,2)], {type:'application/json'});
-    const a = document.createElement('a');
-    a.href = URL.createObjectURL(blob);
-    a.download = `formaciones_${new Date().toISOString().replace(/[:.]/g,'-')}.json`;
-    a.click();
-  };
+    if(document.getElementById('exportFormBtn')) return; // evitar duplicados
+    const row = document.createElement('div');
+    row.className = 'row';
+    row.innerHTML = `
+      <button id="exportFormBtn" class="btn mini focusable">💾 Exportar</button>
+      <button id="importFormBtn" class="btn mini focusable">📂 Cargar</button>
+      <input type="file" id="formFileInput" accept=".json" style="display:none">
+    `;
+    panel.appendChild(row);
 
-  // === IMPORTAR ===
-  document.getElementById('importFormBtn').onclick = ()=>{
-    document.getElementById('formFileInput').click();
-  };
-
-  document.getElementById('formFileInput').addEventListener('change', (e)=>{
-    const file = e.target.files[0];
-    if(!file) return;
-    const reader = new FileReader();
-    reader.onload = (ev)=>{
-      try{
-        const data = JSON.parse(ev.target.result);
-        if(!data.planes) throw new Error('Archivo inválido');
-        // Limpia los actuales y carga los nuevos
-        st.planes = data.planes;
-        st.roles = data.roles || {};
-        repaintPlanesList && repaintPlanesList();
-        repaintNav && repaintNav();
-        repaintAlt && repaintAlt();
-        repaintPairs && repaintPairs();
-        alert('Formaciones cargadas correctamente.');
-      }catch(err){
-        alert('Error al cargar el archivo: '+err.message);
+    // === EXPORTAR ===
+    document.getElementById('exportFormBtn').onclick = ()=>{
+      if(!window.st || !Array.isArray(st.planes) || st.planes.length===0){
+        alert('No hay formaciones para exportar.');
+        return;
       }
+      const data = {
+        version: 'SETCA-Form-1.0',
+        timestamp: new Date().toISOString(),
+        planes: st.planes,
+        roles: st.roles
+      };
+      const blob = new Blob([JSON.stringify(data,null,2)], {type:'application/json'});
+      const a = document.createElement('a');
+      a.href = URL.createObjectURL(blob);
+      a.download = `formaciones_${new Date().toISOString().replace(/[:.]/g,'-')}.json`;
+      document.body.appendChild(a);
+      a.click();
+      URL.revokeObjectURL(a.href);
+      a.remove();
     };
-    reader.readAsText(file);
-  });
+
+    // === IMPORTAR ===
+    document.getElementById('importFormBtn').onclick = ()=>{
+      document.getElementById('formFileInput').click();
+    };
+
+    document.getElementById('formFileInput').addEventListener('change', (e)=>{
+      const file = e.target.files[0];
+      if(!file) return;
+      const reader = new FileReader();
+      reader.onload = (ev)=>{
+        try{
+          const data = JSON.parse(ev.target.result);
+          if(!data.planes) throw new Error('Archivo inválido');
+          st.planes = data.planes;
+          st.roles = data.roles || {};
+          repaintPlanesList && repaintPlanesList();
+          repaintNav && repaintNav();
+          repaintAlt && repaintAlt();
+          repaintPairs && repaintPairs();
+          alert('Formaciones cargadas correctamente.');
+        }catch(err){
+          alert('Error al cargar el archivo: '+err.message);
+        }
+      };
+      reader.readAsText(file);
+    });
+  }
+
+  if(document.readyState === 'loading'){
+    document.addEventListener('DOMContentLoaded', montarExportImport);
+  } else {
+    montarExportImport();
+  }
 })();
 </script>
 
-<!-- === PARCHE: Botones de aviones + botón Etiqueta === -->
+<!-- === PARCHE: Botones de aviones + botón Etiqueta (CSS aplicado con !important) === -->
 <style>
-  /* Tamaño pequeño y en filas de 6 */
-  #planeList {
-    display: grid !important;
-    grid-template-columns: repeat(6, 38px) !important;
-    grid-auto-rows: 38px !important;
-    gap: 5px !important;
-    justify-content: start !important;
-    align-content: start !important;
-    padding: 4px !important;
+  #planeList{
+    display:grid !important;
+    grid-template-columns:repeat(6,38px) !important;
+    grid-auto-rows:38px !important;
+    gap:5px !important;
+    justify-content:start !important;
+    align-content:start !important;
+    padding:4px !important;
   }
-  #planeList button {
-    width: 38px !important;
-    height: 38px !important;
-    font-size: 10px !important;
-    line-height: 38px !important;
-    padding: 0 !important;
-    margin: 0 !important;
-    text-align: center !important;
-    border-radius: 6px !important;
-    border: 1px solid #2a6 !important;
-    background: #0e2b17 !important;
-    color: var(--txt) !important;
+  #planeList button{
+    width:38px !important;
+    height:38px !important;
+    font-size:10px !important;
+    line-height:38px !important;
+    padding:0 !important;
+    margin:0 !important;
+    text-align:center !important;
+    border-radius:6px !important;
+    border:1px solid #2a6 !important;
+    background:#0e2b17 !important;
+    color:var(--txt) !important;
   }
 
-  /* Botón de control de etiquetas */
   #tagControlWrap{
-    display:flex;
-    gap:8px;
-    align-items:center;
-    justify-content:center;
-    margin-bottom:6px;
+    display:flex; gap:8px; align-items:center; justify-content:center; margin-bottom:6px;
   }
   #tagNudge{
-    background:#102a18;
-    border:1px solid #2a6;
-    color:var(--txt);
-    border-radius:6px;
-    padding:4px 10px;
-    font-size:12px;
-    cursor:pointer;
+    background:#102a18; border:1px solid #2a6; color:var(--txt);
+    border-radius:6px; padding:4px 10px; font-size:12px; cursor:pointer;
   }
   #tagNudge:hover{ background:#164f2b; }
   #tagPos{
-    font:12px monospace;
-    color:var(--mut);
-    padding:2px 6px;
-    border:1px solid #2a6;
-    border-radius:6px;
-    background:#0a110b;
+    font:12px monospace; color:var(--mut); padding:2px 6px; border:1px solid #2a6; border-radius:6px; background:#0a110b;
   }
 </style>
 
 <script>
+/* === PARCHE: Botón "Etiqueta" + mover labels (corregido: espera a que exista <header> y drawPlane) === */
 (function(){
   let tagOffsetX = 12, tagOffsetY = -6;
   const STEP = 10;
@@ -2820,7 +2817,8 @@ document.getElementById('radar').addEventListener('click', function(e){
 
   function crearBoton(){
     const hdr = document.querySelector('header');
-    if(!hdr || document.getElementById('tagControlWrap')) return;
+    if(!hdr){ requestAnimationFrame(crearBoton); return; }
+    if(document.getElementById('tagControlWrap')) return;
     const box = document.createElement('div');
     box.id = 'tagControlWrap';
     box.innerHTML = `
@@ -2843,25 +2841,21 @@ document.getElementById('radar').addEventListener('click', function(e){
     });
   }
 
-  function cambiarEtiquetas(){
-    const original = window.drawPlane;
-    if(!original || original._editado) return;
-    window.drawPlane = function(p){
-      const s = toScreen(p.x,p.y);
-      const role = st.roles[p.id] || 'Neutral';
-      const color = role==='Civilian' ? '#4de3ff' :
-                    role==='Friend'   ? '#35ff79' :
-                    role==='Bandit'   ? '#ff7070' : '#7CFC00';
-      ctx.save();
-      ctx.translate(s.x,s.y);
-      ctx.rotate(p.hdg*Math.PI/180);
-      ctx.strokeStyle=color;
-      ctx.lineWidth=2;
-      ctx.strokeRect(-5,-5,10,10);
-      ctx.restore();
+  // Espera a que drawPlane esté definida y luego la parchea
+  function parchearDrawPlane(){
+    if(typeof window.drawPlane !== 'function'){ requestAnimationFrame(parchearDrawPlane); return; }
+    if(window.drawPlane._editado) return;
 
+    const original = window.drawPlane;
+    window.drawPlane = function(p){
+      // Dibujo base (lo que ya hacía tu función original)
+      original(p);
+
+      // Encima, re-dibujar SOLO las etiquetas con offset movible
+      const s = toScreen(p.x,p.y);
       ctx.fillStyle='#eaffea';
       ctx.font='12px monospace';
+      ctx.textAlign='left';
       ctx.fillText(p.name, s.x+tagOffsetX, s.y+tagOffsetY);
       ctx.fillText(`${p.alt|0} ft`, s.x+tagOffsetX, s.y+tagOffsetY+14);
       ctx.fillText(`${(p.spd/1.852).toFixed(0)} kts`, s.x+tagOffsetX, s.y+tagOffsetY+28);
@@ -2870,14 +2864,14 @@ document.getElementById('radar').addEventListener('click', function(e){
     window.drawPlane._editado = true;
   }
 
-  document.addEventListener('DOMContentLoaded', ()=>{
-    crearBoton();
-    cambiarEtiquetas();
-  });
+  if(document.readyState === 'loading'){
+    document.addEventListener('DOMContentLoaded', ()=>{ crearBoton(); parchearDrawPlane(); });
+  }else{
+    crearBoton(); parchearDrawPlane();
+  }
 })();
 </script>
 <!-- === /PARCHE === -->
 
 </body>
 </html>
-
