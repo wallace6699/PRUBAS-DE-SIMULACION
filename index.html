@@ -2758,7 +2758,74 @@ document.getElementById('radar').addEventListener('click', function(e){
 })();
 </script>
 
+  <script>
+/* === PATCH: Panel de Aviones en Cuadrícula + Selección Amarilla === */
+(function(){
+  // --- 1) Reestilizar contenedor del listado de aviones ---
+  const style = document.createElement('style');
+  style.textContent = `
+    #planeList {
+      display: grid !important;
+      grid-template-columns: repeat(7, 1fr);
+      gap: 6px;
+      justify-items: center;
+      align-items: center;
+    }
+    #planeList button {
+      min-width: 40px;
+      text-align: center;
+      padding: 6px 4px;
+      font-size: 12px;
+      border-radius: 6px;
+      border: 1px solid #2a6;
+      background: #0e2b17;
+      color: var(--txt);
+      transition: all 0.2s ease;
+    }
+    #planeList button:hover {
+      background: #1a5c32;
+      transform: scale(1.05);
+    }
+    #planeList button.selectedPlane {
+      background: #ffd700 !important;
+      color: #000 !important;
+      border-color: #fff300 !important;
+      box-shadow: 0 0 8px #fff300;
+    }
+  `;
+  document.head.appendChild(style);
+
+  // --- 2) Extender repaintPlanesList() ---
+  if (typeof window.repaintPlanesList === 'function') {
+    const original = window.repaintPlanesList;
+    window.repaintPlanesList = function() {
+      original();
+      try {
+        const list = document.getElementById('planeList');
+        if (!list) return;
+        // Actualizar estilo y comportamiento de selección
+        Array.from(list.querySelectorAll('button')).forEach(btn => {
+          const id = Array.from(st.planes).find(p => p.name === btn.textContent)?.id;
+          if (!id) return;
+          btn.classList.toggle('selectedPlane', st.sel.includes(id));
+          btn.addEventListener('click', () => {
+            const i = st.sel.indexOf(id);
+            if (i >= 0) st.sel.splice(i, 1);
+            else st.sel.push(id);
+            window.repaintPlanesList();
+            if (window.repaintNav) repaintNav();
+            if (window.repaintAlt) repaintAlt();
+            if (window.repaintStudent) repaintStudent();
+          });
+        });
+      } catch (e) { console.warn('Patch error:', e); }
+    };
+  }
+})();
+</script>
+
   
 </body>
 </html>
 by wallace
+
