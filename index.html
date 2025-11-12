@@ -2759,20 +2759,22 @@ document.getElementById('radar').addEventListener('click', function(e){
 </script>
 
   <script>
-/* === PATCH: Panel de Aviones en Cuadrícula + Selección Amarilla === */
+    
+<script>
+/* === PATCH: Panel de Aviones con 6 columnas + selección funcional === */
 (function(){
-  // --- 1) Reestilizar contenedor del listado de aviones ---
+  // --- 1) Estilo en cuadrícula ---
   const style = document.createElement('style');
   style.textContent = `
     #planeList {
       display: grid !important;
-      grid-template-columns: repeat(7, 1fr);
+      grid-template-columns: repeat(6, 1fr); /* ← 6 columnas */
       gap: 6px;
       justify-items: center;
       align-items: center;
     }
     #planeList button {
-      min-width: 40px;
+      min-width: 48px;
       text-align: center;
       padding: 6px 4px;
       font-size: 12px;
@@ -2781,6 +2783,7 @@ document.getElementById('radar').addEventListener('click', function(e){
       background: #0e2b17;
       color: var(--txt);
       transition: all 0.2s ease;
+      cursor: pointer;
     }
     #planeList button:hover {
       background: #1a5c32;
@@ -2795,37 +2798,41 @@ document.getElementById('radar').addEventListener('click', function(e){
   `;
   document.head.appendChild(style);
 
-  // --- 2) Extender repaintPlanesList() ---
-  if (typeof window.repaintPlanesList === 'function') {
-    const original = window.repaintPlanesList;
-    window.repaintPlanesList = function() {
-      original();
-      try {
-        const list = document.getElementById('planeList');
-        if (!list) return;
-        // Actualizar estilo y comportamiento de selección
-        Array.from(list.querySelectorAll('button')).forEach(btn => {
-          const id = Array.from(st.planes).find(p => p.name === btn.textContent)?.id;
-          if (!id) return;
-          btn.classList.toggle('selectedPlane', st.sel.includes(id));
-          btn.addEventListener('click', () => {
-            const i = st.sel.indexOf(id);
-            if (i >= 0) st.sel.splice(i, 1);
-            else st.sel.push(id);
-            window.repaintPlanesList();
-            if (window.repaintNav) repaintNav();
-            if (window.repaintAlt) repaintAlt();
-            if (window.repaintStudent) repaintStudent();
-          });
-        });
-      } catch (e) { console.warn('Patch error:', e); }
-    };
-  }
+  // --- 2) Reemplazar repaintPlanesList con selección activa ---
+  const original = window.repaintPlanesList;
+  window.repaintPlanesList = function(){
+    const list = document.getElementById('planeList');
+    if (!list) return;
+    list.innerHTML = '';
+    st.planes.forEach(p=>{
+      const b = document.createElement('button');
+      b.textContent = p.name;
+      b.className = 'mini btn focusable';
+      if (st.sel.includes(p.id)) b.classList.add('selectedPlane');
+
+      // Al hacer clic: seleccionar/deseleccionar y actualizar paneles
+      b.onclick = ()=>{
+        const i = st.sel.indexOf(p.id);
+        if (i >= 0) st.sel.splice(i,1);
+        else {
+          // Solo un avión activo si se desea controlarlo
+          st.sel = [p.id];
+        }
+        // Actualizar todos los paneles dependientes
+        if (typeof repaintPlanesList === 'function') repaintPlanesList();
+        if (typeof repaintNav === 'function') repaintNav();
+        if (typeof repaintAlt === 'function') repaintAlt();
+        if (typeof repaintStudent === 'function') repaintStudent();
+      };
+
+      list.appendChild(b);
+    });
+  };
 })();
 </script>
-
   
 </body>
 </html>
 by wallace
+
 
