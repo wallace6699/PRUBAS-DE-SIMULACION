@@ -2693,7 +2693,6 @@ document.getElementById('radar').addEventListener('click', function(e){
   setTimeout(fitRadar, 150);
 })();
 </script>
-
 <script>
 /* === PATCH: Exportar / Importar Formaciones === */
 (function(){
@@ -2755,9 +2754,10 @@ document.getElementById('radar').addEventListener('click', function(e){
     };
     reader.readAsText(file);
   });
-})(); 
+})();
+</script>
 
-  <!-- === PARCHE: Botones de aviones + botón Etiqueta === -->
+<!-- === PARCHE: Botones de aviones + botón Etiqueta === -->
 <style>
   /* Tamaño pequeño y en filas de 6 */
   #planeList {
@@ -2818,7 +2818,6 @@ document.getElementById('radar').addEventListener('click', function(e){
   const DIRS = ['→','↓','←','↑'];
   let dirIdx = 0;
 
-  // Crear el botón "Etiqueta"
   function crearBoton(){
     const hdr = document.querySelector('header');
     if(!hdr || document.getElementById('tagControlWrap')) return;
@@ -2844,19 +2843,25 @@ document.getElementById('radar').addEventListener('click', function(e){
     });
   }
 
-  // Cambiar la posición de las etiquetas
   function cambiarEtiquetas(){
     const original = window.drawPlane;
     if(!original || original._editado) return;
     window.drawPlane = function(p){
       const s = toScreen(p.x,p.y);
-      const role=st.roles[p.id]||'Neutral';
-      const color=role==='Civilian'?'#4de3ff':(role==='Friend'?'#35ff79':(role==='Bandit'?'#ff7070':'#7CFC00'));
-      ctx.save();ctx.translate(s.x,s.y);ctx.rotate(p.hdg*Math.PI/180);
-      ctx.strokeStyle=color;ctx.lineWidth=2;ctx.strokeRect(-5,-5,10,10);ctx.restore();
+      const role = st.roles[p.id] || 'Neutral';
+      const color = role==='Civilian' ? '#4de3ff' :
+                    role==='Friend'   ? '#35ff79' :
+                    role==='Bandit'   ? '#ff7070' : '#7CFC00';
+      ctx.save();
+      ctx.translate(s.x,s.y);
+      ctx.rotate(p.hdg*Math.PI/180);
+      ctx.strokeStyle=color;
+      ctx.lineWidth=2;
+      ctx.strokeRect(-5,-5,10,10);
+      ctx.restore();
 
-      // etiquetas movibles
-      ctx.fillStyle='#eaffea';ctx.font='12px monospace';
+      ctx.fillStyle='#eaffea';
+      ctx.font='12px monospace';
       ctx.fillText(p.name, s.x+tagOffsetX, s.y+tagOffsetY);
       ctx.fillText(`${p.alt|0} ft`, s.x+tagOffsetX, s.y+tagOffsetY+14);
       ctx.fillText(`${(p.spd/1.852).toFixed(0)} kts`, s.x+tagOffsetX, s.y+tagOffsetY+28);
@@ -2873,20 +2878,6 @@ document.getElementById('radar').addEventListener('click', function(e){
 </script>
 <!-- === /PARCHE === -->
 
- 
 </body>
 </html>
-by wallace
-
-
-
-
-
-
-
-
-
-
-
-
 
