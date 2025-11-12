@@ -2756,13 +2756,19 @@ document.getElementById('radar').addEventListener('click', function(e){
     reader.readAsText(file);
   });
 })();
-<script>
+
   
-/* === PATCH FORZADO: 6 columnas en cuadritos + selección/deselección funcional === */
+<script>
+/* === PARCHE FINAL: cuadritos pequeños 6xN — rompe herencia de estilos === */
 (function(){
-  // --- CSS de alta prioridad ---
   const css = document.createElement('style');
   css.textContent = `
+    /* Rompe herencia de flex o width 100% */
+    #planeList, #planeList * {
+      all: unset !important;
+    }
+
+    /* Contenedor: grilla forzada */
     #planeList {
       display: grid !important;
       grid-template-columns: repeat(6, 44px) !important;
@@ -2770,98 +2776,81 @@ document.getElementById('radar').addEventListener('click', function(e){
       gap: 6px !important;
       justify-content: start !important;
       align-content: start !important;
-      padding: 4px !important;
+      padding: 6px !important;
+      margin: 0 !important;
     }
+
+    /* Botones: cuadrados pequeños */
     #planeList button {
+      all: unset !important;
+      display: block !important;
       width: 44px !important;
       height: 44px !important;
       line-height: 44px !important;
-      padding: 0 !important;
-      margin: 0 !important;
       font-size: 11px !important;
       text-align: center !important;
       border-radius: 6px !important;
       border: 1px solid #2a6 !important;
       background: #0e2b17 !important;
-      color: var(--txt) !important;
+      color: #c8ffc8 !important;
+      box-sizing: border-box !important;
       cursor: pointer !important;
-      overflow: hidden !important;
-      white-space: nowrap !important;
-      text-overflow: ellipsis !important;
       transition: transform .12s ease, background .12s ease !important;
     }
-    #planeList button:hover { transform: scale(1.06); background:#1a5c32 !important; }
+
+    #planeList button:hover {
+      transform: scale(1.06);
+      background: #1a5c32 !important;
+    }
+
     #planeList button.selectedPlane {
-      background: #ffd700 !important; color:#000 !important; border-color:#fff300 !important;
+      background: #ffd700 !important;
+      color: #000 !important;
+      border-color: #fff300 !important;
       box-shadow: 0 0 8px #fff300 !important;
     }
   `;
   document.head.appendChild(css);
 
-  // Utilidad: asegura que exista st.sel
-  function ensureSel(){ if(!Array.isArray(st.sel)) st.sel = []; }
+  function ensureSel(){ if(!Array.isArray(st.sel)) st.sel=[]; }
 
-  // Render controlado en cuadritos + selección toggle
   function renderPlaneGrid(){
-    const list = document.getElementById('planeList');
+    const list=document.getElementById('planeList');
     if(!list) return;
     ensureSel();
-    list.innerHTML = '';
+    list.innerHTML='';
 
-    (st.planes || []).forEach(p=>{
-      const b = document.createElement('button');
-      b.textContent = p.name || p.id;
-      // Inline para vencer cualquier CSS residual
-      b.style.width = '44px'; b.style.height = '44px'; b.style.lineHeight = '44px';
-      if (st.sel.includes(p.id)) b.classList.add('selectedPlane');
-
-      b.onclick = ()=>{
+    (st.planes||[]).forEach(p=>{
+      const b=document.createElement('button');
+      b.textContent=p.name||p.id;
+      if(st.sel.includes(p.id)) b.classList.add('selectedPlane');
+      b.onclick=()=>{
         ensureSel();
-        if (st.sel.includes(p.id)) {
-          // deseleccionar si se vuelve a pulsar
-          st.sel = st.sel.filter(x => x !== p.id);
-        } else {
-          // selección única (recomendado para maniobrar)
-          st.sel = [p.id];
+        if(st.sel.includes(p.id)){
+          st.sel=st.sel.filter(x=>x!==p.id);
+        }else{
+          st.sel=[p.id];
         }
         renderPlaneGrid();
-        if (window.repaintNav) repaintNav();
-        if (window.repaintAlt) repaintAlt();
-        if (window.repaintStudent) repaintStudent();
+        if(window.repaintNav) repaintNav();
+        if(window.repaintAlt) repaintAlt();
+        if(window.repaintStudent) repaintStudent();
       };
-
       list.appendChild(b);
     });
   }
 
-  // Sobrescribe repaintPlanesList para evitar que el original vuelva a crear botones largos
-  const _orig = window.repaintPlanesList;
-  window.repaintPlanesList = function(){
-    // NO llamamos al original para que no ponga layout en columnas verticales
-    renderPlaneGrid();
-  };
+  window.repaintPlanesList=function(){ renderPlaneGrid(); };
 
-  // Si otro código intenta modificar #planeList, re-aplicamos nuestro layout
-  const list = document.getElementById('planeList');
-  if (list) {
-    new MutationObserver(()=> {
-      // fuerza grilla y tamaños si algo los cambia
-      list.style.display = 'grid';
-      list.style.gridTemplateColumns = 'repeat(6, 44px)';
-      list.style.gridAutoRows = '44px';
-      list.querySelectorAll('button').forEach(b=>{
-        b.style.width='44px'; b.style.height='44px'; b.style.lineHeight='44px';
-      });
-    }).observe(list, {childList:true, subtree:false, attributes:true});
-  }
-
-  // Primer pintado (con pequeño retraso por si el DOM aún arma la sección)
-  setTimeout(()=>{ renderPlaneGrid(); }, 150);
+  setTimeout(()=>renderPlaneGrid(),300);
 })();
 </script>
+
+  
 </body>
 </html>
 by wallace
+
 
 
 
