@@ -2756,97 +2756,113 @@ document.getElementById('radar').addEventListener('click', function(e){
     reader.readAsText(file);
   });
 })();
-</script>
-
-  <script>
-    
 <script>
-<script>
-
- <script>
-
-  <script>
   
-<script>
-
-<script>
-
-<script>
-/* === PATCH: Panel de Aviones en Cuadrícula + Selección FUNCIONAL === */
+/* === PATCH FORZADO: 6 columnas en cuadritos + selección/deselección funcional === */
 (function(){
-  const style = document.createElement('style');
-  style.textContent = `
+  // --- CSS de alta prioridad ---
+  const css = document.createElement('style');
+  css.textContent = `
     #planeList {
       display: grid !important;
-      grid-template-columns: repeat(6, 1fr);
-      gap: 5px;
-      justify-items: center;
-      align-items: center;
-      padding: 4px;
+      grid-template-columns: repeat(6, 44px) !important;
+      grid-auto-rows: 44px !important;
+      gap: 6px !important;
+      justify-content: start !important;
+      align-content: start !important;
+      padding: 4px !important;
     }
     #planeList button {
-      width: 40px;
-      height: 40px;
-      text-align: center;
-      padding: 0;
-      font-size: 11px;
-      border-radius: 6px;
-      border: 1px solid #2a6;
-      background: #0e2b17;
-      color: var(--txt);
-      transition: all 0.2s ease;
-      cursor: pointer;
+      width: 44px !important;
+      height: 44px !important;
+      line-height: 44px !important;
+      padding: 0 !important;
+      margin: 0 !important;
+      font-size: 11px !important;
+      text-align: center !important;
+      border-radius: 6px !important;
+      border: 1px solid #2a6 !important;
+      background: #0e2b17 !important;
+      color: var(--txt) !important;
+      cursor: pointer !important;
+      overflow: hidden !important;
+      white-space: nowrap !important;
+      text-overflow: ellipsis !important;
+      transition: transform .12s ease, background .12s ease !important;
     }
-    #planeList button:hover {
-      background: #1a5c32;
-      transform: scale(1.07);
-    }
+    #planeList button:hover { transform: scale(1.06); background:#1a5c32 !important; }
     #planeList button.selectedPlane {
-      background: #ffd700 !important;
-      color: #000 !important;
-      border-color: #fff300 !important;
-      box-shadow: 0 0 8px #fff300;
+      background: #ffd700 !important; color:#000 !important; border-color:#fff300 !important;
+      box-shadow: 0 0 8px #fff300 !important;
     }
   `;
-  document.head.appendChild(style);
+  document.head.appendChild(css);
 
-  // --- Redefinir repaintPlanesList para selección funcional ---
-  window.repaintPlanesList = function(){
+  // Utilidad: asegura que exista st.sel
+  function ensureSel(){ if(!Array.isArray(st.sel)) st.sel = []; }
+
+  // Render controlado en cuadritos + selección toggle
+  function renderPlaneGrid(){
     const list = document.getElementById('planeList');
-    if (!list) return;
+    if(!list) return;
+    ensureSel();
     list.innerHTML = '';
 
     (st.planes || []).forEach(p=>{
-      const btn = document.createElement('button');
-      btn.textContent = p.name;
+      const b = document.createElement('button');
+      b.textContent = p.name || p.id;
+      // Inline para vencer cualquier CSS residual
+      b.style.width = '44px'; b.style.height = '44px'; b.style.lineHeight = '44px';
+      if (st.sel.includes(p.id)) b.classList.add('selectedPlane');
 
-      // Marcar si está seleccionado
-      if (st.sel.includes(p.id)) btn.classList.add('selectedPlane');
-
-      // Clic: seleccionar avión y actualizar paneles
-      btn.onclick = ()=>{
-        // Si haces clic en uno, selecciona solo ese (para maniobrar)
-        st.sel = [p.id];
-
-        // Actualiza UI y paneles dependientes
-        if (typeof repaintPlanesList === 'function') repaintPlanesList();
-        if (typeof repaintNav === 'function') repaintNav();
-        if (typeof repaintAlt === 'function') repaintAlt();
-        if (typeof repaintStudent === 'function') repaintStudent();
+      b.onclick = ()=>{
+        ensureSel();
+        if (st.sel.includes(p.id)) {
+          // deseleccionar si se vuelve a pulsar
+          st.sel = st.sel.filter(x => x !== p.id);
+        } else {
+          // selección única (recomendado para maniobrar)
+          st.sel = [p.id];
+        }
+        renderPlaneGrid();
+        if (window.repaintNav) repaintNav();
+        if (window.repaintAlt) repaintAlt();
+        if (window.repaintStudent) repaintStudent();
       };
 
-      list.appendChild(btn);
+      list.appendChild(b);
     });
+  }
+
+  // Sobrescribe repaintPlanesList para evitar que el original vuelva a crear botones largos
+  const _orig = window.repaintPlanesList;
+  window.repaintPlanesList = function(){
+    // NO llamamos al original para que no ponga layout en columnas verticales
+    renderPlaneGrid();
   };
 
-  // Render inicial
-  setTimeout(()=>{ if(window.repaintPlanesList) repaintPlanesList(); }, 500);
+  // Si otro código intenta modificar #planeList, re-aplicamos nuestro layout
+  const list = document.getElementById('planeList');
+  if (list) {
+    new MutationObserver(()=> {
+      // fuerza grilla y tamaños si algo los cambia
+      list.style.display = 'grid';
+      list.style.gridTemplateColumns = 'repeat(6, 44px)';
+      list.style.gridAutoRows = '44px';
+      list.querySelectorAll('button').forEach(b=>{
+        b.style.width='44px'; b.style.height='44px'; b.style.lineHeight='44px';
+      });
+    }).observe(list, {childList:true, subtree:false, attributes:true});
+  }
+
+  // Primer pintado (con pequeño retraso por si el DOM aún arma la sección)
+  setTimeout(()=>{ renderPlaneGrid(); }, 150);
 })();
 </script>
-  
 </body>
 </html>
 by wallace
+
 
 
 
