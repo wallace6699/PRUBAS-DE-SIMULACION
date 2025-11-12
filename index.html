@@ -2757,9 +2757,144 @@ document.getElementById('radar').addEventListener('click', function(e){
   });
 })(); 
 <script>
+<!-- === PATCH: Redimensionar botones de aviones + control de etiquetas === -->
+<style>
+  #planeList {
+    display: grid !important;
+    grid-template-columns: repeat(6, 38px) !important;
+    grid-auto-rows: 38px !important;
+    gap: 5px !important;
+    justify-content: start !important;
+    align-content: start !important;
+    padding: 4px !important;
+  }
+  #planeList button {
+    width: 38px !important;
+    height: 38px !important;
+    font-size: 10px !important;
+    line-height: 38px !important;
+    padding: 0 !important;
+    margin: 0 !important;
+    text-align: center !important;
+    border-radius: 6px !important;
+    border: 1px solid #2a6 !important;
+    background: #0e2b17 !important;
+    color: var(--txt) !important;
+  }
+  #tagControls {
+    display: flex;
+    gap: 6px;
+    justify-content: center;
+    margin-bottom: 6px;
+  }
+  #tagControls button {
+    background: #102a18;
+    border: 1px solid #2a6;
+    color: var(--txt);
+    border-radius: 5px;
+    padding: 4px 8px;
+    font-size: 11px;
+    cursor: pointer;
+  }
+  #tagControls button:hover {
+    background: #164f2b;
+  }
+</style>
+
+<script>
+(function(){
+  // === Sistema de desplazamiento de etiquetas ===
+  let tagOffsetX = 12, tagOffsetY = -6;
+
+  // Añadimos controles en el header si no existen
+  document.addEventListener('DOMContentLoaded', ()=>{
+    const hdr = document.querySelector('header');
+    if(!hdr) return;
+    if(document.getElementById('tagControls')) return;
+
+    const ctrl = document.createElement('div');
+    ctrl.id = 'tagControls';
+    ctrl.innerHTML = `
+      <button data-dir="left">Etiqueta ←</button>
+      <button data-dir="right">Etiqueta →</button>
+      <button data-dir="up">Etiqueta ↑</button>
+      <button data-dir="down">Etiqueta ↓</button>
+      <button data-dir="reset">Reset</button>
+    `;
+    hdr.appendChild(ctrl);
+
+    ctrl.querySelectorAll('button').forEach(btn=>{
+      btn.addEventListener('click', ()=>{
+        const dir = btn.dataset.dir;
+        const step = 10;
+        switch(dir){
+          case 'left': tagOffsetX -= step; break;
+          case 'right': tagOffsetX += step; break;
+          case 'up': tagOffsetY -= step; break;
+          case 'down': tagOffsetY += step; break;
+          case 'reset': tagOffsetX = 12; tagOffsetY = -6; break;
+        }
+      });
+    });
+  });
+
+  // Reemplazamos temporalmente la función drawPlane para aplicar el offset dinámico
+  const origDrawPlane = window.drawPlane;
+  window.drawPlane = function(p){
+    if(!origDrawPlane) return;
+    const s = toScreen(p.x,p.y);
+    const role=st.roles[p.id]||'Neutral';
+    const color=role==='Civilian'?'#4de3ff':(role==='Friend'?'#35ff79':(role==='Bandit'?'#ff7070':'#7CFC00'));
+
+    p.ghosts.forEach((g,i)=>{
+      const sg=toScreen(g.x,g.y);
+      const op=(i+1)/p.ghosts.length*.35;
+      ctx.fillStyle=`rgba(179,0,255,${op})`;
+      ctx.fillRect(sg.x-1,sg.y-1,2,2);
+    });
+
+    ctx.save();ctx.translate(s.x,s.y);ctx.rotate(p.hdg*Math.PI/180);
+    ctx.strokeStyle=color;ctx.lineWidth=2;ctx.strokeRect(-5,-5,10,10);ctx.restore();
+
+    const lr=(p.hdg-90)*Math.PI/180;
+    ctx.beginPath();
+    ctx.moveTo(s.x,s.y);
+    ctx.lineTo(s.x+Math.cos(lr)*25,s.y+Math.sin(lr)*25);
+    ctx.strokeStyle='#35ff79';ctx.lineWidth=1;ctx.stroke();
+
+    // === Aplicar offset dinámico a etiquetas ===
+    ctx.fillStyle='#eaffea';ctx.font='12px monospace';ctx.textAlign='left';
+    ctx.fillText(p.name,s.x+tagOffsetX,s.y+tagOffsetY);
+    if(st.metric){
+      ctx.fillText(`${(p.alt*FT2M|0)} m`,s.x+tagOffsetX,s.y+tagOffsetY+14);
+      ctx.fillText(`${p.spd.toFixed(0)} km/h`,s.x+tagOffsetX,s.y+tagOffsetY+28);
+      ctx.fillText(`${String(p.hdg|0).padStart(3,'0')}°`,s.x+tagOffsetX,s.y+tagOffsetY+42);
+    } else {
+      ctx.fillText(`${p.alt|0} ft`,s.x+tagOffsetX,s.y+tagOffsetY+14);
+      ctx.fillText(`${(p.spd*KMH2KTS).toFixed(0)} kts`,s.x+tagOffsetX,s.y+tagOffsetY+28);
+      ctx.fillText(`${String(p.hdg|0).padStart(3,'0')}°`,s.x+tagOffsetX,s.y+tagOffsetY+42);
+    }
+
+    if(st.sel.includes(p.id)){
+      ctx.strokeStyle='#ffe066';
+      ctx.strokeRect(s.x-10,s.y-10,20,20);
+    }
+    if(p.jamming){
+      const t=(performance.now()%1000)/1000;
+      const r=10+8*Math.sin(t*2*Math.PI);
+      ctx.strokeStyle='rgba(179,0,255,0.85)';
+      ctx.beginPath();ctx.arc(s.x,s.y,r,0,2*Math.PI);ctx.stroke();
+      ctx.strokeStyle='rgba(179,0,255,0.45)';
+      ctx.beginPath();ctx.arc(s.x,s.y,r+10,0,2*Math.PI);ctx.stroke();
+    }
+  };
+})();
+</script>
+<!-- === /PATCH === -->  
 </body>
 </html>
 by wallace
+
 
 
 
