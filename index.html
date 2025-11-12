@@ -2768,73 +2768,80 @@ document.getElementById('radar').addEventListener('click', function(e){
   <script>
   
 <script>
-/* === PATCH FINAL: Aviones en 6 columnas pequeñas + selección funcional === */
-(function(){
-  // --- 1) Estilos visuales ---
-  const style = document.createElement('style');
-  style.textContent = `
-    #planeList {
-      display: grid !important;
-      grid-template-columns: repeat(6, 1fr) !important;
-      gap: 6px !important;
-      justify-items: center !important;
-      align-items: center !important;
-      padding: 4px !important;
-    }
-    #planeList button {
-      width: 45px !important;
-      height: 45px !important;
-      font-size: 12px !important;
-      text-align: center !important;
-      border-radius: 6px !important;
-      border: 1px solid #2a6 !important;
-      background: #0e2b17 !important;
-      color: var(--txt) !important;
-      transition: all 0.15s ease !important;
-      cursor: pointer !important;
-      overflow: hidden !important;
-    }
-    #planeList button:hover {
-      background: #1a5c32 !important;
-      transform: scale(1.06);
-    }
-    #planeList button.selectedPlane {
-      background: #ffd700 !important;
-      color: #000 !important;
-      border-color: #fff300 !important;
-      box-shadow: 0 0 8px #fff300;
-    }
-  `;
-  document.head.appendChild(style);
 
-  // --- 2) Reescribir repaintPlanesList manteniendo funcionalidad ---
+<script>
+/* === PATCH FORZADO: Cuadritos pequeños de aviones (6 columnas, funcional) === */
+(function(){
+  function applyPlaneGridStyle(){
+    const list = document.getElementById('planeList');
+    if(!list) return;
+
+    // === Estilos al contenedor ===
+    list.style.display = 'grid';
+    list.style.gridTemplateColumns = 'repeat(6, 45px)';
+    list.style.gridAutoRows = '45px';
+    list.style.gap = '5px';
+    list.style.justifyItems = 'center';
+    list.style.alignItems = 'center';
+    list.style.padding = '4px';
+
+    // === Aplicar a cada botón existente ===
+    const btns = list.querySelectorAll('button');
+    btns.forEach(b=>{
+      b.style.width = '45px';
+      b.style.height = '45px';
+      b.style.lineHeight = '45px';
+      b.style.fontSize = '11px';
+      b.style.padding = '0';
+      b.style.margin = '0';
+      b.style.borderRadius = '6px';
+      b.style.border = '1px solid #2a6';
+      b.style.background = '#0e2b17';
+      b.style.color = 'var(--txt)';
+      b.style.cursor = 'pointer';
+      b.style.textAlign = 'center';
+      b.style.overflow = 'hidden';
+      b.style.transition = 'all 0.15s ease';
+    });
+  }
+
+  // === Reescribir repaintPlanesList para forzar cuadrícula ===
   window.repaintPlanesList = function(){
     const list = document.getElementById('planeList');
-    if (!list) return;
+    if(!list) return;
     list.innerHTML = '';
 
-    st.planes.forEach(p=>{
+    (st.planes || []).forEach(p=>{
       const btn = document.createElement('button');
       btn.textContent = p.name;
 
-      // Si está seleccionado, color amarillo
-      if (st.sel.includes(p.id)) btn.classList.add('selectedPlane');
+      if(st.sel.includes(p.id)){
+        btn.style.background = '#ffd700';
+        btn.style.color = '#000';
+        btn.style.borderColor = '#fff300';
+        btn.style.boxShadow = '0 0 8px #fff300';
+      }
 
-      // Al hacer clic: seleccionar único y refrescar todo
       btn.onclick = ()=>{
         st.sel = [p.id];
-        if (typeof repaintPlanesList === 'function') repaintPlanesList();
-        if (typeof repaintNav === 'function') repaintNav();
-        if (typeof repaintAlt === 'function') repaintAlt();
-        if (typeof repaintStudent === 'function') repaintStudent();
+        repaintPlanesList();
+        if(window.repaintNav) repaintNav();
+        if(window.repaintAlt) repaintAlt();
+        if(window.repaintStudent) repaintStudent();
       };
 
       list.appendChild(btn);
     });
+
+    // Aplicar estilo forzado cada vez que se repinta
+    applyPlaneGridStyle();
   };
 
-  // Refrescar la interfaz cuando cargue
-  setTimeout(()=>{ if (window.repaintPlanesList) repaintPlanesList(); }, 800);
+  // Forzar estilo cuando cargue
+  setTimeout(()=>{ 
+    if(window.repaintPlanesList) repaintPlanesList(); 
+    applyPlaneGridStyle();
+  }, 500);
 })();
 </script>
 
@@ -2842,6 +2849,7 @@ document.getElementById('radar').addEventListener('click', function(e){
 </body>
 </html>
 by wallace
+
 
 
 
