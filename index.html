@@ -2762,36 +2762,43 @@ document.getElementById('radar').addEventListener('click', function(e){
     
 <script>
 <script>
-/* === PATCH: Panel de Aviones compacto en 6 columnas + selección activa === */
+
+ <script>
+/* === PATCH: Aviones en cuadrícula de 6 columnas, botones pequeños === */
 (function(){
-  // === 1) Estilo permanente ===
-  const style = document.createElement('style');
-  style.textContent = `
+  const css = document.createElement('style');
+  css.textContent = `
+    /* Contenedor: cuadrícula 6xN */
     #planeList {
       display: grid !important;
-      grid-template-columns: repeat(6, minmax(0, 1fr)) !important;
-      gap: 6px !important;
+      grid-template-columns: repeat(6, 1fr) !important;
+      gap: 4px !important;
       justify-items: center !important;
       align-items: center !important;
       padding: 4px !important;
     }
+
+    /* Botones pequeños tipo cuadrado */
     #planeList button {
-      width: 100% !important;
-      min-width: 0 !important;
-      padding: 6px 0 !important;
+      width: 38px !important;
+      height: 38px !important;
       font-size: 11px !important;
       text-align: center !important;
       border-radius: 6px !important;
       border: 1px solid #2a6 !important;
       background: #0e2b17 !important;
       color: var(--txt) !important;
-      transition: all 0.2s ease !important;
       cursor: pointer !important;
+      transition: all 0.2s ease !important;
+      overflow: hidden !important;
     }
+
     #planeList button:hover {
       background: #1a5c32 !important;
-      transform: scale(1.05);
+      transform: scale(1.07);
     }
+
+    /* Selección activa en amarillo brillante */
     #planeList button.selectedPlane {
       background: #ffd700 !important;
       color: #000 !important;
@@ -2799,41 +2806,38 @@ document.getElementById('radar').addEventListener('click', function(e){
       box-shadow: 0 0 8px #fff300;
     }
   `;
-  document.head.appendChild(style);
+  document.head.appendChild(css);
 
-  // === 2) Reemplazo completo de repaintPlanesList ===
+  // --- Función para renderizar aviones en cuadrícula ---
   window.repaintPlanesList = function(){
     const list = document.getElementById('planeList');
     if (!list) return;
     list.innerHTML = '';
     st.planes.forEach(p=>{
-      const btn = document.createElement('button');
-      btn.textContent = p.name;
-      if (st.sel.includes(p.id)) btn.classList.add('selectedPlane');
-      btn.onclick = ()=>{
-        // Selección única (para maniobrar)
-        st.sel = [p.id];
-        // Refrescar todo
-        repaintPlanesList();
-        if (typeof repaintNav === 'function') repaintNav();
-        if (typeof repaintAlt === 'function') repaintAlt();
-        if (typeof repaintStudent === 'function') repaintStudent();
+      const b = document.createElement('button');
+      b.textContent = p.name;
+      if (st.sel.includes(p.id)) b.classList.add('selectedPlane');
+      b.onclick = ()=>{
+        st.sel = [p.id]; // selección única para maniobra
+        if (window.repaintPlanesList) repaintPlanesList();
+        if (window.repaintNav) repaintNav();
+        if (window.repaintAlt) repaintAlt();
+        if (window.repaintStudent) repaintStudent();
       };
-      list.appendChild(btn);
+      list.appendChild(b);
     });
   };
 
-  // === 3) Refrescar interfaz inicial ===
-  setTimeout(()=>{ 
-    if (typeof repaintPlanesList === 'function') repaintPlanesList(); 
-  }, 1000);
+  // Refrescar al iniciar
+  setTimeout(()=>{ if (window.repaintPlanesList) repaintPlanesList(); }, 800);
 })();
 </script>
-
+ 
   
 </body>
 </html>
 by wallace
+
 
 
 
