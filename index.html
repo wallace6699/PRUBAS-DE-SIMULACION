@@ -2755,101 +2755,12 @@ document.getElementById('radar').addEventListener('click', function(e){
     };
     reader.readAsText(file);
   });
-})();
-
-  
+})(); 
 <script>
-/* === PARCHE FINAL: cuadritos pequeños 6xN — rompe herencia de estilos === */
-(function(){
-  const css = document.createElement('style');
-  css.textContent = `
-    /* Rompe herencia de flex o width 100% */
-    #planeList, #planeList * {
-      all: unset !important;
-    }
-
-    /* Contenedor: grilla forzada */
-    #planeList {
-      display: grid !important;
-      grid-template-columns: repeat(6, 44px) !important;
-      grid-auto-rows: 44px !important;
-      gap: 6px !important;
-      justify-content: start !important;
-      align-content: start !important;
-      padding: 6px !important;
-      margin: 0 !important;
-    }
-
-    /* Botones: cuadrados pequeños */
-    #planeList button {
-      all: unset !important;
-      display: block !important;
-      width: 44px !important;
-      height: 44px !important;
-      line-height: 44px !important;
-      font-size: 11px !important;
-      text-align: center !important;
-      border-radius: 6px !important;
-      border: 1px solid #2a6 !important;
-      background: #0e2b17 !important;
-      color: #c8ffc8 !important;
-      box-sizing: border-box !important;
-      cursor: pointer !important;
-      transition: transform .12s ease, background .12s ease !important;
-    }
-
-    #planeList button:hover {
-      transform: scale(1.06);
-      background: #1a5c32 !important;
-    }
-
-    #planeList button.selectedPlane {
-      background: #ffd700 !important;
-      color: #000 !important;
-      border-color: #fff300 !important;
-      box-shadow: 0 0 8px #fff300 !important;
-    }
-  `;
-  document.head.appendChild(css);
-
-  function ensureSel(){ if(!Array.isArray(st.sel)) st.sel=[]; }
-
-  function renderPlaneGrid(){
-    const list=document.getElementById('planeList');
-    if(!list) return;
-    ensureSel();
-    list.innerHTML='';
-
-    (st.planes||[]).forEach(p=>{
-      const b=document.createElement('button');
-      b.textContent=p.name||p.id;
-      if(st.sel.includes(p.id)) b.classList.add('selectedPlane');
-      b.onclick=()=>{
-        ensureSel();
-        if(st.sel.includes(p.id)){
-          st.sel=st.sel.filter(x=>x!==p.id);
-        }else{
-          st.sel=[p.id];
-        }
-        renderPlaneGrid();
-        if(window.repaintNav) repaintNav();
-        if(window.repaintAlt) repaintAlt();
-        if(window.repaintStudent) repaintStudent();
-      };
-      list.appendChild(b);
-    });
-  }
-
-  window.repaintPlanesList=function(){ renderPlaneGrid(); };
-
-  setTimeout(()=>renderPlaneGrid(),300);
-})();
-</script>
-
-  
 </body>
 </html>
 by wallace
+
 
 
 
