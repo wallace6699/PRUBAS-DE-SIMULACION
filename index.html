@@ -420,43 +420,6 @@ canvas#radar {
     📄 Ver / Imprimir Informe Parcial
   </button>
 
-  
-  
-
-  
-  <div style="margin-left:20px; position:relative;">
-    <select id="roomSelect" class="btn mini" style="background:#0e2b17;color:#eaffea;border:1px solid #2a6;border-radius:6px;">
-      <option value="alpha">Sala Alpha</option>
-      <option value="bravo">Sala Bravo</option>
-      <option value="charlie">Sala Charlie</option>
-      <option value="delta">Sala Delta</option>
-    </select>
-    <span id="roomLabel" style="margin-left:12px;font-size:13px;color:#b6f3b6;">Usted está en la sala Alpha</span>
-  </div>
-  <script>
-    function setRoomFromHash(){
-      const h = (location.hash || '#alpha').replace(/^#/, '').trim();
-      const sel = document.getElementById('roomSelect');
-      const label = document.getElementById('roomLabel');
-      if(sel && label){
-        sel.value = h || 'alpha';
-        label.textContent = 'Usted está en la sala ' + sel.options[sel.selectedIndex].text.split(' ')[1];
-      }
-    }
-    function changeRoom(){
-      const sel = document.getElementById('roomSelect');
-      const val = sel.value;
-      const base = location.origin + location.pathname;
-      location.href = base + '#' + val;
-      location.reload();
-    }
-    document.addEventListener('DOMContentLoaded', ()=>{
-      const sel = document.getElementById('roomSelect');
-      if(sel){ sel.addEventListener('change', changeRoom); }
-      setRoomFromHash();
-    });
-  </script>
-
   <span id="stateChip" class="pill">Pausada</span>
   <span id="timer" class="timer"></span>
 </header>
@@ -790,22 +753,38 @@ const timerEl=$('#timer'),stateChip=$('#stateChip'),fpsEl=$('#fps'),simStateEl=$
 function tickTimer(){const now=new Date();const s=String(now.getSeconds()).padStart(2,'0');const m=String(now.getMinutes()).padStart(2,'0');const h=String(now.getHours()).padStart(2,'0');const d=String(now.getDate()).padStart(2,'0');const mo=String(now.getMonth()+1).padStart(2,'0');const y=now.getFullYear();timerEl.textContent=`${d}-${mo}-${y} ${h}:${m}:${s}`;}
 setInterval(tickTimer,1000);tickTimer();
 
-/* ===== Zoom ultra preciso y extendido de rueda de mouse (suave) ===== */
-const MIN_Z = 0.02, MAX_Z = 15; // más alcance de acercamiento
+/* ===== Zoom ultra preciso centrado en el puntero ===== */
+const MIN_Z = 0.02, MAX_Z = 15; // límites de zoom
 cvs.addEventListener('wheel', e => {
   e.preventDefault();
 
-  // Base muy fina (más cerca a 1 => más suave)
-  const BASE = 1.01;
-
-  // Normaliza deltaY y calcula un factor exponencial suave:
-  // deltaY < 0 => f > 1 (acerca), deltaY > 0 => f < 1 (aleja)
+  const BASE = 1.01; // suavidad base
   const dy = Math.max(-240, Math.min(240, e.deltaY || 0));
-  const f = Math.pow(BASE, -dy / 100);
+  const f = Math.pow(BASE, -dy / 100); // factor de escala suave
 
-  // Aplica y limita
-  zoom = Math.min(MAX_Z, Math.max(MIN_Z, zoom * f));
+  const newZoom = Math.min(MAX_Z, Math.max(MIN_Z, zoom * f));
+
+  // === Mantener el punto bajo el mouse fijo ===
+  const rect = cvs.getBoundingClientRect();
+  const mx = e.clientX - rect.left;
+  const my = e.clientY - rect.top;
+
+  // Coordenadas del mouse en espacio del mundo antes del zoom
+  const worldX = (mx - CX - offX) / (zoom * PX_PER_NM);
+  const worldY = (my - CY - offY) / (zoom * PX_PER_NM);
+
+  // Cambiar el zoom
+  zoom = newZoom;
+
+  // Recalcular offset para que ese punto se mantenga en pantalla
+  const newScreenX = worldX * zoom * PX_PER_NM + CX + offX;
+  const newScreenY = worldY * zoom * PX_PER_NM + CY + offY;
+
+  offX -= (newScreenX - mx);
+  offY -= (newScreenY - my);
+
 }, { passive: false });
+
 
   
 /* ===== Pan con botón derecho ===== */
@@ -1626,8 +1605,7 @@ $$('#pFormations button[data-form]').forEach(btn=>{
     const now = performance.now();
     if(now - lastSync < 200) return; // 5 veces por segundo
     lastSync = now;
-    // Local analog/digital sync disabled
-//window._SETCA_SYNC && window._SETCA_SYNC.push();
+    window._SETCA_SYNC && window._SETCA_SYNC.push();
   }
 
   // Conectar con los botones
@@ -1653,8 +1631,7 @@ $$('#pFormations button[data-form]').forEach(btn=>{
     const now = performance.now();
     if(now - _lastSync < 100) return;
     _lastSync = now;
-    // Local analog/digital sync disabled
-//window._SETCA_SYNC && window._SETCA_SYNC.push();
+    window._SETCA_SYNC && window._SETCA_SYNC.push();
   }
   // Hook to existing controls if present
   ['#addFighter','#addCom','#delLast','#pause','#start','#uMetric','#uImperial'].forEach(id=>{
@@ -1757,19 +1734,77 @@ $$('#pFormations button[data-form]').forEach(btn=>{
     setInterval(()=>{ overlay.style.display = (st.modoAlumno && st.radarFailNet) ? 'flex' : 'none'; }, 200);
   }catch(e){ console.warn('Falla Radar overlay patch:', e); }
 
-// ===== Pinch-zoom táctil nativo (2 dedos) =====
-(function(){ const cvs = document.getElementById('radar'); if(!cvs) return; let pinch = null; const MIN_Z = 0.02, MAX_Z = 15; function dist(e){ const dx = e.touches[0].clientX - e.touches[1].clientX; const dy = e.touches[0].clientY - e.touches[1].clientY; return Math.hypot(dx, dy); } cvs.addEventListener('touchstart', (e)=>{ if(e.touches.length === 2){ e.preventDefault(); pinch = {d0: dist(e), z0: zoom}; } }, {passive:false}); cvs.addEventListener('touchmove', (e)=>{ if(pinch && e.touches.length === 2){ e.preventDefault(); const scale = dist(e) / pinch.d0; zoom = Math.min(MAX_Z, Math.max(MIN_Z, pinch.z0 * scale)); } }, {passive:false}); cvs.addEventListener('touchend', ()=>{ pinch = null; }, {passive:true}); })();
+  // ===== Pinch-zoom táctil nativo centrado en el punto medio =====
+(function(){
+  const cvs = document.getElementById('radar');
+  if(!cvs) return;
 
-  // interpolación suave entre el zoom actual y el objetivo
-  function animate(){
-    // cuanto más pequeño el factor (0.08), más suave
-    smoothZoom += (targetZoom - smoothZoom) * 0.08;
-    zoom = smoothZoom; // actualiza la variable global usada por el radar
-    requestAnimationFrame(animate);
+  let pinch = null;
+  const MIN_Z = 0.02, MAX_Z = 15;
+
+  function dist(e){
+    const dx = e.touches[0].clientX - e.touches[1].clientX;
+    const dy = e.touches[0].clientY - e.touches[1].clientY;
+    return Math.hypot(dx, dy);
   }
-  animate();
+
+  function mid(e){
+    return {
+      x: (e.touches[0].clientX + e.touches[1].clientX) / 2,
+      y: (e.touches[0].clientY + e.touches[1].clientY) / 2
+    };
+  }
+
+  cvs.addEventListener('touchstart', (e)=>{
+    if(e.touches.length === 2){
+      e.preventDefault();
+      const m = mid(e);
+      const rect = cvs.getBoundingClientRect();
+
+      // Centro inicial del gesto en coordenadas del mundo
+      const mx = m.x - rect.left;
+      const my = m.y - rect.top;
+      const worldX = (mx - CX - offX) / (zoom * PX_PER_NM);
+      const worldY = (my - CY - offY) / (zoom * PX_PER_NM);
+
+      pinch = {
+        d0: dist(e),
+        z0: zoom,
+        worldX,
+        worldY,
+        screenX: mx,
+        screenY: my
+      };
+    }
+  }, {passive:false});
+
+  cvs.addEventListener('touchmove', (e)=>{
+    if(pinch && e.touches.length === 2){
+      e.preventDefault();
+      const scale = dist(e) / pinch.d0;
+      const newZoom = Math.min(MAX_Z, Math.max(MIN_Z, pinch.z0 * scale));
+
+      // Mantiene el punto medio fijo durante el zoom
+      const m = mid(e);
+      const rect = cvs.getBoundingClientRect();
+      const mx = m.x - rect.left;
+      const my = m.y - rect.top;
+
+      const newScreenX = pinch.worldX * newZoom * PX_PER_NM + CX + offX;
+      const newScreenY = pinch.worldY * newZoom * PX_PER_NM + CY + offY;
+
+      offX -= (newScreenX - mx);
+      offY -= (newScreenY - my);
+
+      zoom = newZoom;
+    }
+  }, {passive:false});
+
+  cvs.addEventListener('touchend', ()=>{
+    pinch = null;
+  }, {passive:true});
 })();
-  
+
   // Missile sync: call scheduleSync after launch
   try{
     const origLaunch = window.launch;
@@ -2659,6 +2694,71 @@ document.getElementById('radar').addEventListener('click', function(e){
 })();
 </script>
 
+<script>
+/* === PATCH: Exportar / Importar Formaciones === */
+(function(){
+  // Crear botones
+  const panel = document.querySelector('#pFormations .panel-body');
+  if(!panel) return;
+  const row = document.createElement('div');
+  row.className = 'row';
+  row.innerHTML = `
+    <button id="exportFormBtn" class="btn mini focusable">💾 Exportar</button>
+    <button id="importFormBtn" class="btn mini focusable">📂 Cargar</button>
+    <input type="file" id="formFileInput" accept=".json" style="display:none">
+  `;
+  panel.appendChild(row);
+
+  // === EXPORTAR ===
+  document.getElementById('exportFormBtn').onclick = ()=>{
+    if(!window.st || !Array.isArray(st.planes) || st.planes.length===0){
+      alert('No hay formaciones para exportar.');
+      return;
+    }
+    const data = {
+      version: 'SETCA-Form-1.0',
+      timestamp: new Date().toISOString(),
+      planes: st.planes,
+      roles: st.roles
+    };
+    const blob = new Blob([JSON.stringify(data,null,2)], {type:'application/json'});
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = `formaciones_${new Date().toISOString().replace(/[:.]/g,'-')}.json`;
+    a.click();
+  };
+
+  // === IMPORTAR ===
+  document.getElementById('importFormBtn').onclick = ()=>{
+    document.getElementById('formFileInput').click();
+  };
+
+  document.getElementById('formFileInput').addEventListener('change', (e)=>{
+    const file = e.target.files[0];
+    if(!file) return;
+    const reader = new FileReader();
+    reader.onload = (ev)=>{
+      try{
+        const data = JSON.parse(ev.target.result);
+        if(!data.planes) throw new Error('Archivo inválido');
+        // Limpia los actuales y carga los nuevos
+        st.planes = data.planes;
+        st.roles = data.roles || {};
+        repaintPlanesList && repaintPlanesList();
+        repaintNav && repaintNav();
+        repaintAlt && repaintAlt();
+        repaintPairs && repaintPairs();
+        alert('Formaciones cargadas correctamente.');
+      }catch(err){
+        alert('Error al cargar el archivo: '+err.message);
+      }
+    };
+    reader.readAsText(file);
+  });
+})();
+</script>
+
+  
 </body>
 </html>
 by wallace
