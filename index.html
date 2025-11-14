@@ -50,7 +50,12 @@ document.getElementById('cancelDelete').onclick = ()=>{
     return h || "sala-default";
   }
   const ROOM_ID = getRoomId();
-  const stateRef = ref(db, `rooms/${ROOM_ID}/state`);
+// expose
+globalThis.SETCA_ROOM_ID=ROOM_ID;
+globalThis.SETCA_DB=db;
+globalThis.SETCA_REF=ref;
+globalThis.SETCA_ONVALUE=onValue;
+const stateRef = ref(db, `rooms/${ROOM_ID}/state`);
   let currentUID = null;
 
   signInAnonymously(auth).catch(console.error);
@@ -68,7 +73,7 @@ document.getElementById('cancelDelete').onclick = ()=>{
       planes: local.planes,
       roles: local.roles,
       drawings: local.drawings,
-      // pairs: local.pairs, // disabled for local-only
+      // pairs: local.pairs,
       mode: local.mode,
       metric: local.metric,
       altUnit: local.altUnit,
@@ -86,7 +91,7 @@ document.getElementById('cancelDelete').onclick = ()=>{
       if (Array.isArray(v.planes)) st.planes = v.planes;
       else if (v.planes && typeof v.planes === "object") st.planes = Object.values(v.planes);
       if (v.roles) st.roles = v.roles;
-      // if (v.pairs) st.pairs = v.pairs; // disabled local-only
+      // if (v.pairs) st.pairs = v.pairs;
       if (v.drawings) st.drawings = v.drawings;
       if (v.mode) st.mode = v.mode;if (typeof v.metric === "boolean") st.metric = v.metric;
       if (v.altUnit) st.altUnit = v.altUnit;
@@ -163,7 +168,7 @@ const app = initializeApp(firebaseConfig);
       planes: local.planes,
       roles: local.roles,
       drawings: local.drawings,
-      // pairs: local.pairs, // disabled for local-only
+      // pairs: local.pairs,
       mode: local.mode,
       metric: local.metric,
       altUnit: local.altUnit,
@@ -2861,16 +2866,20 @@ document.getElementById('radar').addEventListener('click', function(e){
 </style>
 <div id="connBox">Conectados: 1</div>
 <script>
-const connBox = document.getElementById('connBox');
-const ROOM = ROOM_ID || 'sala-default';
-const presRef2 = ref(db, `rooms/${ROOM}/presence`);
-onValue(presRef2, snap=>{
-  const val = snap.val() || {};
-  const count = Object.keys(val).length;
-  connBox.textContent = `Conectados: ${count}`;
-});
+function startPresenceCounter(){
+  if(!globalThis.SETCA_DB){
+    return setTimeout(startPresenceCounter,300);
+  }
+  const ROOM=globalThis.SETCA_ROOM_ID;
+  const pres=globalThis.SETCA_REF(globalThis.SETCA_DB,`rooms/${ROOM}/presence`);
+  globalThis.SETCA_ONVALUE(pres,snap=>{
+    const v=snap.val()||{};
+    document.getElementById('connBox').textContent='Conectados: '+Object.keys(v).length;
+  });
+}
+startPresenceCounter();
 </script>
 
 </body>
 </html>
-B Y     W   A   L   L   A   C   E
+B Y                                                           //                              W   A   L   L   A   C   E
