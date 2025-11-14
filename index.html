@@ -1,4 +1,4 @@
-ESTE SIMULADOR SE ENCUENTRA EN TRABAJO / FASE DE PRUEBA - PUEDEN OCURRIR ERRORES DURANTE EL FUNCIONAMIENTO 
+ESTE SIMULADOR SE ENCUENTRA EN FASE DE PRUEBA - PUEDEN OCURRIR ERRORES DURANTE EL FUNCIONAMIENTO 
 <!DOCTYPE html>
 <html lang="es">
 <head>
@@ -7,8 +7,6 @@ ESTE SIMULADOR SE ENCUENTRA EN TRABAJO / FASE DE PRUEBA - PUEDEN OCURRIR ERRORES
 <title>SETCA</title>
 <link rel="preconnect" href="https://cdn.jsdelivr.net" crossorigin>
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js">
-
-
 
 // delLast old handler removed
 document.getElementById('confirmDelete').onclick = ()=>{
@@ -70,7 +68,7 @@ document.getElementById('cancelDelete').onclick = ()=>{
       planes: local.planes,
       roles: local.roles,
       drawings: local.drawings,
-      pairs: local.pairs,
+      // pairs: local.pairs, // disabled for local-only
       mode: local.mode,
       metric: local.metric,
       altUnit: local.altUnit,
@@ -88,7 +86,7 @@ document.getElementById('cancelDelete').onclick = ()=>{
       if (Array.isArray(v.planes)) st.planes = v.planes;
       else if (v.planes && typeof v.planes === "object") st.planes = Object.values(v.planes);
       if (v.roles) st.roles = v.roles;
-      if (v.pairs) st.pairs = v.pairs;
+      // if (v.pairs) st.pairs = v.pairs; // disabled local-only
       if (v.drawings) st.drawings = v.drawings;
       if (v.mode) st.mode = v.mode;if (typeof v.metric === "boolean") st.metric = v.metric;
       if (v.altUnit) st.altUnit = v.altUnit;
@@ -165,7 +163,7 @@ const app = initializeApp(firebaseConfig);
       planes: local.planes,
       roles: local.roles,
       drawings: local.drawings,
-      pairs: local.pairs,
+      // pairs: local.pairs, // disabled for local-only
       mode: local.mode,
       metric: local.metric,
       altUnit: local.altUnit,
@@ -1007,7 +1005,7 @@ let draggingPlane=null,draggingDrawing=null,dragStart=null;
 cvs.addEventListener('mousedown',e=>{
   if(e.button!==0 || !e.altKey) return;
   const r=cvs.getBoundingClientRect();const wx=toWorld(e.clientX-r.left,e.clientY-r.top).x;const wy=toWorld(e.clientX-r.left,e.clientY-r.top).y;
-  const hit=pickShape(wx,wy); if(hit){st.selectedDrawing=hit;draggingDrawing=st.drawings.find(d=>d.id===hit);dragStart={x:e.clientX,y:e.clientY};return;}
+  const hit=null; // ALT: solo mover aeronaves, no dibujos if(hit){st.selectedDrawing=hit;draggingDrawing=st.drawings.find(d=>d.id===hit);dragStart={x:e.clientX,y:e.clientY};return;}
   let best=null,bd=1e9;st.planes.forEach(p=>{const d=Math.hypot(wx-p.x,wy-p.y);if(d<15/zoom && d<bd){bd=d;best=p;}});
   if(best){draggingPlane=best;dragStart={x:e.clientX,y:e.clientY};}
 });
@@ -2687,191 +2685,192 @@ document.getElementById('radar').addEventListener('click', function(e){
     cvs.width = w;
     cvs.height = w;
   }
-  <script>
-window.addEventListener('resize', fitRadar);
-window.addEventListener('orientationchange', fitRadar);
-document.addEventListener('DOMContentLoaded', fitRadar);
-setTimeout(fitRadar, 150);
-</script>
-
-<script>
-/* === PATCH: Exportar / Importar Formaciones (corregido: se monta cuando el DOM está listo y el panel exista) === */
-(function(){
-  function montarExportImport(){
-    const panel = document.querySelector('#pFormations .panel-body');
-    if(!panel){ requestAnimationFrame(montarExportImport); return; }
-
-    if(document.getElementById('exportFormBtn')) return; // evitar duplicados
-    const row = document.createElement('div');
-    row.className = 'row';
-    row.innerHTML = `
-      <button id="exportFormBtn" class="btn mini focusable">💾 Exportar</button>
-      <button id="importFormBtn" class="btn mini focusable">📂 Cargar</button>
-      <input type="file" id="formFileInput" accept=".json" style="display:none">
-    `;
-    panel.appendChild(row);
-
-    // === EXPORTAR ===
-    document.getElementById('exportFormBtn').onclick = ()=>{
-      if(!window.st || !Array.isArray(st.planes) || st.planes.length===0){
-        alert('No hay formaciones para exportar.');
-        return;
-      }
-      const data = {
-        version: 'SETCA-Form-1.0',
-        timestamp: new Date().toISOString(),
-        planes: st.planes,
-        roles: st.roles
-      };
-      const blob = new Blob([JSON.stringify(data,null,2)], {type:'application/json'});
-      const a = document.createElement('a');
-      a.href = URL.createObjectURL(blob);
-      a.download = `formaciones_${new Date().toISOString().replace(/[:.]/g,'-')}.json`;
-      document.body.appendChild(a);
-      a.click();
-      URL.revokeObjectURL(a.href);
-      a.remove();
-    };
-
-    // === IMPORTAR ===
-    document.getElementById('importFormBtn').onclick = ()=>{
-      document.getElementById('formFileInput').click();
-    };
-
-    document.getElementById('formFileInput').addEventListener('change', (e)=>{
-      const file = e.target.files[0];
-      if(!file) return;
-      const reader = new FileReader();
-      reader.onload = (ev)=>{
-        try{
-          const data = JSON.parse(ev.target.result);
-          if(!data.planes) throw new Error('Archivo inválido');
-          st.planes = data.planes;
-          st.roles = data.roles || {};
-          repaintPlanesList && repaintPlanesList();
-          repaintNav && repaintNav();
-          repaintAlt && repaintAlt();
-          repaintPairs && repaintPairs();
-          alert('Formaciones cargadas correctamente.');
-        }catch(err){
-          alert('Error al cargar el archivo: '+err.message);
-        }
-      };
-      reader.readAsText(file);
-    });
-  }
-
-  if(document.readyState === 'loading'){
-    document.addEventListener('DOMContentLoaded', montarExportImport);
-  } else {
-    montarExportImport();
-  }
+  window.addEventListener('resize', fitRadar);
+  window.addEventListener('orientationchange', fitRadar);
+  document.addEventListener('DOMContentLoaded', fitRadar);
+  setTimeout(fitRadar, 150);
 })();
 </script>
 
-<!-- === PARCHE: Botones de aviones + botón Etiqueta (CSS aplicado con !important) === -->
+<script>
+/* === PATCH: Exportar / Importar Formaciones === */
+(function(){
+  // Crear botones
+  const panel = document.querySelector('#pFormations .panel-body');
+  if(!panel) return;
+  const row = document.createElement('div');
+  row.className = 'row';
+  row.innerHTML = `
+    <button id="exportFormBtn" class="btn mini focusable">💾 Exportar</button>
+    <button id="importFormBtn" class="btn mini focusable">📂 Cargar</button>
+    <input type="file" id="formFileInput" accept=".json" style="display:none">
+  `;
+  panel.appendChild(row);
+
+  // === EXPORTAR ===
+  document.getElementById('exportFormBtn').onclick = ()=>{
+    if(!window.st || !Array.isArray(st.planes) || st.planes.length===0){
+      alert('No hay formaciones para exportar.');
+      return;
+    }
+    const data = {
+      version: 'SETCA-Form-1.0',
+      timestamp: new Date().toISOString(),
+      planes: st.planes,
+      roles: st.roles,
+      drawings: st.drawings
+    };
+    const blob = new Blob([JSON.stringify(data,null,2)], {type:'application/json'});
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = `formaciones_${new Date().toISOString().replace(/[:.]/g,'-')}.json`;
+    a.click();
+  };
+
+  // === IMPORTAR ===
+  document.getElementById('importFormBtn').onclick = ()=>{
+    document.getElementById('formFileInput').click();
+  };
+
+  document.getElementById('formFileInput').addEventListener('change', (e)=>{
+    const file = e.target.files[0];
+    if(!file) return;
+    const reader = new FileReader();
+    reader.onload = (ev)=>{
+      try{
+        const data = JSON.parse(ev.target.result);
+        if(!data.planes) throw new Error('Archivo inválido');
+        // Limpia los actuales y carga los nuevos
+        st.planes = data.planes;
+        st.roles = data.roles || {};
+        st.drawings = data.drawings || [];
+        repaintPlanesList && repaintPlanesList();
+        repaintNav && repaintNav();
+        repaintAlt && repaintAlt();
+        repaintPairs && repaintPairs();
+        alert('Formaciones cargadas correctamente.');
+      }catch(err){
+        alert('Error al cargar el archivo: '+err.message);
+      }
+    };
+    reader.readAsText(file);
+  });
+})();
+</script>
+<!-- === PARCHE: Botones de aviones más pequeños + selección amarilla === -->
 <style>
-  #planeList{
-    display:grid !important;
-    grid-template-columns:repeat(6,38px) !important;
-    grid-auto-rows:38px !important;
-    gap:5px !important;
-    justify-content:start !important;
-    align-content:start !important;
-    padding:4px !important;
-  }
-  #planeList button{
-    width:38px !important;
-    height:38px !important;
-    font-size:10px !important;
-    line-height:38px !important;
-    padding:0 !important;
-    margin:0 !important;
-    text-align:center !important;
-    border-radius:6px !important;
-    border:1px solid #2a6 !important;
-    background:#0e2b17 !important;
-    color:var(--txt) !important;
+  /* Cuadros más pequeños (para que entren más en pantalla) */
+  #planeList {
+    display: grid !important;
+    grid-template-columns: repeat(7, 34px) !important; /* 6 por fila */
+    grid-auto-rows: 34px !important;
+    gap: 5px !important;
+    justify-content: start !important;
+    align-content: start !important;
+    padding: 4px !important;
   }
 
-  #tagControlWrap{
-    display:flex; gap:8px; align-items:center; justify-content:center; margin-bottom:6px;
+  /* Estilo base de los botones (cuadros) */
+  #planeList button {
+    width: 34px !important;
+    height: 34px !important;
+    font-size: 9px !important;
+    line-height: 34px !important;
+    padding: 0 !important;
+    margin: 0 !important;
+    text-align: center !important;
+    border-radius: 6px !important;
+    border: 1px solid #2a6 !important;
+    background: #0e2b17 !important;
+    color: var(--txt) !important;
+    transition: background 0.2s, border-color 0.2s;
+    cursor: pointer !important;
   }
-  #tagNudge{
-    background:#102a18; border:1px solid #2a6; color:var(--txt);
-    border-radius:6px; padding:4px 10px; font-size:12px; cursor:pointer;
+
+  /* Cuando un botón esté seleccionado */
+  #planeList button.active {
+    background: #ffe066 !important; /* Amarillo */
+    border-color: #ffd700 !important;
+    color: #000 !important;
   }
-  #tagNudge:hover{ background:#164f2b; }
-  #tagPos{
-    font:12px monospace; color:var(--mut); padding:2px 6px; border:1px solid #2a6; border-radius:6px; background:#0a110b;
+
+  /* Controles del botón "Etiqueta" (mantengo igual) */
+  #tagControlWrap {
+    display: flex;
+    gap: 8px;
+    align-items: center;
+    justify-content: center;
+    margin-bottom: 6px;
+  }
+
+  #tagNudge {
+    background: #102a18;
+    border: 1px solid #2a6;
+    color: var(--txt);
+    border-radius: 6px;
+    padding: 4px 10px;
+    font-size: 12px;
+    cursor: pointer;
+  }
+
+  #tagNudge:hover {
+    background: #164f2b;
+  }
+
+  #tagPos {
+    font: 12px monospace;
+    color: var(--mut);
+    padding: 2px 6px;
+    border: 1px solid #2a6;
+    border-radius: 6px;
+    background: #0a110b;
   }
 </style>
 
 <script>
-/* === PARCHE: Botón "Etiqueta" + mover labels (corregido: espera a que exista <header> y drawPlane) === */
+/* === Parche funcional de selección/deselección amarilla en botones === */
 (function(){
-  let tagOffsetX = 12, tagOffsetY = -6;
-  const STEP = 10;
-  const DIRS = ['→','↓','←','↑'];
-  let dirIdx = 0;
+  document.addEventListener('DOMContentLoaded', ()=>{
+    const lista = document.getElementById('planeList');
+    if(!lista) return;
 
-  function crearBoton(){
-    const hdr = document.querySelector('header');
-    if(!hdr){ requestAnimationFrame(crearBoton); return; }
-    if(document.getElementById('tagControlWrap')) return;
-    const box = document.createElement('div');
-    box.id = 'tagControlWrap';
-    box.innerHTML = `
-      <button id="tagNudge">Etiqueta</button>
-      <span id="tagPos">dir: ${DIRS[dirIdx]} • off: (${tagOffsetX}, ${tagOffsetY})</span>
-    `;
-    hdr.appendChild(box);
-
-    const btn = document.getElementById('tagNudge');
-    const pos = document.getElementById('tagPos');
-    btn.addEventListener('click', ()=>{
-      dirIdx = (dirIdx + 1) % DIRS.length;
-      switch(DIRS[dirIdx]){
-        case '→': tagOffsetX += STEP; break;
-        case '↓': tagOffsetY += STEP; break;
-        case '←': tagOffsetX -= STEP; break;
-        case '↑': tagOffsetY -= STEP; break;
-      }
-      pos.textContent = `dir: ${DIRS[dirIdx]} • off: (${tagOffsetX}, ${tagOffsetY})`;
+    lista.addEventListener('click', (ev)=>{
+      const btn = ev.target.closest('button');
+      if(!btn) return;
+      btn.classList.toggle('active'); // cambia entre normal y amarillo
     });
-  }
-
-  // Espera a que drawPlane esté definida y luego la parchea
-  function parchearDrawPlane(){
-    if(typeof window.drawPlane !== 'function'){ requestAnimationFrame(parchearDrawPlane); return; }
-    if(window.drawPlane._editado) return;
-
-    const original = window.drawPlane;
-    window.drawPlane = function(p){
-      // Dibujo base (lo que ya hacía tu función original)
-      original(p);
-
-      // Encima, re-dibujar SOLO las etiquetas con offset movible
-      const s = toScreen(p.x,p.y);
-      ctx.fillStyle='#eaffea';
-      ctx.font='12px monospace';
-      ctx.textAlign='left';
-      ctx.fillText(p.name, s.x+tagOffsetX, s.y+tagOffsetY);
-      ctx.fillText(`${p.alt|0} ft`, s.x+tagOffsetX, s.y+tagOffsetY+14);
-      ctx.fillText(`${(p.spd/1.852).toFixed(0)} kts`, s.x+tagOffsetX, s.y+tagOffsetY+28);
-      ctx.fillText(`${String(p.hdg|0).padStart(3,'0')}°`, s.x+tagOffsetX, s.y+tagOffsetY+42);
-    };
-    window.drawPlane._editado = true;
-  }
-
-  if(document.readyState === 'loading'){
-    document.addEventListener('DOMContentLoaded', ()=>{ crearBoton(); parchearDrawPlane(); });
-  }else{
-    crearBoton(); parchearDrawPlane();
-  }
+  });
 })();
 </script>
-<!-- === /PARCHE === -->
+<!-- === /PARCHE === -->  
+
+<style>
+#connBox{
+  position:fixed;
+  top:10px;
+  right:10px;
+  background:rgba(0,0,0,.55);
+  border:1px solid #2a6;
+  border-radius:6px;
+  padding:6px 10px;
+  font-family:monospace;
+  font-size:13px;
+  color:#aaffaa;
+  z-index:9999;
+}
+</style>
+<div id="connBox">Conectados: 1</div>
+<script>
+const connBox = document.getElementById('connBox');
+const ROOM = ROOM_ID || 'sala-default';
+const presRef2 = ref(db, `rooms/${ROOM}/presence`);
+onValue(presRef2, snap=>{
+  const val = snap.val() || {};
+  const count = Object.keys(val).length;
+  connBox.textContent = `Conectados: ${count}`;
+});
+</script>
 
 </body>
 </html>
+B Y     W   A   L   L   A   C   E
