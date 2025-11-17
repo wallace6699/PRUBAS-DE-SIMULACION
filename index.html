@@ -50,12 +50,7 @@ document.getElementById('cancelDelete').onclick = ()=>{
     return h || "sala-default";
   }
   const ROOM_ID = getRoomId();
-// expose
-globalThis.SETCA_ROOM_ID=ROOM_ID;
-globalThis.SETCA_DB=db;
-globalThis.SETCA_REF=ref;
-globalThis.SETCA_ONVALUE=onValue;
-const stateRef = ref(db, `rooms/${ROOM_ID}/state`);
+  const stateRef = ref(db, `rooms/${ROOM_ID}/state`);
   let currentUID = null;
 
   signInAnonymously(auth).catch(console.error);
@@ -73,7 +68,7 @@ const stateRef = ref(db, `rooms/${ROOM_ID}/state`);
       planes: local.planes,
       roles: local.roles,
       drawings: local.drawings,
-      // pairs: local.pairs,
+      pairs: local.pairs,
       mode: local.mode,
       metric: local.metric,
       altUnit: local.altUnit,
@@ -91,7 +86,7 @@ const stateRef = ref(db, `rooms/${ROOM_ID}/state`);
       if (Array.isArray(v.planes)) st.planes = v.planes;
       else if (v.planes && typeof v.planes === "object") st.planes = Object.values(v.planes);
       if (v.roles) st.roles = v.roles;
-      // if (v.pairs) st.pairs = v.pairs;
+      if (v.pairs) st.pairs = v.pairs;
       if (v.drawings) st.drawings = v.drawings;
       if (v.mode) st.mode = v.mode;if (typeof v.metric === "boolean") st.metric = v.metric;
       if (v.altUnit) st.altUnit = v.altUnit;
@@ -168,7 +163,7 @@ const app = initializeApp(firebaseConfig);
       planes: local.planes,
       roles: local.roles,
       drawings: local.drawings,
-      // pairs: local.pairs,
+      pairs: local.pairs,
       mode: local.mode,
       metric: local.metric,
       altUnit: local.altUnit,
@@ -413,6 +408,7 @@ canvas#radar {
 
   <button id="start" style="display:none" class="btn focusable">▶️ Iniciar</button>
   <button id="pause" class="btn focusable">⏸️ Pausar</button>
+  <button id="toggleLabels" class="btn focusable">🧷 Etiquetas</button>
   <button id="reportBtn" class="btn focusable">📝 Reporte Táctico</button>
 
   <button
@@ -446,7 +442,6 @@ canvas#radar {
           <button id="toggleSweep" class="btn mini focusable">Haz Radar</button>
         </div>
         <div class="row">
-          <button id="modeAnalog" class="btn mini focusable">Analógico</button>
           <button id="modeDigital" class="btn mini focusable">Digital</button>
           <span class="chip">Pred</span>
           <button id="predMinus" class="btn mini focusable">-</button>
@@ -575,6 +570,8 @@ const INIT_PLANES=[
   {name:'R3',id:'R3',x:0,y:-40,hdg:90, spd:500, tgtSpd:500, alt:22000, tgtAlt:22000, turn:2.5,tgtHdg:90, ghosts:[], lastDet:0, fail:{comms:false,eng:'none',cab:'none',gear:false,bird:false}, kills:0, fuel:100, jamming:false},
 ];
 let st={
+  showLabels:true,
+  labelMode:0,
   planes: [],
   roles: {R1:'Friend',R2:'Bandit',R3:'Friend'},
   sel: [],
@@ -839,11 +836,12 @@ function updatePlane(p,dt){
 }
 function drawPlane(p){
   const s=toScreen(p.x,p.y);
-  if(st.mode==='analog'){
+  // Modo 2: solo puntos naranjas de contactos detectados por el radar
+  if(st.labelMode===2){
     const age=performance.now()-p.lastDet;
     if(age<CONTACT_PERSIST_MS){ // 5 s
       const fade=1-Math.min(1,age/CONTACT_PERSIST_MS);
-      ctx.fillStyle=`rgba(179,0,255,${0.2+0.8*fade})`;
+      ctx.fillStyle=`rgba(255,153,0,${0.2+0.8*fade})`;
       ctx.beginPath();ctx.arc(s.x,s.y,5,0,2*Math.PI);ctx.fill();
     }
     return;
@@ -855,11 +853,18 @@ function drawPlane(p){
   const lr=(p.hdg-90)*Math.PI/180;ctx.beginPath();ctx.moveTo(s.x,s.y);ctx.lineTo(s.x+Math.cos(lr)*25,s.y+Math.sin(lr)*25);ctx.strokeStyle='#35ff79';ctx.lineWidth=1;ctx.stroke();
   if(st.predMin>0){const t=st.predMin*60,nmps=(p.spd/NM2KM)/3600;const d=nmps*t;const ex=p.x+Math.cos(lr)*d,ey=p.y+Math.sin(lr)*d;const se=toScreen(ex,ey);ctx.setLineDash([5,5]);ctx.strokeStyle='#2ee74f';ctx.beginPath();ctx.moveTo(s.x,s.y);ctx.lineTo(se.x,se.y);ctx.stroke();ctx.setLineDash([]);}
   ctx.fillStyle='#eaffea';ctx.font='12px monospace';ctx.textAlign='left';
-  ctx.fillText(p.name,s.x+12,s.y-6);
-  if(st.metric){ctx.fillText(`${(p.alt*FT2M|0)} m`,s.x+12,s.y+8);ctx.fillText(`${p.spd.toFixed(0)} km/h`,s.x+12,s.y+22);
-      ctx.fillText(`${String(p.hdg|0).padStart(3,'0')}°`,s.x+12,s.y+36);}
-  else {ctx.fillText(`${p.alt|0} ft`,s.x+12,s.y+8);ctx.fillText(`${(p.spd*KMH2KTS).toFixed(0)} kts`,s.x+12,s.y+22);
-      ctx.fillText(`${String(p.hdg|0).padStart(3,'0')}°`,s.x+12,s.y+36);}
+  if(st.showLabels){
+    ctx.fillText(p.name,s.x+12,s.y-6);
+    if(st.metric){
+      ctx.fillText(`${(p.alt*FT2M|0)} m`,s.x+12,s.y+8);
+      ctx.fillText(`${p.spd.toFixed(0)} km/h`,s.x+12,s.y+22);
+      ctx.fillText(`${String(p.hdg|0).padStart(3,'0')}°`,s.x+12,s.y+36);
+    } else {
+      ctx.fillText(`${p.alt|0} ft`,s.x+12,s.y+8);
+      ctx.fillText(`${(p.spd*KMH2KTS).toFixed(0)} kts`,s.x+12,s.y+22);
+      ctx.fillText(`${String(p.hdg|0).padStart(3,'0')}°`,s.x+12,s.y+36);
+    }
+  }
   if(st.sel.includes(p.id)){ctx.strokeStyle='#ffe066';ctx.strokeRect(s.x-10,s.y-10,20,20);}
   if(p.jamming){
     const t=(performance.now()%1000)/1000;const r=10+8*Math.sin(t*2*Math.PI);
@@ -881,7 +886,7 @@ function drawGrid(){
 }
 function drawSweep(dt){
   if(st.radarFail) return;
-  if(st.mode==='analog'||st.sweep){
+  if(st.sweep){
     st.sweepAng=(st.sweepAng+(st.paused?0:st.sweepSpd*dt))%360;
     const rad=Math.max(W,H)*2;const a=st.sweepAng*Math.PI/180;
     ctx.save();ctx.translate(CX+offX,CY+offY);ctx.rotate(a);
@@ -1520,6 +1525,31 @@ $('#pause').onclick = ()=>{
   if(chip) chip.textContent = st.paused ? 'Pausada' : 'En curso';
   if(simst) simst.textContent = st.paused ? 'PAUSA' : 'RUN';
 };
+
+$('#toggleLabels').onclick = ()=>{
+  // 0 = etiquetas ON, 1 = sin etiquetas, 2 = solo puntos de contactos
+  st.labelMode = (st.labelMode + 1) % 3;
+  const btn = document.getElementById('toggleLabels');
+  if(st.labelMode===0){
+    st.showLabels = true;
+    if(btn){
+      btn.textContent = '🧷 Etiquetas';
+      btn.style.opacity = '1';
+    }
+  } else if(st.labelMode===1){
+    st.showLabels = false;
+    if(btn){
+      btn.textContent = '🧷 Sin etiquetas';
+      btn.style.opacity = '0.6';
+    }
+  } else {
+    st.showLabels = false;
+    if(btn){
+      btn.textContent = '📍 Puntos radar';
+      btn.style.opacity = '1';
+    }
+  }
+};
 $('#reportBtn').onclick=()=>{ $('#report').style.display='block'; renderReport(); };
 $('#closeReport').onclick=()=>{ $('#report').style.display='none'; };
 $('#uMetric').onclick=()=>{ st.metric=true; repaintNav(); repaintStudent(); repaintAlt(); flash($('#uMetric')); };
@@ -1528,7 +1558,6 @@ $('#windSpd').onchange=e=>{ st.windKmh = st.metric?(+e.target.value||0):((+e.tar
 $('#windDir').onchange=e=>{ st.windDir = +e.target.value||0; flash(e.target); };
 $('#failRadar').onclick=e=>{ st.radarFail=!st.radarFail; e.currentTarget.classList.toggle('hi',st.radarFail); flash(e.currentTarget); };
 $('#toggleSweep').onclick=e=>{ st.sweep=!st.sweep; e.currentTarget.classList.toggle('hi',st.sweep); flash(e.currentTarget); };
-$('#modeAnalog').onclick=()=>{ st.mode='analog'; flash($('#modeAnalog')); };
 $('#modeDigital').onclick=()=>{ st.mode='digital'; flash($('#modeDigital')); };
 $('#predPlus').onclick=()=>{ st.predMin=Math.min(60,st.predMin+1); $('#predVal').textContent=st.predMin; flash($('#predPlus')); };
 $('#predMinus').onclick=()=>{ st.predMin=Math.max(0,st.predMin-1); $('#predVal').textContent=st.predMin; flash($('#predMinus')); };
@@ -1684,6 +1713,19 @@ $$('#pFormations button[data-form]').forEach(btn=>{
       alumnoBtn.id = 'alumnoBtn';
       alumnoBtn.textContent = '🎯 Alumno';
       hdr.appendChild(alumnoBtn);
+      // Botón de Salas
+      let salasBtn = document.getElementById('salasBtn');
+      if(!salasBtn){
+        salasBtn = document.createElement('button');
+        salasBtn.id = 'salasBtn';
+        salasBtn.textContent = '📡 Salas';
+        hdr.appendChild(salasBtn);
+      }
+      salasBtn.addEventListener('click', ()=>{
+        if(window.setcaRooms && typeof window.setcaRooms.open==='function'){
+          window.setcaRooms.open();
+        }
+      });
     }
     const toHide = ['#pCmd','#pPlanes','#pNav','#pFormations','#pDraw'];
     alumnoBtn.addEventListener('click', ()=>{
@@ -2849,37 +2891,238 @@ document.getElementById('radar').addEventListener('click', function(e){
 </script>
 <!-- === /PARCHE === -->  
 
+
+<!-- ROOMS MODAL -->
+<div id="roomsModal" class="rooms-hidden">
+  <div class="rooms-backdrop"></div>
+  <div class="rooms-dialog">
+    <h3>Salas de entrenamiento</h3>
+    <div id="roomsCurrent" style="margin-bottom:6px;font-size:13px;"></div>
+    <div class="rooms-row" style="margin-bottom:8px;">
+      <label for="roomsUsername" style="margin-right:4px;">Tu indicativo:</label>
+      <input id="roomsUsername" placeholder="Ej: Oso" style="width:130px;">
+      <button id="roomsSaveName">Guardar</button>
+    </div>
+    <div id="roomsList"></div>
+    <div style="text-align:right;margin-top:8px;">
+      <button id="roomsClose">Cerrar</button>
+    </div>
+  </div>
+</div>
+
 <style>
-#connBox{
+#roomsModal{
   position:fixed;
-  top:10px;
-  right:10px;
-  background:rgba(0,0,0,.55);
-  border:1px solid #2a6;
-  border-radius:6px;
-  padding:6px 10px;
-  font-family:monospace;
-  font-size:13px;
-  color:#aaffaa;
+  inset:0;
+  display:none;
+  align-items:center;
+  justify-content:center;
   z-index:9999;
 }
+#roomsModal.rooms-open{ display:flex; }
+#roomsModal .rooms-backdrop{
+  position:absolute;
+  inset:0;
+  background:rgba(0,0,0,0.6);
+}
+#roomsModal .rooms-dialog{
+  position:relative;
+  background:#111;
+  color:#eee;
+  padding:10px 14px;
+  border-radius:8px;
+  min-width:260px;
+  max-width:420px;
+  max-height:80vh;
+  overflow:auto;
+  box-shadow:0 0 10px #000;
+  font-family:monospace;
+  font-size:13px;
+}
+#roomsList .room-row{
+  padding:4px 0;
+  border-bottom:1px solid #333;
+  cursor:pointer;
+}
+#roomsList .room-row:hover{
+  background:#181818;
+}
+#roomsList .room-name{
+  font-weight:bold;
+}
+#roomsList small{
+  display:block;
+  font-size:11px;
+  color:#8f8;
+}
 </style>
-<div id="connBox">Conectados: 1</div>
-<script>
-function startPresenceCounter(){
-  if(!globalThis.SETCA_DB){
-    return setTimeout(startPresenceCounter,300);
+
+<script type="module">
+import { getDatabase, ref, onValue, set } from "https://www.gstatic.com/firebasejs/10.12.3/firebase-database.js";
+import { getAuth, signInAnonymously, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/10.12.3/firebase-auth.js";
+
+const db = getDatabase();
+const auth = getAuth();
+
+const salas = ["alfa","bravo","charlie","delta","eco","foxtrot","golf","hotel","india","juliet"];
+
+function getRoomId(){
+  const h = (location.hash || "").replace(/^#/,"").trim();
+  return h || "sala-default";
+}
+let currentRoom = getRoomId();
+
+let username = localStorage.getItem("setca_username") || "sinNombre";
+
+const modal = document.getElementById("roomsModal");
+const roomsCurrent = document.getElementById("roomsCurrent");
+const roomsList = document.getElementById("roomsList");
+const usernameInput = document.getElementById("roomsUsername");
+const saveNameBtn = document.getElementById("roomsSaveName");
+const closeBtn = document.getElementById("roomsClose");
+
+if(usernameInput){ usernameInput.value = username; }
+
+function refreshCurrent(){
+  if(roomsCurrent){
+    roomsCurrent.textContent = "Sala actual: " + String(currentRoom||"sala-default").toUpperCase();
   }
-  const ROOM=globalThis.SETCA_ROOM_ID;
-  const pres=globalThis.SETCA_REF(globalThis.SETCA_DB,`rooms/${ROOM}/presence`);
-  globalThis.SETCA_ONVALUE(pres,snap=>{
-    const v=snap.val()||{};
-    document.getElementById('connBox').textContent='Conectados: '+Object.keys(v).length;
+  const salasBtn = document.getElementById("salasBtn");
+  if(salasBtn){
+    salasBtn.title = "Sala actual: " + String(currentRoom||"sala-default").toUpperCase();
+  }
+}
+
+function openModal(){
+  if(!modal) return;
+  refreshCurrent();
+  modal.classList.add("rooms-open");
+}
+function closeModal(){
+  if(!modal) return;
+  modal.classList.remove("rooms-open");
+}
+
+if(closeBtn){
+  closeBtn.addEventListener("click", closeModal);
+}
+if(modal){
+  modal.addEventListener("click", (e)=>{
+    if(e.target === modal || (e.target && e.target.classList && e.target.classList.contains("rooms-backdrop"))){
+      closeModal();
+    }
   });
 }
-startPresenceCounter();
+if(saveNameBtn){
+  saveNameBtn.addEventListener("click", ()=>{
+    username = usernameInput.value || "sinNombre";
+    localStorage.setItem("setca_username", username);
+  });
+}
+
+// Exponer API global para que el botón de Salas lo pueda abrir
+window.setcaRooms = {
+  open: openModal,
+  close: closeModal
+};
+
+let uid = null;
+signInAnonymously(auth).catch(console.error);
+onAuthStateChanged(auth, u=>{
+  if(!u) return;
+  uid = u.uid;
+  startPresence();
+});
+
+function startPresence(){
+  // Escuchar lista de usuarios por sala
+  salas.forEach(sala=>{
+    const uRef = ref(db, `rooms/${sala}/users`);
+    onValue(uRef, snap=>{
+      const val = snap.val() || {};
+      const entries = Object.values(val);
+      const names = entries.map(v => (v && v.name) ? v.name : "sinNombre");
+      const count = names.length;
+      const rowId = "room-row-" + sala;
+      let row = document.getElementById(rowId);
+      if(!row){
+        row = document.createElement("div");
+        row.id = rowId;
+        row.className = "room-row";
+        row.onclick = ()=>chooseRoom(sala);
+        roomsList.appendChild(row);
+      }
+      const label = sala.toUpperCase() + ": " + count + " conectados";
+      const namesHtml = names.length ? `<small>${names.map(n => `${n} <button class='kick-user' data-user='${n}' style='font-size:10px;'>-</button>`).join('<br>')}</small>` : "";
+      row.innerHTML = `<span class="room-name">${label}</span>${namesHtml}`;
+    });
+  });
+
+  // Heartbeat de presencia en la sala actual
+  setInterval(()=>{
+    if(!uid) return;
+    const nameToUse = (usernameInput && usernameInput.value) ? usernameInput.value : username;
+    username = nameToUse || username;
+    localStorage.setItem("setca_username", username);
+    const meRef = ref(db, `rooms/${currentRoom}/users/${uid}`);
+    set(meRef, { name: username, t: Date.now() });
+  }, 5000);
+
+  refreshCurrent();
+}
+
+
+// EXIT BUTTON HANDLER
+document.addEventListener("click", (e)=>{
+  if(e.target && e.target.classList.contains("rooms-exit")){
+    const sala = e.target.getAttribute("data-sala");
+    if(uid && sala){
+      const userRef = ref(db, `rooms/${sala}/users/${uid}`);
+      set(userRef, null);
+    }
+    e.stopPropagation();
+  }
+});
+
+// Kick user handler
+document.addEventListener("click", (e)=>{
+  if(e.target && e.target.classList.contains("kick-user")){
+    const name = e.target.getAttribute("data-user");
+    // remove from current room
+    salas.forEach(s=>{
+      const uRef = ref(db, `rooms/${s}/users`);
+      onValue(uRef, snap=>{
+        const val = snap.val()||{};
+        for(const uid2 in val){
+          if(val[uid2].name === name){
+            // move to default
+            set(ref(db, `rooms/${s}/users/${uid2}`), null);
+            set(ref(db, `rooms/sala-default/users/${uid2}`), {name:name, t:Date.now()});
+          }
+        }
+      }, {onlyOnce:true});
+    });
+    e.stopPropagation();
+  }
+});
+function chooseRoom(sala){
+  const prevRoom = currentRoom;
+if(sala === currentRoom) return;
+  currentRoom = sala;
+  // cambiar hash para que TODO el simulador use esa sala
+  location.hash = "#" + sala;
+  
+  // REMOVE USER FROM PREVIOUS ROOM
+  if(uid){
+    const oldRef = ref(db, `rooms/${prevRoom}/users/${uid}`);
+    set(oldRef, null);
+  }
+  location.reload();
+
+}
 </script>
+
 
 </body>
 </html>
-B Y                                                           //                              W   A   L   L   A   C   E
+B Y     W   A   L   L   A   C   E // v1
