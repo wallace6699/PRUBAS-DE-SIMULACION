@@ -1,4 +1,4 @@
-ESTE SIMULADOR SE ENCUENTRA EN FASE DE PRUEBA - PUEDEN OCURRIR ERRORES DURANTE EL FUNCIONAMIENTO / v2.1
+ESTE SIMULADOR SE ENCUENTRA EN FASE DE PRUEBA - PUEDEN OCURRIR ERRORES DURANTE EL FUNCIONAMIENTO 
 <!DOCTYPE html>
 <html lang="es">
 <head>
@@ -67,8 +67,7 @@ document.getElementById('cancelDelete').onclick = ()=>{
     const payload = {
       planes: local.planes,
       roles: local.roles,
-      drawings: local.drawings,
-      pairs: local.pairs,
+      drawings: local.drawings, 
       mode: local.mode,
       metric: local.metric,
       altUnit: local.altUnit,
@@ -85,8 +84,7 @@ document.getElementById('cancelDelete').onclick = ()=>{
     try {
       if (Array.isArray(v.planes)) st.planes = v.planes;
       else if (v.planes && typeof v.planes === "object") st.planes = Object.values(v.planes);
-      if (v.roles) st.roles = v.roles;
-      if (v.pairs) st.pairs = v.pairs;
+      if (v.roles) st.roles = v.roles; 
       if (v.drawings) st.drawings = v.drawings;
       if (v.mode) st.mode = v.mode;if (typeof v.metric === "boolean") st.metric = v.metric;
       if (v.altUnit) st.altUnit = v.altUnit;
@@ -162,8 +160,7 @@ const app = initializeApp(firebaseConfig);
     const payload = {
       planes: local.planes,
       roles: local.roles,
-      drawings: local.drawings,
-      pairs: local.pairs,
+      drawings: local.drawings, 
       mode: local.mode,
       metric: local.metric,
       altUnit: local.altUnit,
@@ -399,6 +396,8 @@ canvas#radar {
   color: #000000 !important;
 }
 
+
+#modeDigital { display:none !important; }
 </style>
 </head>
 <body>
