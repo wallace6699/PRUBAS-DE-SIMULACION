@@ -68,7 +68,6 @@ document.getElementById('cancelDelete').onclick = ()=>{
       planes: local.planes,
       roles: local.roles,
       drawings: local.drawings,
-      pairs: local.pairs,
       mode: local.mode,
       metric: local.metric,
       altUnit: local.altUnit,
@@ -86,7 +85,7 @@ document.getElementById('cancelDelete').onclick = ()=>{
       if (Array.isArray(v.planes)) st.planes = v.planes;
       else if (v.planes && typeof v.planes === "object") st.planes = Object.values(v.planes);
       if (v.roles) st.roles = v.roles;
-      // if (v.pairs) st.pairs = v.pairs;   // ← DESACTIVADO PARA QUE NO BAJE NADA DE PAREOS
+      if (v.pairs) st.pairs = v.pairs;
       if (v.drawings) st.drawings = v.drawings;
       if (v.mode) st.mode = v.mode;if (typeof v.metric === "boolean") st.metric = v.metric;
       if (v.altUnit) st.altUnit = v.altUnit;
@@ -163,7 +162,6 @@ const app = initializeApp(firebaseConfig);
       planes: local.planes,
       roles: local.roles,
       drawings: local.drawings,
-      // pairs: local.pairs,   // ← DESACTIVADO PARA QUE NO SUBA NADA DEL PAREO
       mode: local.mode,
       metric: local.metric,
       altUnit: local.altUnit,
@@ -442,7 +440,7 @@ canvas#radar {
           <button id="toggleSweep" class="btn mini focusable">Haz Radar</button>
         </div>
         <div class="row">
-          <span class="chip">Pred</span>
+           <span class="chip">Pred</span>
           <button id="predMinus" class="btn mini focusable">-</button>
           <span id="predVal" class="pill">5</span>
           <button id="predPlus" class="btn mini focusable">+</button>
