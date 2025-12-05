@@ -1,3 +1,4 @@
+ESTE SIMULADOR SE ENCUENTRA EN FASE DE PRUEBA - PUEDEN OCURRIR ERRORES DURANTE EL FUNCIONAMIENTO 
 <!DOCTYPE html>
 <html lang="es">
 <head>
@@ -1498,7 +1499,7 @@ function repaintNav(){
     wrap.appendChild(c);
     const focusables=c.querySelectorAll('.focusable, input, select, button');
     focusables.forEach(el=>{el.addEventListener('focus',()=>el.classList.add('focusGlow'));el.addEventListener('blur',()=>el.classList.remove('focusGlow'));el.addEventListener('click',()=>flash(el));});
-    c.querySelector('#nm-'+id).onchange=e=>p.name=e.target.value;
+    c.querySelector('#nm-'+id).onchange=e=>{p.name=e.target.value; repaintAlt();};
     
      // --- BOTONES DE RUMBO ---
 c.querySelectorAll('button[data-hdg]').forEach(btn=>{
@@ -3254,6 +3255,3 @@ if(sala === currentRoom) return;
 </body>
 </html>
 B Y     W   A   L   L   A   C   E // v2.1
-este simulador se encuentra en fase de prueba
-
-
