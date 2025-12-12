@@ -1,4 +1,4 @@
-ESTE SIMULADOR SE ENCUENTRA EN FASE DE PRUEBA - PUEDEN OCURRIR ERRORES DURANTE EL FUNCIONAMIENTO 2.2
+ESTE SIMULADOR SE ENCUENTRA EN FASE DE PRUEBA - PUEDEN OCURRIR ERRORES DURANTE EL FUNCIONAMIENTO 
 <!DOCTYPE html>
 <html lang="es">
 <head>
@@ -3812,96 +3812,65 @@ document.querySelectorAll('#pCmdBody .btn').forEach(btn=>{
 
 
 <script>
-/* === LOCAL-ONLY DATABLOCK (copiado del enfoque de PAREO LOCAL) ===
-   - NO toca st.planes
-   - NO agrega campos al avión
-   - NO viaja a Firebase
-   - offsets viven SOLO en memoria local
-*/
+/* === HARD LOCAL LOCK: DataBlock NEVER syncs to Firebase === */
 (function(){
-  if(window.__LOCAL_DATABLOCK_DONE__) return;
-  window.__LOCAL_DATABLOCK_DONE__ = true;
+  if(window.__DATABLOCK_LOCAL_LOCK__) return;
+  window.__DATABLOCK_LOCAL_LOCK__ = true;
 
-  // Mapa local: idAvion -> {dx,dy} EN PIXELES DE PANTALLA
-  const localDB = window.__localDataBlock = Object.create(null);
+  // Mark fields as local-only
+  function stripLocal(p){
+    if(!p) return;
+    delete p.tagDx;
+    delete p.tagDy;
+    delete p.dataBlock;
+  }
 
-  // --- Helper: id estable ---
-  function pid(p){ return p.id || p.name || p.callsign || p._id; }
+  // Patch common sync functions if present
+  const syncFns = ['scheduleSync','pushState','syncNow','sendState','saveState'];
+  syncFns.forEach(fn=>{
+    if(typeof window[fn]==='function'){
+      const orig = window[fn];
+      window[fn] = function(state){
+        try{
+          if(state && state.planes){
+            state.planes.forEach(stripLocal);
+          }
+        }catch(e){}
+        return orig.apply(this, arguments);
+      };
+    }
+  });
 
-  // --- Hook de DIBUJO: sobreescribe SOLO la lectura de offsets ---
-  // Guardamos referencias originales si existen
-  const _drawPlane = window.drawPlane;
-  if(typeof _drawPlane === 'function'){
-    window.drawPlane = function(p){
-      const k = pid(p);
-      const off = localDB[k];
-      // Proveer offsets SOLO para el frame, sin mutar el avión
-      const _tagDx = p.tagDx, _tagDy = p.tagDy;
-      if(off){
-        p.tagDx = off.dx;
-        p.tagDy = off.dy;
-      }
+  // Patch Firebase direct writes (defensive)
+  if(window.firebase && firebase.database){
+    const db = firebase.database();
+    const origSet = db.ref().set;
+    const origUpdate = db.ref().update;
+
+    db.ref().set = function(data){
       try{
-        return _drawPlane.apply(this, arguments);
-      } finally {
-        // Restaurar para evitar que nada lo sincronice
-        p.tagDx = _tagDx;
-        p.tagDy = _tagDy;
-      }
+        if(data && data.planes){
+          data.planes.forEach(stripLocal);
+        }
+      }catch(e){}
+      return origSet.apply(this, arguments);
+    };
+
+    db.ref().update = function(data){
+      try{
+        if(data && data.planes){
+          data.planes.forEach(stripLocal);
+        }
+      }catch(e){}
+      return origUpdate.apply(this, arguments);
     };
   }
 
-  // --- Z + drag (window-level) que escribe SOLO en localDB ---
-  let zDown=false, dragging=null, last=null;
-
-  window.addEventListener('keydown',e=>{ if(e.key==='z'||e.key==='Z') zDown=true; }, true);
-  window.addEventListener('keyup',e=>{ if(e.key==='z'||e.key==='Z') zDown=false; }, true);
-  window.addEventListener('blur',()=>{ zDown=false; dragging=null; }, true);
-
-  function screenToWorld(mx,my){
-    // usa las funciones reales si existen; fallback a píxeles
-    if(typeof window.toWorld === 'function') return window.toWorld(mx,my);
-    return {x:mx, y:my};
-  }
-
-  function hitBox(p, mx, my){
-    // hitbox del recuadro ya dibujado (coincide con tu implementación)
-    const k = pid(p);
-    const off = localDB[k] || {dx:12, dy:-6};
-    const s = (typeof window.toScreen==='function') ? window.toScreen(p.x,p.y) : {x:p.x,y:p.y};
-    const x = s.x + off.dx, y = s.y + off.dy;
-    return (mx>x && mx<x+96 && my>y-18 && my<y+46);
-  }
-
-  window.addEventListener('mousedown',e=>{
-    if(e.button!==0 || !zDown || !window.st) return;
-    const mx=e.clientX, my=e.clientY;
-    for(const p of (window.st.planes||[])){
-      if(hitBox(p,mx,my)){
-        dragging = p;
-        last = {x:mx,y:my};
-        e.preventDefault(); e.stopPropagation();
-        break;
-      }
-    }
-  }, true);
-
-  window.addEventListener('mousemove',e=>{
-    if(!dragging) return;
-    const dx=e.clientX-last.x, dy=e.clientY-last.y;
-    const k = pid(dragging);
-    const cur = localDB[k] || {dx:12, dy:-6};
-    localDB[k] = {dx: cur.dx + dx, dy: cur.dy + dy};
-    last = {x:e.clientX,y:e.clientY};
-    e.preventDefault(); e.stopPropagation();
-  }, true);
-
-  window.addEventListener('mouseup',()=>{ dragging=null; last=null; }, true);
 })();
 </script>
 
 </body>
 </html>
-B Y     W   A   L   L   A   C   E 
+B Y     W   A   L   L   A   C   E // v2.1
 
 
