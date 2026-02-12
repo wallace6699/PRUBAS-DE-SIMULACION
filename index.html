@@ -1,4 +1,4 @@
-ESTE SIMULADOR SE ENCUENTRA EN FASE DE PRUEBA - PUEDEN OCURRIR ERRORES DURANTE EL FUNCIONAMIENTO 2.1 
+ESTE SIMULADOR SE ENCUENTRA EN FASE DE PRUEBA - PUEDEN OCURRIR ERRORES DURANTE EL FUNCIONAMIENTO 2.2 
 <!DOCTYPE html>
 <html lang="es">
 <head>
@@ -3967,7 +3967,7 @@ document.querySelectorAll('#pCmdBody .btn').forEach(btn=>{
 })();
 </script>
 <script>
-/* === MÓDULO B — IA / Combate (LIMITE 4 + CONO 30°) === */
+/* === MÓDULO B — IA / Combate (4 MISILES + CONO 30° + 10s ENTRE LANZAMIENTOS) === */
 (function(){
   if (!window.st) return;
 
@@ -3996,7 +3996,8 @@ document.querySelectorAll('#pCmdBody .btn').forEach(btn=>{
 
         if (!p.aiAggressor) {
           p.aiAggressor = true;
-          p._aiShotsFired = 0; // TOTAL permanente
+          p._aiShotsFired = 0;
+          p._aiLastShotTime = 0;
           p._aiLocked = null;
         }
       }
@@ -4024,12 +4025,18 @@ document.querySelectorAll('#pCmdBody .btn').forEach(btn=>{
       if (isAggressor) {
 
         shooter._aiShotsFired = shooter._aiShotsFired || 0;
+        shooter._aiLastShotTime = shooter._aiLastShotTime || 0;
 
-        if (shooter._aiShotsFired >= 4) {
-          return; // 🔒 nunca más dispara
-        }
+        const now = performance.now();
+
+        // 🔒 Máximo 4 total
+        if (shooter._aiShotsFired >= 4) return;
+
+        // ⏱ Separación mínima 10 segundos
+        if (now - shooter._aiLastShotTime < 10000) return;
 
         shooter._aiShotsFired++;
+        shooter._aiLastShotTime = now;
       }
 
       return originalLaunch(srcId, tgtId, type);
@@ -4051,8 +4058,6 @@ document.querySelectorAll('#pCmdBody .btn').forEach(btn=>{
 
     if (!friends.length) return;
 
-    const now = performance.now();
-
     aggressors.forEach(b => {
 
       let tgt = null;
@@ -4068,7 +4073,7 @@ document.querySelectorAll('#pCmdBody .btn').forEach(btn=>{
 
       if (!tgt) return;
 
-      // Registrar enganche una sola vez
+      // Registrar enganche una vez
       if (!b._aiLocked) {
         b._aiLocked = tgt.id;
         if (window.logEvent) {
@@ -4087,19 +4092,12 @@ document.querySelectorAll('#pCmdBody .btn').forEach(btn=>{
       // Verificar cono frontal ±30°
       const currentHdg = b.hdg || b.tgtHdg || 0;
       const offAngle = angleDiff(currentHdg, brgToTgt);
+      if (offAngle > 30) return;
 
-      if (offAngle > 30) return; // fuera del cono → no dispara
-
-      b._aiNextShot = b._aiNextShot || 0;
-      if (now < b._aiNextShot) return;
-
-      // Condiciones de disparo por distancia
+      // Condición de rango
       if (dBest <= 40 && dBest >= 6) {
-
         const type = (dBest > 20) ? 'AMRAAM' : 'R77';
         window.launch(b.id, tgt.id, type);
-
-        b._aiNextShot = now + 15000;
       }
 
     });
@@ -4113,6 +4111,7 @@ document.querySelectorAll('#pCmdBody .btn').forEach(btn=>{
 </body>
 </html>
 B Y     W   A   L   L   A   C   E // v2.1
+
 
 
 
