@@ -1,4 +1,4 @@
-ESTE SIMULADOR SE ENCUENTRA EN FASE DE PRUEBA - PUEDEN OCURRIR ERRORES DURANTE EL FUNCIONAMIENTO 2.0 
+ESTE SIMULADOR SE ENCUENTRA EN FASE DE PRUEBA - PUEDEN OCURRIR ERRORES DURANTE EL FUNCIONAMIENTO 2.1 
 <!DOCTYPE html>
 <html lang="es">
 <head>
@@ -3967,7 +3967,7 @@ document.querySelectorAll('#pCmdBody .btn').forEach(btn=>{
 })();
 </script>
 <script>
-/* === MÓDULO B — IA / Combate (CORREGIDO DEFINITIVO) === */
+/* === MÓDULO B — IA / Combate (LIMITE 4 + CONO 30°) === */
 (function(){
   if (!window.st) return;
 
@@ -3981,6 +3981,10 @@ document.querySelectorAll('#pCmdBody .btn').forEach(btn=>{
     return Math.hypot((a.x || 0) - (b.x || 0), (a.y || 0) - (b.y || 0));
   }
 
+  function angleDiff(a, b){
+    return Math.abs(((a - b + 540) % 360) - 180);
+  }
+
   /* =========================================================
      MARCAR AGRESORES
   ========================================================= */
@@ -3992,7 +3996,7 @@ document.querySelectorAll('#pCmdBody .btn').forEach(btn=>{
 
         if (!p.aiAggressor) {
           p.aiAggressor = true;
-          p._aiShotsFired = 0;     // contador TOTAL permanente
+          p._aiShotsFired = 0; // TOTAL permanente
           p._aiLocked = null;
         }
       }
@@ -4000,63 +4004,36 @@ document.querySelectorAll('#pCmdBody .btn').forEach(btn=>{
   }
 
   /* =========================================================
-     MEJORAR MISIL SIN ROMPER FÍSICA ORIGINAL
+     BLOQUEO ABSOLUTO EN launch()
   ========================================================= */
 
-  if (typeof window.updateMissiles === 'function' && !window._patchedMissiles) {
+  if (!window._aggressorLaunchLimited && typeof window.launch === 'function') {
 
-    window._patchedMissiles = true;
-    const originalUpdate = window.updateMissiles;
+    window._aggressorLaunchLimited = true;
+    const originalLaunch = window.launch;
 
-    window.updateMissiles = function(dt){
+    window.launch = function(srcId, tgtId, type){
 
-      const windX = st.windX || 0;
-      const windY = st.windY || 0;
+      const shooter = (st.planes || []).find(p => p.id === srcId);
+      if (!shooter) return;
 
-      // Ejecutar primero la física original del sistema
-      originalUpdate(dt);
+      const isAggressor =
+        shooter.name &&
+        shooter.name.toUpperCase().includes("AGRESOR");
 
-      // Luego aplicar degradación de energía y viento
-      (st.missiles || []).forEach(m => {
+      if (isAggressor) {
 
-        if (m._baseSpd == null) {
-          m._baseSpd = m.spd || 2500;
-          m._energy = 1;
+        shooter._aiShotsFired = shooter._aiShotsFired || 0;
+
+        if (shooter._aiShotsFired >= 4) {
+          return; // 🔒 nunca más dispara
         }
 
-        // pérdida progresiva por arrastre
-        m._energy = Math.max(0.2, m._energy - 0.01 * dt);
+        shooter._aiShotsFired++;
+      }
 
-        // reducir velocidad real progresivamente
-        m.spd = m._baseSpd * m._energy;
-
-        // aplicar viento REAL (deriva física)
-        m.x += windX * dt / 3600;
-        m.y += windY * dt / 3600;
-      });
+      return originalLaunch(srcId, tgtId, type);
     };
-  }
-
-  /* =========================================================
-     LANZAMIENTO CON LIMITE REAL 4 TOTAL
-  ========================================================= */
-
-  function aiLaunch(shooter, target, kind){
-
-    if (!window.launch) return;
-
-    // BLINDAJE ABSOLUTO
-    if (!shooter.aiAggressor) return;
-    if (shooter._aiShotsFired >= 4) return;
-
-    const type = (kind === 'FOX3') ? 'AMRAAM' : 'R77';
-    launch(shooter.id, target.id, type);
-
-    shooter._aiShotsFired++;
-
-    if (typeof window.logEvent === 'function') {
-      logEvent(`AGRESOR ${shooter.name} lanzó misil (${shooter._aiShotsFired}/4)`);
-    }
   }
 
   /* =========================================================
@@ -4070,15 +4047,14 @@ document.querySelectorAll('#pCmdBody .btn').forEach(btn=>{
 
     const planes = st.planes || [];
     const friends = planes.filter(p => st.roles[p.id] === 'Friend');
-    const bandits = planes.filter(p => p.aiAggressor);
+    const aggressors = planes.filter(p => p.aiAggressor);
 
     if (!friends.length) return;
 
     const now = performance.now();
 
-    bandits.forEach(b => {
+    aggressors.forEach(b => {
 
-      // Buscar objetivo más cercano
       let tgt = null;
       let dBest = 9999;
 
@@ -4092,7 +4068,7 @@ document.querySelectorAll('#pCmdBody .btn').forEach(btn=>{
 
       if (!tgt) return;
 
-      // Guardar enganche
+      // Registrar enganche una sola vez
       if (!b._aiLocked) {
         b._aiLocked = tgt.id;
         if (window.logEvent) {
@@ -4100,22 +4076,29 @@ document.querySelectorAll('#pCmdBody .btn').forEach(btn=>{
         }
       }
 
-      // Perseguir SIEMPRE incluso Winchester
-      b.tgtHdg = bearing(b, tgt);
+      // Persecución constante
+      const brgToTgt = bearing(b, tgt);
+      b.tgtHdg = brgToTgt;
       b.tgtSpd = Math.max((tgt.spd || 450) + 100, 550);
 
-      // Si ya disparó 4 → no dispara más nunca
-      if (b._aiShotsFired >= 4) return;
+      // Si ya disparó 4 → solo persigue
+      if ((b._aiShotsFired || 0) >= 4) return;
+
+      // Verificar cono frontal ±30°
+      const currentHdg = b.hdg || b.tgtHdg || 0;
+      const offAngle = angleDiff(currentHdg, brgToTgt);
+
+      if (offAngle > 30) return; // fuera del cono → no dispara
 
       b._aiNextShot = b._aiNextShot || 0;
       if (now < b._aiNextShot) return;
 
-      if (dBest < 40 && dBest > 20) {
-        aiLaunch(b, tgt, 'FOX3');
-        b._aiNextShot = now + 20000;
-      }
-      else if (dBest <= 20 && dBest >= 6) {
-        aiLaunch(b, tgt, 'FOX1');
+      // Condiciones de disparo por distancia
+      if (dBest <= 40 && dBest >= 6) {
+
+        const type = (dBest > 20) ? 'AMRAAM' : 'R77';
+        window.launch(b.id, tgt.id, type);
+
         b._aiNextShot = now + 15000;
       }
 
@@ -4130,6 +4113,7 @@ document.querySelectorAll('#pCmdBody .btn').forEach(btn=>{
 </body>
 </html>
 B Y     W   A   L   L   A   C   E // v2.1
+
 
 
 
