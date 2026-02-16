@@ -1,4 +1,4 @@
-ESTE SIMULADOR SE ENCUENTRA EN FASE DE PRUEBA - PUEDEN OCURRIR ERRORES DURANTE EL FUNCIONAMIENTO 2.3 
+ESTE SIMULADOR SE ENCUENTRA EN FASE DE PRUEBA - PUEDEN OCURRIR ERRORES DURANTE EL FUNCIONAMIENTO 2.3
 <!DOCTYPE html>
 <html lang="es">
 <head>
@@ -414,6 +414,1757 @@ canvas#radar {
 }
 
 </style>
+
+<!-- === PATCH v12: Compact UI + remove hold + move export/import + units in altitude === -->
+<style>
+/* Compact + ordered button grids */
+#pFormationsBody, #pDrawBody, #pAltBody, #pCmdBody { gap:6px; }
+#pFormationsBody .row, #pDrawBody .row, #pCmdBody .row { flex-wrap:wrap !important; gap:4px !important; }
+#pFormationsBody .btn.mini, #pDrawBody .btn.mini, #pAltBody .btn.mini, #pCmdBody .btn.mini {
+  padding:2px 6px !important;
+  font-size:11px !important;
+  min-width:auto !important;
+}
+/* Draw tools: make a compact grid-like row */
+#pDrawBody .row:first-child { justify-content:flex-start !important; }
+#pDrawBody .row:first-child .btn.mini { margin:0 !important; }
+/* Red delete button */
+#delDraw { background:#d92d20 !important; border-color:#d92d20 !important; color:#fff !important; }
+#delDraw:hover { filter:brightness(1.05); }
+/* Altitude list compact */
+#altList .row { gap:6px !important; }
+#altList .pill { max-width:110px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+#altList input { width:90px !important; }
+.altUnit { font-size:11px; opacity:.85; min-width:24px; text-align:left; }
+/* Center export/import inside Centro de Mando */
+#pCmdBody .cmdCenterRow { justify-content:center !important; gap:6px !important; }
+/* Make formations buttons more compact */
+#pFormationsBody .row { justify-content:flex-start !important; }
+/* Remove any leftover hold button spacing */
+</style>
+
+<script>
+(function(){
+  if(window.__APT_V12__) return;
+  window.__APT_V12__ = true;
+
+  const $=(s,r=document)=>r.querySelector(s);
+  const $$=(s,r=document)=>Array.from(r.querySelectorAll(s));
+
+  // 1) Remove HOLD button + disable hold tool if present
+  document.addEventListener('DOMContentLoaded', ()=>{
+    try{
+      ['btnToolHold'].forEach(id=>{
+        const el=document.getElementById(id);
+        if(el && el.parentElement) el.parentElement.removeChild(el);
+      });
+      // remove any tool buttons with data-tool="holdoval"
+      const pDraw=document.getElementById('pDraw');
+      if(pDraw){
+        $$('button[data-tool="holdoval"]', pDraw).forEach(b=>b.remove());
+      }
+      // If current tool is holdoval, reset
+      if(window.tool && tool.tool==='holdoval') tool.tool='none';
+    }catch(_){}
+  });
+
+  // 2) Remove "Aeropuerto" and "Seleccionar" from Draw tools (hard remove)
+  document.addEventListener('DOMContentLoaded', ()=>{
+    try{
+      const pDraw=document.getElementById('pDrawBody');
+      if(pDraw){
+        $$('button', pDraw).forEach(b=>{
+          const t=(b.textContent||'').trim().toLowerCase();
+          const dt=(b.getAttribute('data-tool')||'').toLowerCase();
+          if(t==='aeropuerto' || t==='seleccionar' || dt==='airport' || dt==='none'){
+            // Only remove the draw-tool airport/none buttons, not panel buttons elsewhere
+            b.remove();
+          }
+        });
+      }
+    }catch(_){}
+  });
+
+  // 3) Move Exportar/Cargar (exportFormBtn/importFormBtn) to Centro de Mando
+  document.addEventListener('DOMContentLoaded', ()=>{
+    try{
+      const cmdBody = document.getElementById('pCmdBody');
+      if(!cmdBody) return;
+
+      const exp = document.getElementById('exportFormBtn');
+      const imp = document.getElementById('importFormBtn');
+      if(!exp || !imp) return;
+
+      // Create center row if not exists
+      let row = document.getElementById('cmdFormRow');
+      if(!row){
+        row = document.createElement('div');
+        row.id='cmdFormRow';
+        row.className='row cmdCenterRow';
+        row.innerHTML = '<span class="chip">Formaciones</span>';
+        cmdBody.appendChild(row);
+      }
+      // Move buttons
+      row.appendChild(exp);
+      row.appendChild(imp);
+    }catch(_){}
+  });
+
+  // 4) Add units next to altitude inputs and keep live values
+  // Wrap repaintAlt to include unit label and show current altitude value each repaint (already repaints frequently)
+  if(typeof window.repaintAlt === 'function' && !window.__ALT_UNIT_V12__){
+    window.__ALT_UNIT_V12__ = true;
+    const orig = window.repaintAlt;
+    window.repaintAlt = function(){
+      orig();
+      try{
+        const useMetric = (window.st && (st.altUnit==='m' || st.metric));
+        const unit = useMetric ? 'm' : 'ft';
+        const list = document.getElementById('altList');
+        if(!list) return;
+        // each row: pill + input ; add unit span if missing
+        Array.from(list.querySelectorAll('.row')).forEach(r=>{
+          const inp = r.querySelector('input');
+          if(!inp) return;
+          let u = r.querySelector('.altUnit');
+          if(!u){
+            u = document.createElement('span');
+            u.className = 'altUnit';
+            r.appendChild(u);
+          }
+          u.textContent = unit;
+        });
+      }catch(_){}
+    };
+  }
+
+})();
+</script>
+<!-- === END PATCH v12 === -->
+
+
+<!-- === PATCH v13: RWY head selection + runway numbers at ends + local alt units + no airport delete from draw + layout polish === -->
+<style>
+/* Make tool/formations button areas use the full panel width, grid layout */
+#pDrawBody .row:first-child, #pFormationsBody .row:first-child {
+  display:grid !important;
+  grid-template-columns: repeat(auto-fit, minmax(92px, 1fr)) !important;
+  gap:6px !important;
+  width:100% !important;
+  align-items:stretch !important;
+}
+#pDrawBody .row:first-child .btn.mini, #pFormationsBody .row:first-child .btn.mini {
+  width:100% !important;
+  justify-content:center !important;
+}
+/* Alt panel more compact */
+#pAltBody .row { gap:4px !important; }
+#altList .row { gap:4px !important; padding:2px 0 !important; }
+#altList .pill { max-width:95px !important; }
+#altList input { width:80px !important; padding:2px 4px !important; font-size:11px !important; }
+.altUnit { min-width:18px !important; }
+/* Airports panel: compact selectors row */
+#pAirBody .row { gap:6px !important; }
+#aptSel { flex:1 !important; }
+</style>
+
+<script>
+(function(){
+  if(window.__APT_V13__) return;
+  window.__APT_V13__ = true;
+
+  const $=(s,r=document)=>r.querySelector(s);
+  const $$=(s,r=document)=>Array.from(r.querySelectorAll(s));
+  const KMH2KTS = 0.539957;
+  const FT_TO_M = 0.3048;
+
+  function norm360(h){ return ((+h)%360+360)%360; }
+  function pad2(n){ return String(n).padStart(2,'0'); }
+  function rwyNum(h){ const n=Math.round(norm360(h)/10)||36; return pad2(n); }
+  function pad3(n){ return String(Math.round(norm360(n))).padStart(3,'0'); }
+  function angToRad(d){ return d*Math.PI/180; }
+  function unitFromHdg(h){ const a=angToRad(h); return {x:Math.sin(a), y:-Math.cos(a)}; }
+  function dist(a,b){ return Math.hypot(a.x-b.x, a.y-b.y); }
+  function bearingDeg(from,to){
+    const dx=to.x-from.x, dy=to.y-from.y;
+    return (Math.atan2(dx, -dy)*180/Math.PI+360)%360;
+  }
+  function clamp(v,a,b){ return Math.max(a, Math.min(b,v)); }
+
+  function airports(){
+    return (window.st && Array.isArray(st.drawings)) ? st.drawings.filter(d=>d && d.type==='airport') : [];
+  }
+  function getAirport(id){ return airports().find(a=>a.id===id); }
+
+  // 1) Ensure Oval/Hold is removed (button + tool)
+  document.addEventListener('DOMContentLoaded', ()=>{
+    try{
+      ['btnToolHold','btnToolHoldoval','btnToolHoldOval'].forEach(id=>{
+        const el=document.getElementById(id);
+        if(el) el.remove();
+      });
+      const pDraw=document.getElementById('pDraw');
+      if(pDraw){
+        $$('button', pDraw).forEach(b=>{
+          const t=(b.textContent||'').toLowerCase();
+          const dt=(b.getAttribute('data-tool')||'').toLowerCase();
+          if(dt==='holdoval' || t.includes('óvalo') || t.includes('oval') || t.includes('hold')) b.remove();
+        });
+      }
+      if(window.tool && tool.tool==='holdoval') tool.tool='none';
+    }catch(_){}
+  });
+
+  // 2) Draw delete modal must NOT list/delete airports
+  function rebindDeleteDrawingModal(){
+    const btn = document.getElementById('delDraw');
+    const modal = document.getElementById('deleteDrawingModal');
+    const sel = document.getElementById('deleteDrawingSelect');
+    const ok = document.getElementById('confirmDeleteDrawing');
+    const cancel = document.getElementById('cancelDeleteDrawing');
+    if(!btn || !modal || !sel || !ok) return;
+
+    // Drop previous handlers by cloning
+    btn.replaceWith(btn.cloneNode(true));
+    const btn2 = document.getElementById('delDraw');
+    ok.replaceWith(ok.cloneNode(true));
+    const ok2 = document.getElementById('confirmDeleteDrawing');
+
+    function refreshList(){
+      sel.innerHTML='';
+      if(window.st && Array.isArray(st.drawings)){
+        st.drawings.forEach((d,i)=>{
+          if(!d) return;
+          if(d.type==='airport') return; // keep airports protected
+          const opt=document.createElement('option');
+          opt.value=String(i); // actual index
+          opt.textContent=(d.name || (d.type ? d.type.toUpperCase() : 'Gráfico') + ' ' + (i+1));
+          sel.appendChild(opt);
+        });
+      }
+    }
+
+    btn2.onclick = ()=>{ refreshList(); modal.style.display='flex'; };
+    ok2.onclick = ()=>{
+      const idx = parseInt(sel.value);
+      if(!isNaN(idx) && window.st && Array.isArray(st.drawings)){
+        const d = st.drawings[idx];
+        if(d && d.type==='airport'){
+          // protected
+        }else{
+          st.drawings.splice(idx,1);
+          if(typeof repaintNav==='function') repaintNav();
+          if(typeof repaintAlt==='function') repaintAlt();
+          if(typeof repaintPairs==='function') repaintPairs();
+          if(window._SETCA_SYNC && typeof window._SETCA_SYNC.push==='function'){ window._SETCA_SYNC.push(); }
+        }
+      }
+      modal.style.display='none';
+    };
+    if(cancel){
+      cancel.onclick = ()=>{ modal.style.display='none'; };
+    }
+  }
+
+  // 3) Add RWY head selector in Airports panel (choose which threshold to LAND)
+  function injectRwyHeadSelector(){
+    const body = document.getElementById('pAirBody');
+    const aptSel = document.getElementById('aptSel');
+    if(!body || !aptSel) return;
+    if(document.getElementById('rwyHeadSel')) return;
+
+    // Put selector on same row as airport select (next to delete button if present)
+    const firstRow = body.querySelector('.row');
+    if(!firstRow) return;
+
+    const sel = document.createElement('select');
+    sel.id = 'rwyHeadSel';
+    sel.className = 'ghost focusable';
+    sel.style.width = '120px';
+    firstRow.insertBefore(sel, firstRow.children[1] || null);
+
+    function rebuild(){
+      const apt = getAirport(aptSel.value);
+      sel.innerHTML='';
+      if(!apt) return;
+      const hdg = norm360(apt.hdg||0);
+      const r1 = apt.rwy || rwyNum(hdg);
+      const r2 = rwyNum(hdg+180);
+      const o1=document.createElement('option'); o1.value='NEAR'; o1.textContent=`RWY ${r1}`;
+      const o2=document.createElement('option'); o2.value='OPP';  o2.textContent=`RWY ${r2}`;
+      sel.appendChild(o1); sel.appendChild(o2);
+    }
+    aptSel.addEventListener('change', rebuild, true);
+    setTimeout(rebuild, 0);
+  }
+
+  // 4) Ensure runway numbers are drawn at BOTH runway ends (international style) without relying on old patch order
+  // We'll draw numbers again on top (small) at each threshold, aligned with runway heading.
+  function drawRwyNumbersTop(){
+    try{
+      if(!window.ctx || !window.st || typeof toScreen!=='function') return;
+      const z = window.zoom || 1;
+      const PX_PER_NM = window.PX_PER_NM || 20;
+      const apts = airports();
+      ctx.save();
+      ctx.font = "bold 12px monospace";
+      ctx.fillStyle = "rgba(255,255,255,0.75)";
+      ctx.textAlign = "center";
+      ctx.textBaseline = "middle";
+      apts.forEach(a=>{
+        const len = (a.lenNM||2.0);
+        const hdg = norm360(a.hdg||0);
+        const u = unitFromHdg(hdg);
+        const half=len/2;
+        const thr1 = {x:a.x-u.x*half, y:a.y-u.y*half, hdg:hdg};
+        const thr2 = {x:a.x+u.x*half, y:a.y+u.y*half, hdg:(hdg+180)%360};
+        const s1 = toScreen(thr1.x, thr1.y);
+        const s2 = toScreen(thr2.x, thr2.y);
+        const r1 = a.rwy || rwyNum(hdg);
+        const r2 = rwyNum(hdg+180);
+
+        // offset number slightly into runway (toward center)
+        const off = 18;
+        const uPx = {x:u.x*(off), y:u.y*(off)};
+        // end 1
+        ctx.save();
+        ctx.translate(s1.x + uPx.x, s1.y + uPx.y);
+        ctx.rotate(angToRad(hdg));
+        ctx.fillText(r1, 0, 0);
+        ctx.restore();
+        // end 2
+        ctx.save();
+        ctx.translate(s2.x - uPx.x, s2.y - uPx.y);
+        ctx.rotate(angToRad((hdg+180)%360));
+        ctx.fillText(r2, 0, 0);
+        ctx.restore();
+      });
+      ctx.restore();
+    }catch(_){}
+  }
+
+  if(typeof window.drawRadar==='function' && !window.__RWYNUM_V13__){
+    window.__RWYNUM_V13__ = true;
+    const orig = window.drawRadar;
+    window.drawRadar = function(){
+      orig();
+      drawRwyNumbersTop();
+    };
+  }
+
+  // 5) Landing must respect selected runway head (NEAR/OPP)
+  function runwayForSelection(apt, which){
+    const len = (apt.lenNM||2.0);
+    const baseHdg = norm360(apt.hdg||0);
+    const hdg = (which==='OPP') ? norm360(baseHdg+180) : baseHdg;
+    const u = unitFromHdg(hdg);
+    const half=len/2;
+    // For the selected head, threshold is "near" in that direction (approach toward +u)
+    const thr = {x: apt.x - u.x*half, y: apt.y - u.y*half, hdg: hdg, u:u};
+    // apron: right of runway mid relative to selected hdg
+    const right = unitFromHdg(norm360(hdg+90));
+    const apron = {x: apt.x + right.x*0.25 + u.x*0.15, y: apt.y + right.y*0.25 + u.y*0.15};
+    return {thr, hdg, u, apron};
+  }
+
+  function orderLandingSelected(pid, aptId){
+    const p=(st.planes||[]).find(x=>x.id===pid);
+    const apt=getAirport(aptId);
+    if(!p||!apt) return;
+
+    const which = document.getElementById('rwyHeadSel')?.value || 'NEAR';
+    const g = runwayForSelection(apt, which);
+
+    const ftPerNm3=318;
+    const finalNm = clamp(Math.max(8, (p.alt||12000)/ftPerNm3), 8, 14);
+    const iaf = {x: g.thr.x - g.u.x*finalNm, y: g.thr.y - g.u.y*finalNm};
+
+    p.ops = { kind:'landing_full_v13', aptId, phase:'vector_to_iaf', iaf, thr:g.thr, u:g.u, hdg:g.hdg, apron:g.apron };
+    p.opsTag='LAND';
+  }
+
+  function hookLandButton(){
+    const btn = document.getElementById('doLand');
+    if(!btn) return;
+    if(btn.dataset.v13bound==='1') return;
+    btn.dataset.v13bound='1';
+    btn.replaceWith(btn.cloneNode(true));
+    const b2 = document.getElementById('doLand');
+    b2.addEventListener('click', ()=>{
+      const pid = document.getElementById('planeSelOps')?.value;
+      const aid = document.getElementById('aptSel')?.value;
+      if(pid && aid) orderLandingSelected(pid, aid);
+    }, true);
+  }
+
+  // update loop for landing_full_v13 (same as v9 but uses thr/u/apron from selected head)
+  function hookLandingUpdate(){
+    if(typeof window.updatePlane!=='function' || window.__LAND_V13_UPD__) return;
+    window.__LAND_V13_UPD__=true;
+    const orig = window.updatePlane;
+    window.updatePlane = function(p, dt){
+      try{
+        if(p && p.ops && p.ops.kind==='landing_full_v13'){
+          const ops=p.ops;
+          const pos={x:p.x,y:p.y};
+          const dIaf=dist(pos, ops.iaf);
+          const dThr=dist(pos, ops.thr);
+
+          const v210=(210/ KMH2KTS), v170=(170/ KMH2KTS), v145=(145/ KMH2KTS), v30=(30/ KMH2KTS), taxi=(15/ KMH2KTS);
+          // Convert kts->kmh: kts / KMH2KTS
+          const V210=v210, V170=v170, V145=v145, V30=v30, TAXI=taxi;
+
+          if(ops.phase==='vector_to_iaf'){
+            p.tgtHdg=bearingDeg(pos, ops.iaf);
+            p.tgtSpd=V210;
+            p.tgtAlt=Math.max(2500, dThr*318);
+            if(dIaf<0.8) ops.phase='final';
+          } else if(ops.phase==='final'){
+            p.tgtHdg=ops.hdg;
+            p.tgtSpd=(dThr>5)?V170:V145;
+            p.tgtAlt=Math.max(0, dThr*318);
+            if(p.tgtAlt<65 && dThr<0.9) ops.phase='flare';
+          } else if(ops.phase==='flare'){
+            p.tgtHdg=ops.hdg;
+            p.tgtAlt=0;
+            p.tgtSpd=Math.max(V30, (p.tgtSpd||V145) - 140*dt);
+            if((p.alt||0)<=5 && dThr<0.9){
+              ops.phase='rollout';
+              p.x=ops.thr.x + ops.u.x*0.20;
+              p.y=ops.thr.y + ops.u.y*0.20;
+              p.alt=0; p.tgtAlt=0;
+              p.spd=Math.max(p.spd||0, (120/ KMH2KTS));
+            }
+          } else if(ops.phase==='rollout'){
+            p.alt=0; p.tgtAlt=0;
+            p.tgtHdg=ops.hdg;
+            const curKts=(p.spd||0)*KMH2KTS;
+            const nextKts=Math.max(0, curKts-14*dt);
+            p.spd = nextKts / KMH2KTS;
+            p.tgtSpd=p.spd;
+            const nmps = nextKts/3600;
+            p.x += ops.u.x*nmps*dt;
+            p.y += ops.u.y*nmps*dt;
+            if(nextKts<=25) ops.phase='taxi';
+          } else if(ops.phase==='taxi'){
+            p.alt=0; p.tgtAlt=0;
+            const dAp=dist({x:p.x,y:p.y}, ops.apron);
+            p.tgtHdg=bearingDeg({x:p.x,y:p.y}, ops.apron);
+            p.tgtSpd=TAXI;
+            const curKts=(p.spd||0)*KMH2KTS;
+            const nextKts=clamp(curKts + (15-curKts)*clamp(dt*0.8,0,1), 0, 15);
+            p.spd = nextKts / KMH2KTS;
+            const u=unitFromHdg(p.tgtHdg||p.hdg||0);
+            const nmps = nextKts/3600;
+            p.x += u.x*nmps*dt;
+            p.y += u.y*nmps*dt;
+            if(dAp<0.05){
+              p.x=ops.apron.x; p.y=ops.apron.y;
+              p.spd=0; p.tgtSpd=0;
+              p.alt=0; p.tgtAlt=0;
+              p.opsTag='';
+              p.ops=null;
+            }
+          }
+
+          if(ops.phase==='rollout' || ops.phase==='taxi'){
+            const savedSpd=p.spd, savedAlt=p.alt;
+            p.spd=0;
+            const res=orig(p, dt);
+            p.spd=savedSpd; p.alt=savedAlt;
+            return res;
+          }
+        }
+      }catch(_){}
+      return orig(p, dt);
+    };
+  }
+
+  // 6) Altitude panel: local unit toggle FT/M only affects this panel. No syncing.
+  let altUnitLocal = 'ft'; // default
+  function ensureAltUnitButtons(){
+    const pAlt = document.getElementById('pAltBody') || document.getElementById('pAlt');
+    if(!pAlt) return;
+    // try find existing buttons with text FT/M
+    const btns = $$('button', pAlt).filter(b=>['ft','m'].includes((b.textContent||'').trim().toLowerCase()));
+    if(btns.length>=2){
+      // Rebind locally
+      btns.forEach(b=>{
+        b.replaceWith(b.cloneNode(true));
+      });
+      const btns2 = $$('button', pAlt).filter(b=>['ft','m'].includes((b.textContent||'').trim().toLowerCase()));
+      btns2.forEach(b=>{
+        const t=(b.textContent||'').trim().toLowerCase();
+        b.addEventListener('click', (e)=>{
+          e.preventDefault(); e.stopPropagation();
+          altUnitLocal = (t==='m')?'m':'ft';
+          repaintAltLocal();
+        }, true);
+      });
+    } else {
+      // create buttons if missing
+      const row = pAlt.querySelector('.row') || pAlt;
+      const bft=document.createElement('button'); bft.textContent='FT'; bft.className='btn mini focusable';
+      const bm=document.createElement('button'); bm.textContent='M'; bm.className='btn mini focusable';
+      row.appendChild(bft); row.appendChild(bm);
+      bft.addEventListener('click',(e)=>{e.preventDefault();e.stopPropagation();altUnitLocal='ft'; repaintAltLocal();}, true);
+      bm.addEventListener('click',(e)=>{e.preventDefault();e.stopPropagation();altUnitLocal='m'; repaintAltLocal();}, true);
+    }
+  }
+
+  function repaintAltLocal(){
+    const list = document.getElementById('altList');
+    if(!list || !window.st) return;
+    const planes = st.planes || [];
+    const unit = altUnitLocal;
+    list.innerHTML='';
+    planes.forEach(p=>{
+      const row=document.createElement('div');
+      row.className='row';
+      const pill=document.createElement('span');
+      pill.className='pill';
+      pill.textContent = (p.name||p.id||'ACFT');
+      const val = (p.alt||0);
+      const shown = (unit==='m') ? Math.round(val*FT_TO_M) : Math.round(val);
+      const inp=document.createElement('input');
+      inp.type='text';
+      inp.value = String(shown);
+      inp.readOnly = true;
+      const u=document.createElement('span');
+      u.className='altUnit';
+      u.textContent = unit;
+      row.appendChild(pill);
+      row.appendChild(inp);
+      row.appendChild(u);
+      list.appendChild(row);
+    });
+  }
+
+  function hookAltUpdater(){
+    if(window.__ALT_LOCAL_V13__) return;
+    window.__ALT_LOCAL_V13__=true;
+    setInterval(()=>{
+      try{
+        // informative only, do not affect datablock/nav
+        repaintAltLocal();
+      }catch(_){}
+    }, 500);
+  }
+
+  // Boot
+  function boot(){
+    rebindDeleteDrawingModal();
+    injectRwyHeadSelector();
+    hookLandButton();
+    hookLandingUpdate();
+    ensureAltUnitButtons();
+    repaintAltLocal();
+    hookAltUpdater();
+  }
+  document.addEventListener('DOMContentLoaded', boot);
+  let tries=0;
+  const iv=setInterval(()=>{
+    tries++;
+    boot();
+    if(document.getElementById('rwyHeadSel') && document.getElementById('delDraw') && document.getElementById('altList')) clearInterval(iv);
+    if(tries>80) clearInterval(iv);
+  }, 150);
+
+})();
+</script>
+<!-- === END PATCH v13 === -->
+
+
+<!-- === PATCH v14: Grid layouts everywhere + Fix altitude panel + RWY numbers/selection + Remove hold button + Move delete last === -->
+<style>
+/* Apply grid layout to panels: Formaciones, Centro de Mando, Navegación, Herramientas de Dibujo */
+#pFormationsBody .row:first-child,
+#pCmdBody .row:first-child,
+#pNavBody .row:first-child,
+#pDrawBody .row:first-child{
+  display:grid !important;
+  grid-template-columns: repeat(auto-fit, minmax(92px, 1fr)) !important;
+  gap:8px !important;
+  width:100% !important;
+  align-items:stretch !important;
+}
+#pFormationsBody .row:first-child .btn.mini,
+#pCmdBody .row:first-child .btn.mini,
+#pNavBody .row:first-child .btn.mini,
+#pDrawBody .row:first-child .btn.mini{
+  width:100% !important;
+  justify-content:center !important;
+}
+/* Give the grid some breathing room inside its "square" */
+#pFormationsBody, #pCmdBody, #pNavBody, #pDrawBody { padding-top:6px !important; }
+
+/* Altitude panel: compact, readable */
+#pAltBody { gap:6px !important; }
+#pAltBody .row { gap:6px !important; flex-wrap:wrap !important; }
+#altList { margin-top:6px !important; }
+#altList .altRow {
+  display:flex; align-items:center; gap:8px;
+  padding:2px 0;
+}
+#altList .altName {
+  flex:1; min-width:120px;
+  max-width:140px;
+  overflow:hidden; text-overflow:ellipsis; white-space:nowrap;
+}
+#altList .altVal {
+  width:72px; text-align:right;
+  font-variant-numeric: tabular-nums;
+}
+#altList .altUnit { width:22px; opacity:.85; }
+</style>
+
+<script>
+(function(){
+  if(window.__APT_V14__) return;
+  window.__APT_V14__ = true;
+
+  const $=(s,r=document)=>r.querySelector(s);
+  const $$=(s,r=document)=>Array.from(r.querySelectorAll(s));
+  const FT_TO_M = 0.3048;
+
+  function norm360(h){ return ((+h)%360+360)%360; }
+  function pad3(n){ return String(Math.round(norm360(n))).padStart(3,'0'); }
+  function pad2(n){ return String(n).padStart(2,'0'); }
+  function rwyNum(h){
+    const n = Math.round(norm360(h)/10) || 36;
+    return pad2(n);
+  }
+  function angToRad(d){ return d*Math.PI/180; }
+  function unitFromHdg(h){ const a=angToRad(h); return {x:Math.sin(a), y:-Math.cos(a)}; }
+
+  function airports(){
+    return (window.st && Array.isArray(st.drawings)) ? st.drawings.filter(d=>d && d.type==='airport') : [];
+  }
+  function getAirport(id){ return airports().find(a=>a.id===id); }
+
+  // 1) Remove any remaining Óvalo/Hold button in Draw tools
+  function removeHoldButton(){
+    try{
+      const pDraw=document.getElementById('pDrawBody') || document.getElementById('pDraw');
+      if(pDraw){
+        $$('button', pDraw).forEach(b=>{
+          const t=(b.textContent||'').toLowerCase();
+          const dt=(b.getAttribute('data-tool')||'').toLowerCase();
+          if(dt==='holdoval' || t.includes('óvalo') || t.includes('oval') || t.includes('hold')) b.remove();
+        });
+      }
+      if(window.tool && tool.tool==='holdoval') tool.tool='none';
+    }catch(_){}
+  }
+
+  // 2) Move "Borrar" button to the end of the draw tool grid row
+  function moveDeleteLast(){
+    try{
+      const del = document.getElementById('delDraw');
+      const row = document.querySelector('#pDrawBody .row:first-child') || document.querySelector('#pDrawBody .row');
+      if(del && row){
+        row.appendChild(del); // moving it to end
+      }
+    }catch(_){}
+  }
+
+  // 3) Fix/replace Altitude panel: show ONLY planes and their current altitude, with local FT/M toggle
+  let altUnitLocal = 'ft';
+  function ensureAltButtons(){
+    const pAltBody = document.getElementById('pAltBody') || document.getElementById('pAlt');
+    if(!pAltBody) return;
+    // find existing FT/M buttons
+    let bft=null, bm=null;
+    $$('#pAltBody button, #pAlt button').forEach(b=>{
+      const t=(b.textContent||'').trim().toLowerCase();
+      if(t==='ft') bft=b;
+      if(t==='m') bm=b;
+    });
+    if(bft){ bft.replaceWith(bft.cloneNode(true)); bft=document.querySelector('#pAltBody button, #pAlt button'); }
+    if(bm){ bm.replaceWith(bm.cloneNode(true)); bm=$$('#pAltBody button, #pAlt button').find(x=>(x.textContent||'').trim().toLowerCase()==='m'); }
+
+    // If missing, create a small row at top
+    if(!document.getElementById('altUnitRow')){
+      const row=document.createElement('div');
+      row.id='altUnitRow';
+      row.className='row';
+      row.innerHTML = `
+        <button id="altBtnFT" class="btn mini focusable">FT</button>
+        <button id="altBtnM" class="btn mini focusable">M</button>
+      `;
+      const body = document.getElementById('pAltBody') || pAltBody;
+      body.prepend(row);
+    }
+    const ftBtn=document.getElementById('altBtnFT');
+    const mBtn=document.getElementById('altBtnM');
+    if(ftBtn && !ftBtn.dataset.bound){
+      ftBtn.dataset.bound='1';
+      ftBtn.addEventListener('click',(e)=>{ e.preventDefault(); e.stopPropagation(); altUnitLocal='ft'; repaintAltLocal(); }, true);
+    }
+    if(mBtn && !mBtn.dataset.bound){
+      mBtn.dataset.bound='1';
+      mBtn.addEventListener('click',(e)=>{ e.preventDefault(); e.stopPropagation(); altUnitLocal='m'; repaintAltLocal(); }, true);
+    }
+  }
+
+  function repaintAltLocal(){
+    const list = document.getElementById('altList');
+    if(!list || !window.st) return;
+    const planes = st.planes || [];
+    list.innerHTML='';
+    const unit = altUnitLocal;
+    planes.forEach(p=>{
+      const row=document.createElement('div');
+      row.className='altRow';
+      const name=document.createElement('div');
+      name.className='altName';
+      name.textContent = (p.name||p.id||'ACFT');
+      const val=document.createElement('div');
+      val.className='altVal';
+      const ft = (p.alt||0);
+      const shown = (unit==='m') ? Math.round(ft*FT_TO_M) : Math.round(ft);
+      val.textContent = String(shown);
+      const u=document.createElement('div');
+      u.className='altUnit';
+      u.textContent = unit;
+      row.appendChild(name);
+      row.appendChild(val);
+      row.appendChild(u);
+      list.appendChild(row);
+    });
+  }
+
+  function hookAltUpdater(){
+    if(window.__ALT_V14__) return;
+    window.__ALT_V14__=true;
+    setInterval(()=>{ try{ repaintAltLocal(); }catch(_){ } }, 500);
+  }
+
+  // 4) RWY head numbers and selection
+  // We show BOTH: runway number AND degrees, so you can choose like: RWY 09 (090°)
+  function injectRwySelector(){
+    const body=document.getElementById('pAirBody');
+    const aptSel=document.getElementById('aptSel');
+    if(!body || !aptSel) return;
+    if(document.getElementById('rwyHeadSel')) return;
+
+    const firstRow = body.querySelector('.row');
+    if(!firstRow) return;
+
+    const sel=document.createElement('select');
+    sel.id='rwyHeadSel';
+    sel.className='ghost focusable';
+    sel.style.width='160px';
+    // Put it right after airport select
+    firstRow.insertBefore(sel, firstRow.children[1] || null);
+
+    function rebuild(){
+      const apt=getAirport(aptSel.value);
+      sel.innerHTML='';
+      if(!apt) return;
+      const hdg = norm360(apt.hdg||0);
+      const opp = norm360(hdg+180);
+      const r1 = apt.rwy || rwyNum(hdg);
+      const r2 = rwyNum(opp);
+      const o1=document.createElement('option'); o1.value='NEAR'; o1.textContent=`RWY ${r1} (${pad3(hdg)}°)`;
+      const o2=document.createElement('option'); o2.value='OPP';  o2.textContent=`RWY ${r2} (${pad3(opp)}°)`;
+      sel.appendChild(o1); sel.appendChild(o2);
+    }
+    aptSel.addEventListener('change', rebuild, true);
+    setTimeout(rebuild, 0);
+  }
+
+  // Draw runway end numbers on top (ensure visible)
+  function drawRwyNumbers(){
+    try{
+      if(!window.ctx || !window.st || typeof toScreen!=='function') return;
+      const z=window.zoom||1;
+      const PX_PER_NM = window.PX_PER_NM || 20;
+      ctx.save();
+      ctx.font = "bold 12px monospace";
+      ctx.fillStyle = "rgba(255,255,255,0.78)";
+      ctx.textAlign = "center";
+      ctx.textBaseline = "middle";
+      airports().forEach(a=>{
+        const len=(a.lenNM||2.0);
+        const hdg=norm360(a.hdg||0);
+        const opp=norm360(hdg+180);
+        const u=unitFromHdg(hdg);
+        const half=len/2;
+        const thr1={x:a.x-u.x*half, y:a.y-u.y*half};
+        const thr2={x:a.x+u.x*half, y:a.y+u.y*half};
+        const s1=toScreen(thr1.x,thr1.y);
+        const s2=toScreen(thr2.x,thr2.y);
+        const r1=a.rwy||rwyNum(hdg);
+        const r2=rwyNum(opp);
+
+        // push number slightly inside runway to not overlap threshold bars
+        const off=18;
+        const uPx={x:u.x*off, y:u.y*off};
+
+        // End 1
+        ctx.save();
+        ctx.translate(s1.x+uPx.x, s1.y+uPx.y);
+        ctx.rotate(angToRad(hdg));
+        ctx.fillText(r1, 0, 0);
+        ctx.restore();
+
+        // End 2 (rotate 180)
+        ctx.save();
+        ctx.translate(s2.x-uPx.x, s2.y-uPx.y);
+        ctx.rotate(angToRad(opp));
+        ctx.fillText(r2, 0, 0);
+        ctx.restore();
+      });
+      ctx.restore();
+    }catch(_){}
+  }
+
+  if(typeof window.drawRadar==='function' && !window.__RWY_DRAW_V14__){
+    window.__RWY_DRAW_V14__=true;
+    const orig=window.drawRadar;
+    window.drawRadar=function(){
+      orig();
+      drawRwyNumbers();
+    };
+  }
+
+  // Boot
+  function boot(){
+    removeHoldButton();
+    moveDeleteLast();
+    ensureAltButtons();
+    repaintAltLocal();
+    hookAltUpdater();
+    injectRwySelector();
+  }
+
+  document.addEventListener('DOMContentLoaded', boot);
+  let tries=0;
+  const iv=setInterval(()=>{
+    tries++;
+    boot();
+    if(document.getElementById('rwyHeadSel') && document.getElementById('altList')) clearInterval(iv);
+    if(tries>80) clearInterval(iv);
+  }, 150);
+
+})();
+</script>
+<!-- === END PATCH v14 === -->
+
+
+<!-- === PATCH v15: True "grid pro" layout for Formaciones / Centro de Mando / Navegación / Dibujo === -->
+<style>
+/* Core grid row style */
+.panel-body .gridRow{
+  display:grid !important;
+  grid-template-columns: repeat(auto-fit, minmax(96px, 1fr)) !important;
+  gap:8px !important;
+  width:100% !important;
+  align-items:stretch !important;
+}
+.panel-body .gridRow .btn.mini{
+  width:100% !important;
+  justify-content:center !important;
+}
+
+/* Draw tools: always grid the FIRST row (tool buttons) */
+#pDrawBody .row:first-of-type{
+  display:grid !important;
+  grid-template-columns: repeat(auto-fit, minmax(92px, 1fr)) !important;
+  gap:8px !important;
+  width:100% !important;
+}
+
+/* Formations: grid every row of buttons */
+#pFormationsBody .row{
+  display:grid !important;
+  grid-template-columns: repeat(auto-fit, minmax(110px, 1fr)) !important;
+  gap:8px !important;
+  width:100% !important;
+}
+#pFormationsBody .row .btn.mini{ width:100% !important; justify-content:center !important; }
+
+/* Command center: ONLY rows tagged as gridRow will become grid (so inputs don't break) */
+
+/* Navigation: cards column becomes a tidy single-column grid with consistent gap */
+#navCards.col{
+  display:grid !important;
+  grid-template-columns: 1fr !important;
+  gap:10px !important;
+}
+</style>
+
+<script>
+(function(){
+  if(window.__APT_V15__) return;
+  window.__APT_V15__ = true;
+
+  const $$=(s,r=document)=>Array.from(r.querySelectorAll(s));
+
+  function markGridRows(){
+    // In Centro de Mando, only convert rows that are mostly buttons (no inputs/selects)
+    const cmdBody = document.getElementById('pCmdBody');
+    if(cmdBody){
+      $$('.row', cmdBody).forEach(r=>{
+        const hasInput = r.querySelector('input, select, textarea');
+        const btns = r.querySelectorAll('button.btn');
+        if(!hasInput && btns.length>=2){
+          r.classList.add('gridRow');
+        }
+      });
+    }
+  }
+
+  document.addEventListener('DOMContentLoaded', markGridRows);
+  // also run shortly after in case UI builds late
+  let t=0;
+  const iv=setInterval(()=>{
+    markGridRows();
+    t++;
+    if(t>20) clearInterval(iv);
+  }, 150);
+})();
+</script>
+<!-- === END PATCH v15 === -->
+
+
+<!-- === PATCH v16: Command Center 6-row layout + Fix duplicated Altitude panel (local FT/M) === -->
+<style>
+/* Centro de Mando: fixed 6 rows */
+#pCmdBody .cmdRow{
+  display:flex !important;
+  align-items:center !important;
+  gap:8px !important;
+  width:100% !important;
+  flex-wrap:nowrap !important;
+}
+#pCmdBody .cmdLabel{
+  width:86px !important;
+  opacity:.85;
+  font-size:11px;
+  flex:0 0 auto;
+}
+#pCmdBody .cmdRow .btn.mini{ flex:1 1 0; }
+#pCmdBody .cmdRow input, #pCmdBody .cmdRow select{
+  flex:1 1 0;
+  min-width:0;
+}
+#pCmdBody .cmdRow .pair{
+  display:grid;
+  grid-template-columns: 1fr 1fr;
+  gap:8px;
+  width:100%;
+}
+#pCmdBody .cmdRow .triple{
+  display:grid;
+  grid-template-columns: 1fr 1fr 1fr;
+  gap:8px;
+  width:100%;
+}
+/* Alt panel modern list */
+#pAltBody .altTopRow{
+  display:flex;
+  gap:8px;
+  align-items:center;
+}
+#pAltBody .altTopRow .btn.mini{ padding:2px 8px !important; }
+#altListModern{
+  margin-top:8px;
+  display:flex;
+  flex-direction:column;
+  gap:4px;
+}
+#altListModern .altItem{
+  display:flex;
+  align-items:center;
+  gap:10px;
+  padding:2px 0;
+}
+#altListModern .altName{
+  flex:1;
+  min-width:120px;
+  max-width:160px;
+  overflow:hidden;
+  text-overflow:ellipsis;
+  white-space:nowrap;
+}
+#altListModern .altVal{
+  width:84px;
+  text-align:right;
+  font-variant-numeric: tabular-nums;
+}
+#altListModern .altUnit{
+  width:22px;
+  opacity:.85;
+}
+</style>
+
+<script>
+(function(){
+  if(window.__APT_V16__) return;
+  window.__APT_V16__ = true;
+
+  const $=(s,r=document)=>r.querySelector(s);
+  const $$=(s,r=document)=>Array.from(r.querySelectorAll(s));
+  const FT_TO_M = 0.3048;
+
+  // --------- Command Center: rebuild into exactly 6 rows ---------
+  function take(id){ return document.getElementById(id); }
+  function byTextBtn(scope, txt){
+    const t=txt.toLowerCase();
+    return $$('button', scope).find(b=>(b.textContent||'').trim().toLowerCase()===t) || null;
+  }
+  function ensureMini(el){
+    if(!el) return;
+    if(el.classList) el.classList.add('btn','mini','focusable');
+  }
+
+  function rebuildCmd(){
+    const body = document.getElementById('pCmdBody');
+    if(!body) return;
+
+    // Collect existing elements we want to preserve (by id if present)
+    // Units
+    let btnMetric = take('btnMetric') || take('metricBtn') || byTextBtn(body,'métrico') || byTextBtn(body,'metric');
+    let btnImper = take('btnImperial') || take('imperialBtn') || byTextBtn(body,'imperial');
+
+    // Wind
+    let windVel = take('windVel') || take('windSpd') || take('windSpeed');
+    let windDir = take('windDir') || take('windHdg') || take('windDirection');
+
+    // Radar fail/haz
+    let btnFail = take('btnRadarFail') || byTextBtn(body,'falla radar') || byTextBtn(body,'radar off');
+    let btnHaz  = take('btnRadar') || take('btnRadarOn') || byTextBtn(body,'haz radar') || byTextBtn(body,'radar on');
+
+    // Pred +/- and input
+    let predMinus = take('predMinus') || byTextBtn(body,'-') ;
+    let predPlus  = take('predPlus')  || byTextBtn(body,'+') ;
+    let predVal   = take('predVal') || take('predMin') || take('predMinutes') || body.querySelector('input[type="number"]');
+
+    // Add planes
+    let addF = take('addFighter') || take('btnAddFighter') || byTextBtn(body,'+ caza') || byTextBtn(body,'caza');
+    let addC = take('addCommercial') || take('btnAddCommercial') || byTextBtn(body,'+ comercial') || byTextBtn(body,'comercial');
+    let delP = take('delPlane') || take('btnDelPlane') || byTextBtn(body,'eliminar');
+
+    // Export / Load (Formaciones)
+    let exp = take('exportFormBtn');
+    let imp = take('importFormBtn');
+
+    // If any are missing, try global search (outside body)
+    const root = document;
+    if(!btnMetric) btnMetric = root.getElementById('btnMetric') || root.getElementById('metricBtn');
+    if(!btnImper)  btnImper  = root.getElementById('btnImperial') || root.getElementById('imperialBtn');
+    if(!windVel) windVel = root.getElementById('windVel') || root.getElementById('windSpd') || root.getElementById('windSpeed');
+    if(!windDir) windDir = root.getElementById('windDir') || root.getElementById('windHdg') || root.getElementById('windDirection');
+    if(!btnFail) btnFail = root.getElementById('btnRadarFail');
+    if(!btnHaz)  btnHaz  = root.getElementById('btnRadarOn') || root.getElementById('btnRadar');
+    if(!predMinus) predMinus = root.getElementById('predMinus');
+    if(!predPlus)  predPlus  = root.getElementById('predPlus');
+    if(!predVal)   predVal   = root.getElementById('predVal') || root.getElementById('predMin') || root.getElementById('predMinutes');
+    if(!addF) addF = root.getElementById('addFighter') || root.getElementById('btnAddFighter');
+    if(!addC) addC = root.getElementById('addCommercial') || root.getElementById('btnAddCommercial');
+    if(!delP) delP = root.getElementById('delPlane') || root.getElementById('btnDelPlane');
+
+    // Normalize styles
+    [btnMetric, btnImper, btnFail, btnHaz, predMinus, predPlus, addF, addC, delP, exp, imp].forEach(ensureMini);
+
+    if(windVel){
+      windVel.classList.add('ghost','focusable');
+      windVel.placeholder = windVel.placeholder || 'VEL';
+    }
+    if(windDir){
+      windDir.classList.add('ghost','focusable');
+      windDir.placeholder = windDir.placeholder || 'DIR';
+    }
+    if(predVal){
+      predVal.classList.add('ghost','focusable');
+      predVal.placeholder = predVal.placeholder || 'min';
+      predVal.style.maxWidth = '90px';
+    }
+
+    // Clear and rebuild
+    body.innerHTML = '';
+
+    function row(label, innerEl){
+      const r=document.createElement('div');
+      r.className='cmdRow';
+      const lab=document.createElement('div');
+      lab.className='cmdLabel';
+      lab.textContent=label;
+      r.appendChild(lab);
+      r.appendChild(innerEl);
+      body.appendChild(r);
+    }
+
+    // 1) Units
+    const units=document.createElement('div');
+    units.className='pair';
+    if(btnMetric) units.appendChild(btnMetric);
+    if(btnImper)  units.appendChild(btnImper);
+    row('UNIDADES:', units);
+
+    // 2) Wind vel/dir
+    const wind=document.createElement('div');
+    wind.className='pair';
+    if(windVel) wind.appendChild(windVel);
+    if(windDir) wind.appendChild(windDir);
+    row('VIENTO:', wind);
+
+    // 3) Radar fail/haz
+    const radar=document.createElement('div');
+    radar.className='pair';
+    if(btnFail) radar.appendChild(btnFail);
+    if(btnHaz)  radar.appendChild(btnHaz);
+    row('RADAR:', radar);
+
+    // 4) Pred -/+ (value)
+    const pred=document.createElement('div');
+    pred.className='triple';
+    if(predMinus) pred.appendChild(predMinus);
+    if(predPlus)  pred.appendChild(predPlus);
+    if(predVal)   pred.appendChild(predVal);
+    row('PRED:', pred);
+
+    // 5) + planes
+    const planes=document.createElement('div');
+    planes.className='triple';
+    if(addF) planes.appendChild(addF);
+    if(addC) planes.appendChild(addC);
+    if(delP) planes.appendChild(delP);
+    row('AERONAV:', planes);
+
+    // 6) Export/Load
+    const io=document.createElement('div');
+    io.className='pair';
+    if(exp) io.appendChild(exp);
+    if(imp) io.appendChild(imp);
+    row('FORMAC:', io);
+  }
+
+  // --------- Altitude panel: remove duplication and replace with single modern local view ---------
+  let altUnitLocal = 'ft';
+
+  function rebuildAlt(){
+    const body = document.getElementById('pAltBody');
+    if(!body) return;
+
+    // Remove anything old, create fresh
+    body.innerHTML = '';
+
+    const top=document.createElement('div');
+    top.className='altTopRow';
+    top.innerHTML = `
+      <button id="altFT" class="btn mini focusable">FT</button>
+      <button id="altM" class="btn mini focusable">M</button>
+    `;
+    body.appendChild(top);
+
+    const list=document.createElement('div');
+    list.id='altListModern';
+    body.appendChild(list);
+
+    document.getElementById('altFT').addEventListener('click',(e)=>{
+      e.preventDefault(); e.stopPropagation();
+      altUnitLocal='ft';
+      repaintAltModern();
+    }, true);
+    document.getElementById('altM').addEventListener('click',(e)=>{
+      e.preventDefault(); e.stopPropagation();
+      altUnitLocal='m';
+      repaintAltModern();
+    }, true);
+  }
+
+  function repaintAltModern(){
+    const list = document.getElementById('altListModern');
+    if(!list || !window.st) return;
+    const planes = st.planes || [];
+    list.innerHTML='';
+    planes.forEach(p=>{
+      const item=document.createElement('div');
+      item.className='altItem';
+      const name=document.createElement('div');
+      name.className='altName';
+      name.textContent=(p.name||p.id||'ACFT');
+      const ft=(p.alt||0);
+      const shown=(altUnitLocal==='m') ? Math.round(ft*FT_TO_M) : Math.round(ft);
+      const val=document.createElement('div');
+      val.className='altVal';
+      val.textContent=String(shown);
+      const unit=document.createElement('div');
+      unit.className='altUnit';
+      unit.textContent=altUnitLocal;
+      item.appendChild(name);
+      item.appendChild(val);
+      item.appendChild(unit);
+      list.appendChild(item);
+    });
+  }
+
+  function disableOldAltPainter(){
+    // Some versions repaintAlt writes into old #altList. We disable it to avoid duplication.
+    if(typeof window.repaintAlt === 'function' && !window.__ALT_DISABLED_V16__){
+      window.__ALT_DISABLED_V16__ = true;
+      window.repaintAlt = function(){ /* disabled: local-only alt panel */ };
+    }
+  }
+
+  function startAltTicker(){
+    if(window.__ALT_TICK_V16__) return;
+    window.__ALT_TICK_V16__=true;
+    setInterval(()=>{ try{ repaintAltModern(); }catch(_){ } }, 400);
+  }
+
+  function boot(){
+    rebuildCmd();
+    disableOldAltPainter();
+    rebuildAlt();
+    repaintAltModern();
+    startAltTicker();
+  }
+
+  document.addEventListener('DOMContentLoaded', boot);
+  let tries=0;
+  const iv=setInterval(()=>{
+    tries++;
+    // Re-run command center once UI settles (elements may be created later)
+    rebuildCmd();
+    if(document.getElementById('altListModern')) clearInterval(iv);
+    if(tries>50) clearInterval(iv);
+  }, 150);
+
+})();
+</script>
+<!-- === END PATCH v16 === -->
+
+
+<!-- === PATCH v17: Restore Comercial button + local Metric/Imperial + cleaner Nav + RWY numbers visible + runway selector sync === -->
+<style>
+/* Navigation panel: cleaner cards */
+#pNavBody{ padding-top:8px !important; }
+#navCards{ gap:10px !important; }
+#navCards .card{
+  border:1px solid rgba(255,255,255,0.10);
+  border-radius:12px;
+  padding:10px 10px;
+  background:rgba(255,255,255,0.03);
+}
+#navCards .card .row{ gap:8px; }
+#navCards .card .muted{ opacity:.75; }
+
+/* Command center active state (local only) */
+.btn.localActive{
+  outline:2px solid rgba(255,255,255,0.18);
+  box-shadow: inset 0 0 0 999px rgba(255,255,255,0.06);
+}
+</style>
+
+<script>
+(function(){
+  if(window.__APT_V17__) return;
+  window.__APT_V17__ = true;
+
+  const $=(s,r=document)=>r.querySelector(s);
+  const $$=(s,r=document)=>Array.from(r.querySelectorAll(s));
+
+  // 1) Ensure +CAZA / COMERCIAL / ELIMINAR row uses the real buttons (addFighter, addCom, delLast)
+  function fixAircraftButtonsRow(){
+    const body = document.getElementById('pCmdBody');
+    if(!body) return;
+
+    const addF = document.getElementById('addFighter');
+    const addC = document.getElementById('addCom');      // <-- real commercial button id
+    const delP = document.getElementById('delLast');     // <-- real delete-last id
+    if(!addF || !addC || !delP) return;
+
+    // Find row label "AERONAV:" (created by v16). If not found, do nothing.
+    const cmdRows = $$('.cmdRow', body);
+    const target = cmdRows.find(r => (r.querySelector('.cmdLabel')?.textContent||'').trim().toUpperCase().startsWith('AERONAV'));
+    if(!target) return;
+
+    const slot = target.querySelector('.triple') || target.querySelector('div');
+    if(!slot) return;
+
+    // Move buttons in correct order
+    addF.classList.add('btn','mini','focusable');
+    addC.classList.add('btn','mini','focusable');
+    delP.classList.add('btn','mini','focusable');
+
+    slot.innerHTML='';
+    slot.appendChild(addF);
+    slot.appendChild(addC);
+    slot.appendChild(delP);
+  }
+
+  // 2) Metric/Imperial in Command Center must be LOCAL ONLY (no syncing)
+  function localizeCmdUnits(){
+    const body = document.getElementById('pCmdBody');
+    if(!body) return;
+    // Prefer ids from base UI
+    let mBtn = document.getElementById('btnMetric') || document.getElementById('metricBtn');
+    let iBtn = document.getElementById('btnImperial') || document.getElementById('imperialBtn');
+    if(!mBtn || !iBtn) return;
+
+    // Drop old handlers by cloning
+    mBtn.replaceWith(mBtn.cloneNode(true));
+    iBtn.replaceWith(iBtn.cloneNode(true));
+    mBtn = document.getElementById('btnMetric') || document.getElementById('metricBtn');
+    iBtn = document.getElementById('btnImperial') || document.getElementById('imperialBtn');
+    if(!mBtn || !iBtn) return;
+
+    window.__CMD_UNITS_LOCAL__ = window.__CMD_UNITS_LOCAL__ || 'metric';
+
+    function setActive(which){
+      window.__CMD_UNITS_LOCAL__ = which;
+      mBtn.classList.toggle('localActive', which==='metric');
+      iBtn.classList.toggle('localActive', which==='imperial');
+    }
+    setActive(window.__CMD_UNITS_LOCAL__);
+
+    mBtn.addEventListener('click', (e)=>{
+      e.preventDefault(); e.stopPropagation();
+      setActive('metric');
+    }, true);
+    iBtn.addEventListener('click', (e)=>{
+      e.preventDefault(); e.stopPropagation();
+      setActive('imperial');
+    }, true);
+  }
+
+  // 3) RWY numbers visibility: draw LAST with outline + slight shadow, always on top
+  function norm360(h){ return ((+h)%360+360)%360; }
+  function pad2(n){ return String(n).padStart(2,'0'); }
+  function rwyNum(h){ const n=Math.round(norm360(h)/10)||36; return pad2(n); }
+  function angToRad(d){ return d*Math.PI/180; }
+  function unitFromHdg(h){ const a=angToRad(h); return {x:Math.sin(a), y:-Math.cos(a)}; }
+
+  function airports(){
+    return (window.st && Array.isArray(st.drawings)) ? st.drawings.filter(d=>d && d.type==='airport') : [];
+  }
+
+  function drawRwyNumbersTopMost(){
+    try{
+      if(!window.ctx || !window.st || typeof toScreen!=='function') return;
+      const PX_PER_NM = window.PX_PER_NM || 20;
+      const z = window.zoom || 1;
+
+      ctx.save();
+      ctx.font = `bold ${Math.max(12, Math.min(18, 12 + z*1.2))}px monospace`;
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.shadowColor = 'rgba(0,0,0,0.6)';
+      ctx.shadowBlur = 6;
+
+      airports().forEach(a=>{
+        const len = (a.lenNM||2.0);
+        const hdg = norm360(a.hdg||0);
+        const opp = norm360(hdg+180);
+        const u = unitFromHdg(hdg);
+        const half = len/2;
+
+        const thr1 = {x:a.x-u.x*half, y:a.y-u.y*half};
+        const thr2 = {x:a.x+u.x*half, y:a.y+u.y*half};
+        const s1 = toScreen(thr1.x, thr1.y);
+        const s2 = toScreen(thr2.x, thr2.y);
+
+        const r1 = a.rwy || rwyNum(hdg);
+        const r2 = rwyNum(opp);
+
+        const off = 20; // pixels
+        const uPx = {x:u.x*off, y:u.y*off};
+
+        // stroke + fill for readability on any background
+        function drawAt(sx, sy, rotDeg, txt){
+          ctx.save();
+          ctx.translate(sx, sy);
+          ctx.rotate(angToRad(rotDeg));
+          ctx.lineWidth = 3;
+          ctx.strokeStyle = 'rgba(0,0,0,0.85)';
+          ctx.strokeText(txt, 0, 0);
+          ctx.fillStyle = 'rgba(255,255,255,0.92)';
+          ctx.fillText(txt, 0, 0);
+          ctx.restore();
+        }
+
+        drawAt(s1.x + uPx.x, s1.y + uPx.y, hdg, r1);
+        drawAt(s2.x - uPx.x, s2.y - uPx.y, opp, r2);
+      });
+
+      ctx.restore();
+    }catch(_){}
+  }
+
+  // Wrap current drawRadar once more so runway numbers are truly last
+  if(typeof window.drawRadar==='function' && !window.__RWY_TOPMOST_V17__){
+    window.__RWY_TOPMOST_V17__ = true;
+    const base = window.drawRadar;
+    window.drawRadar = function(){
+      base();
+      drawRwyNumbersTopMost();
+    };
+  }
+
+  // 4) Ensure Airports panel selector uses correct element id (aptSelect) and stays in sync with runway head selector
+  function ensureRunwayHeadSelectorSync(){
+    const body = document.getElementById('pAptBody') || document.getElementById('pAirBody');
+    const aptSel = document.getElementById('aptSelect') || document.getElementById('aptSel') || document.getElementById('aptSelOps');
+    if(!body || !aptSel) return;
+
+    let rSel = document.getElementById('rwyHeadSel');
+    if(!rSel){
+      // Put it in the first row next to the airport select
+      const firstRow = body.querySelector('.row');
+      if(!firstRow) return;
+      rSel = document.createElement('select');
+      rSel.id='rwyHeadSel';
+      rSel.className='ghost focusable';
+      rSel.style.width='170px';
+      firstRow.insertBefore(rSel, firstRow.children[1] || null);
+    }
+
+    function rebuild(){
+      const aptId = aptSel.value;
+      const apt = airports().find(a=>a.id===aptId) || airports().find(a=>(a.icao||a.name||'')===aptId);
+      rSel.innerHTML='';
+      if(!apt) return;
+      const hdg = norm360(apt.hdg||0);
+      const opp = norm360(hdg+180);
+      const r1 = apt.rwy || rwyNum(hdg);
+      const r2 = rwyNum(opp);
+      const o1=document.createElement('option'); o1.value='NEAR'; o1.textContent=`RWY ${r1} (${String(Math.round(hdg)).padStart(3,'0')}°)`;
+      const o2=document.createElement('option'); o2.value='OPP';  o2.textContent=`RWY ${r2} (${String(Math.round(opp)).padStart(3,'0')}°)`;
+      rSel.appendChild(o1); rSel.appendChild(o2);
+    }
+    aptSel.addEventListener('change', rebuild, true);
+    setTimeout(rebuild, 0);
+  }
+
+  function boot(){
+    fixAircraftButtonsRow();
+    localizeCmdUnits();
+    ensureRunwayHeadSelectorSync();
+  }
+
+  document.addEventListener('DOMContentLoaded', boot);
+  let tries=0;
+  const iv=setInterval(()=>{
+    tries++;
+    boot();
+    if(tries>50) clearInterval(iv);
+  }, 150);
+
+})();
+</script>
+<!-- === END PATCH v17 === -->
+
+
+<!-- === PATCH v18: Ensure Comercial button exists in Cmd + RWY numbers visible & sync on HDG change + Alt panel remove FT/M buttons === -->
+<style>
+/* Alt panel: remove toggle buttons spacing if present */
+#pAltBody .altTopRow{ display:none !important; }
+</style>
+<script>
+(function(){
+  if(window.__APT_V18__) return;
+  window.__APT_V18__ = true;
+
+  const $=(s,r=document)=>r.querySelector(s);
+  const $$=(s,r=document)=>Array.from(r.querySelectorAll(s));
+
+  // ---------- 1) Ensure Comercial button exists and is placed to the right of +Caza ----------
+  function ensureComercialBtn(){
+    const cmdBody = document.getElementById('pCmdBody');
+    if(!cmdBody) return;
+
+    // Find the "AERONAV:" row created in v16
+    const rows = $$('.cmdRow', cmdBody);
+    const aer = rows.find(r => (r.querySelector('.cmdLabel')?.textContent||'').trim().toUpperCase().startsWith('AERONAV'));
+    if(!aer) return;
+    const slot = aer.querySelector('.triple') || aer.querySelector('div');
+    if(!slot) return;
+
+    let addF = document.getElementById('addFighter');
+    let addC = document.getElementById('addCom');
+    let delP = document.getElementById('delLast');
+
+    // If addCom was lost due to rebuild, recreate it with the SAME behavior as original
+    if(!addC){
+      addC = document.createElement('button');
+      addC.id = 'addCom';
+      addC.className = 'btn mini focusable';
+      addC.textContent = '✈️ Comercial';
+
+      // Re-implement original handler
+      addC.onclick = ()=>{
+        try{
+          const id='COM-'+Date.now(), edge=Math.floor(Math.random()*4), range=MAX_RANGE_NM*1.1;
+          let x=0,y=0,hdg=0;
+          if(edge===0){x=-range;y=(Math.random()-0.5)*range;hdg=90;}
+          else if(edge===1){x=range;y=(Math.random()-0.5)*range;hdg=270;}
+          else if(edge===2){y=-range;x=(Math.random()-0.5)*range;hdg=180;}
+          else {y=range;x=(Math.random()-0.5)*range;hdg=0;}
+          const p={name:'COMERCIAL '+(Math.floor(Math.random()*900)+100),id,x,y,hdg,spd:850,tgtSpd:850,alt:30000+(Math.random()*8000|0),tgtAlt:30000+(Math.random()*8000|0),turn:1.2,tgtHdg:hdg,ghosts:[],lastDet:0,fail:{comms:false,eng:'none',cab:'none',gear:false,bird:false},kills:0,fuel:100,jamming:false};
+          st.planes.push(p);
+          st.roles[id]=Math.random()>.5?'Friend':'Bandit';
+          repaintPlanesList(); repaintNav(); repaintPairs(); repaintAlt();
+        }catch(_){}
+      };
+    }
+
+    // ensure styles
+    [addF, addC, delP].forEach(b=>{ if(b){ b.classList.add('btn','mini','focusable'); }});
+
+    // Put in correct order: +Caza | Comercial | Eliminar
+    // If any are missing, keep those present.
+    slot.innerHTML='';
+    if(addF) slot.appendChild(addF);
+    if(addC) slot.appendChild(addC);
+    if(delP) slot.appendChild(delP);
+  }
+
+  // ---------- 2) RWY numbers must be visible + RWY selector must update when HDG changes ----------
+  function norm360(h){ return ((+h)%360+360)%360; }
+  function pad2(n){ return String(n).padStart(2,'0'); }
+  function rwyNum(h){ const n=Math.round(norm360(h)/10)||36; return pad2(n); }
+  function angToRad(d){ return d*Math.PI/180; }
+  function unitFromHdg(h){ const a=angToRad(h); return {x:Math.sin(a), y:-Math.cos(a)}; }
+
+  function airports(){
+    return (window.st && Array.isArray(st.drawings)) ? st.drawings.filter(d=>d && d.type==='airport') : [];
+  }
+
+  function drawRwyNumbersHard(){
+    try{
+      if(!window.ctx || !window.st || typeof toScreen!=='function') return;
+      const z = window.zoom || 1;
+      ctx.save();
+      ctx.font = `bold ${Math.max(13, Math.min(20, 13 + z*1.3))}px monospace`;
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.shadowColor = 'rgba(0,0,0,0.65)';
+      ctx.shadowBlur = 7;
+
+      airports().forEach(a=>{
+        const len = (a.lenNM||2.0);
+        const hdg = norm360(a.hdg||0);
+        const opp = norm360(hdg+180);
+        const u = unitFromHdg(hdg);
+        const half=len/2;
+
+        const thr1={x:a.x-u.x*half, y:a.y-u.y*half};
+        const thr2={x:a.x+u.x*half, y:a.y+u.y*half};
+        const s1=toScreen(thr1.x,thr1.y);
+        const s2=toScreen(thr2.x,thr2.y);
+        const r1=a.rwy || rwyNum(hdg);
+        const r2=rwyNum(opp);
+
+        const off=22;
+        const uPx={x:u.x*off, y:u.y*off};
+
+        function drawAt(sx,sy,rot,txt){
+          ctx.save();
+          ctx.translate(sx,sy);
+          ctx.rotate(angToRad(rot));
+          ctx.lineWidth=3.5;
+          ctx.strokeStyle='rgba(0,0,0,0.9)';
+          ctx.strokeText(txt,0,0);
+          ctx.fillStyle='rgba(255,255,255,0.96)';
+          ctx.fillText(txt,0,0);
+          ctx.restore();
+        }
+        drawAt(s1.x+uPx.x, s1.y+uPx.y, hdg, r1);
+        drawAt(s2.x-uPx.x, s2.y-uPx.y, opp, r2);
+      });
+      ctx.restore();
+    }catch(_){}
+  }
+
+  // Ensure drawn truly last
+  if(typeof window.drawRadar==='function' && !window.__RWY_LAST_V18__){
+    window.__RWY_LAST_V18__=true;
+    const prev = window.drawRadar;
+    window.drawRadar = function(){
+      prev();
+      drawRwyNumbersHard();
+    };
+  }
+
+  function rebuildRwyHeadSel(){
+    const aptSel = document.getElementById('aptSelect') || document.getElementById('aptSel');
+    const rSel = document.getElementById('rwyHeadSel');
+    if(!aptSel || !rSel) return;
+    const aptId = aptSel.value;
+    const apt = airports().find(a=>a.id===aptId);
+    rSel.innerHTML='';
+    if(!apt) return;
+    const hdg=norm360(apt.hdg||0);
+    const opp=norm360(hdg+180);
+    const r1=apt.rwy || rwyNum(hdg);
+    const r2=rwyNum(opp);
+    const o1=document.createElement('option'); o1.value='NEAR'; o1.textContent=`RWY ${r1} (${String(Math.round(hdg)).padStart(3,'0')}°)`;
+    const o2=document.createElement('option'); o2.value='OPP';  o2.textContent=`RWY ${r2} (${String(Math.round(opp)).padStart(3,'0')}°)`;
+    rSel.appendChild(o1); rSel.appendChild(o2);
+  }
+
+  // When SET HDG pressed, refresh runway selector and repaint
+  document.addEventListener('click', (e)=>{
+    const t = e.target;
+    if(!t) return;
+    if(t.id === 'aptSetHdg'){
+      setTimeout(()=>{
+        try{ rebuildRwyHeadSel(); }catch(_){}
+        try{ if(typeof repaintNav==='function') repaintNav(); }catch(_){}
+      }, 0);
+    }
+  }, true);
+
+  // Also refresh on airport change
+  document.addEventListener('change', (e)=>{
+    if(e.target && (e.target.id==='aptSelect' || e.target.id==='aptSel')){
+      setTimeout(()=>{ try{ rebuildRwyHeadSel(); }catch(_){ } }, 0);
+    }
+  }, true);
+
+  // ---------- 3) Altitude panel: remove FT/M buttons (keep only list) ----------
+  function altRemoveButtons(){
+    const altBody = document.getElementById('pAltBody');
+    if(!altBody) return;
+    // Remove buttons FT/M created by v16/v14/etc
+    $$('button', altBody).forEach(b=>{
+      const txt=(b.textContent||'').trim().toLowerCase();
+      if(txt==='ft' || txt==='m') b.remove();
+    });
+    // If modern list exists, keep it; else fallback to showing #altListModern or #altList
+    const modern = document.getElementById('altListModern');
+    if(modern){
+      // Force units to ft in display and keep updating via its ticker
+      $$('[class*="altUnit"]', modern).forEach(u=>u.textContent='ft');
+    }
+  }
+
+  function boot(){
+    ensureComercialBtn();
+    altRemoveButtons();
+    rebuildRwyHeadSel();
+  }
+  document.addEventListener('DOMContentLoaded', boot);
+  let tries=0;
+  const iv=setInterval(()=>{
+    tries++;
+    boot();
+    if(tries>40) clearInterval(iv);
+  }, 150);
+
+})();
+</script>
+<!-- === END PATCH v18 === -->
+
+
+<!-- === PATCH v19: Remove FT/M from Alt panel + Smaller RWY end numbers (below airport name size) === -->
+<script>
+(function(){
+  if(window.__APT_V19__) return;
+  window.__APT_V19__ = true;
+
+  const $$=(s,r=document)=>Array.from(r.querySelectorAll(s));
+
+  // 1) Remove FT/M buttons in Alt panel (hard remove, keep rest intact)
+  function removeAltUnitButtons(){
+    const altBody = document.getElementById('pAltBody');
+    if(!altBody) return;
+    $$('button', altBody).forEach(b=>{
+      const t=(b.textContent||'').trim().toLowerCase();
+      if(t==='ft' || t==='m') b.remove();
+    });
+  }
+
+  // 2) RWY numbers at runway ends: slightly smaller than airport name
+  function norm360(h){ return ((+h)%360+360)%360; }
+  function pad2(n){ return String(n).padStart(2,'0'); }
+  function rwyNum(h){ const n=Math.round(norm360(h)/10)||36; return pad2(n); }
+  function angToRad(d){ return d*Math.PI/180; }
+  function unitFromHdg(h){ const a=angToRad(h); return {x:Math.sin(a), y:-Math.cos(a)}; }
+  function airports(){
+    return (window.st && Array.isArray(st.drawings)) ? st.drawings.filter(d=>d && d.type==='airport') : [];
+  }
+
+  function drawRwyNumbersSmall(){
+    try{
+      if(!window.ctx || !window.st || typeof toScreen!=='function') return;
+      const z = window.zoom || 1;
+
+      // Airport name label uses ~12px monospace in your build; set RWY slightly smaller
+      const px = Math.max(11, Math.min(16, 11 + z*1.0));
+      ctx.save();
+      ctx.font = `bold ${px}px monospace`;
+      ctx.textAlign='center';
+      ctx.textBaseline='middle';
+      ctx.shadowColor='rgba(0,0,0,0.6)';
+      ctx.shadowBlur=5;
+
+      airports().forEach(a=>{
+        const len=(a.lenNM||2.0);
+        const hdg=norm360(a.hdg||0);
+        const opp=norm360(hdg+180);
+        const u=unitFromHdg(hdg);
+        const half=len/2;
+
+        const thr1={x:a.x-u.x*half, y:a.y-u.y*half};
+        const thr2={x:a.x+u.x*half, y:a.y+u.y*half};
+        const s1=toScreen(thr1.x,thr1.y);
+        const s2=toScreen(thr2.x,thr2.y);
+
+        const r1=a.rwy || rwyNum(hdg);
+        const r2=rwyNum(opp);
+
+        const off=22;
+        const uPx={x:u.x*off, y:u.y*off};
+
+        function drawAt(sx,sy,rot,txt){
+          ctx.save();
+          ctx.translate(sx,sy);
+          ctx.rotate(angToRad(rot));
+          ctx.lineWidth=3;
+          ctx.strokeStyle='rgba(0,0,0,0.85)';
+          ctx.strokeText(txt,0,0);
+          ctx.fillStyle='rgba(255,255,255,0.92)';
+          ctx.fillText(txt,0,0);
+          ctx.restore();
+        }
+        drawAt(s1.x+uPx.x, s1.y+uPx.y, hdg, r1);
+        drawAt(s2.x-uPx.x, s2.y-uPx.y, opp, r2);
+      });
+
+      ctx.restore();
+    }catch(_){}
+  }
+
+  // Override any previous runway number drawer so only the small one remains on top
+  if(typeof window.drawRadar==='function' && !window.__RWY_SMALL_V19__){
+    window.__RWY_SMALL_V19__ = true;
+    const prev = window.drawRadar;
+    window.drawRadar = function(){
+      prev();
+      drawRwyNumbersSmall();
+    };
+  }
+
+  function boot(){
+    removeAltUnitButtons();
+  }
+  document.addEventListener('DOMContentLoaded', boot);
+  let tries=0;
+  const iv=setInterval(()=>{
+    tries++;
+    boot();
+    if(tries>30) clearInterval(iv);
+  }, 150);
+
+})();
+</script>
+<!-- === END PATCH v19 === -->
+
 </head>
 <body>
 <div class="app">
@@ -490,6 +2241,29 @@ canvas#radar {
   <aside id="right">
     
 
+    
+    <section class="panel" id="pApt">
+      <div class="panel-header"><h3>Aeropuertos</h3><span class="toggle" data-target="#pAptBody">▾</span></div>
+      <div id="pAptBody" class="panel-body">
+        <div class="row">
+          <select id="aptSelect" class="ghost focusable" style="flex:1"></select>
+          <button id="aptDel" class="btn mini focusable">🗑️</button>
+        </div>
+        <div class="row">
+          <select id="aptPlane" class="ghost focusable" style="flex:1"></select>
+        </div>
+        <div class="row">
+          <button id="aptLand" class="btn mini focusable">🛬 Aterrizar</button>
+          <button id="aptTo" class="btn mini focusable">🛫 Despegar</button>
+          <button id="aptAbort" class="btn mini focusable">⛔ Abort</button>
+        </div>
+        <div class="mini" style="opacity:.9">
+          <div>Tool: <span class="pill">Aeropuerto</span> para crear en el radar.</div>
+          <div>Procedimiento: base 3° (≈318 ft/NM), final alineado, flare y rollout.</div>
+        </div>
+      </div>
+    </section>
+
     <section class="panel" id="pPair">
       <div class="panel-header"><h3>Emparejamientos</h3><span class="toggle" data-target="#pPairBody">▾</span></div>
       <div id="pPairBody" class="panel-body">
@@ -540,6 +2314,7 @@ canvas#radar {
           <button class="btn mini tool focusable" data-tool="square">Cuadrado</button>
           <button class="btn mini tool focusable" data-tool="bullseye">Bullseye</button>
           <button class="btn mini tool focusable" data-tool="label">Etiqueta</button>
+          <button class="btn mini tool focusable" data-tool="airport">Aeropuerto</button>
           <button id="delDraw" class="btn mini focusable">Borrar</button>
         </div>
         <div class="row">
@@ -840,7 +2615,7 @@ function updatePlane(p,dt){
   const hrad=(p.hdg-90)*Math.PI/180;
   p.x+=Math.cos(hrad)*nmps*dt+Math.cos(vrad)*wnd*dt;
   p.y+=Math.sin(hrad)*nmps*dt+Math.sin(vrad)*wnd*dt;
-  p._gt=(p._gt||0)+dt*1000;if(p._gt>1800){p.ghosts.push({x:p.x,y:p.y});if(p.ghosts.length>10)p.ghosts.shift();p._gt=0;}
+  p._gt=(p._gt||0)+dt*1000;if(p._gt>1800){p.ghosts.push({x:p.x,y:p.y});if(p.ghosts.length>30)p.ghosts.shift();p._gt=0;}
 }
 function drawPlane(p){
   const s=toScreen(p.x,p.y);
@@ -885,7 +2660,7 @@ function drawPlane(p){
     ctx.strokeRect(bx, by-12, w, h);
 
     // --- text ---
-    ctx.fillText(p.name, bx+4, by);
+    ctx.fillText(p.name + (p.opsTag?(' '+p.opsTag):''), bx+4, by);
     if(st.metric){
       ctx.fillText(`${(p.alt*FT2M|0)} m`, bx+4, by+14);
       ctx.fillText(`${p.spd.toFixed(0)} km/h`, bx+4, by+28);
@@ -1136,6 +2911,35 @@ function drawShapes(){
       ctx.shadowBlur = 0;
     }
 
+
+    // --- AEROPUERTO ---
+    if(d.type === 'airport'){
+      // círculo + pista orientada
+      const ang = (d.hdg||0) * Math.PI/180;
+      const lenNm = d.rwyLenNM || 2.0;
+      const half = (lenNm*zoom*PX_PER_NM)/2;
+      const dx = Math.sin(ang)*half;
+      const dy = -Math.cos(ang)*half;
+
+      ctx.beginPath();
+      ctx.arc(s.x, s.y, 10, 0, 2*Math.PI);
+      ctx.stroke();
+
+      ctx.beginPath();
+      ctx.moveTo(s.x-dx, s.y-dy);
+      ctx.lineTo(s.x+dx, s.y+dy);
+      ctx.stroke();
+
+      // etiqueta
+      const name = d.name || d.text || d.id;
+      if(name){
+        ctx.font = 'bold 12px monospace';
+        ctx.textAlign = 'left';
+        ctx.textBaseline = 'middle';
+        ctx.fillText(name, s.x + 14, s.y);
+      }
+    }
+
     ctx.restore();
   });
 
@@ -1269,6 +3073,16 @@ ensureDrawingName(st.drawings[st.drawings.length-1]);
     } else if(tool.tool==='bullseye'){
       st.drawings.push({id,type:'bullseye',x:a.x,y:a.y});
 ensureDrawingName(st.drawings[st.drawings.length-1]);
+    
+    } else if(tool.tool==='airport'){
+      // Crear Aeropuerto como dibujo sincronizable
+      const hdg = Math.round(Math.random()*359);
+      const name = prompt('Nombre/ICAO del aeropuerto (opcional):') || ('APT ' + hdg.toString().padStart(3,'0'));
+      st.drawings.push({id,type:'airport',x:a.x,y:a.y,hdg:hdg,rwyLenNM:2.0,name:name});
+      if(typeof ensureDrawingName==='function') ensureDrawingName(st.drawings[st.drawings.length-1]);
+      try{ repaintAirports && repaintAirports(); }catch(e){}
+      try{ scheduleSync && scheduleSync(); }catch(e){}
+
     } else if(tool.tool==='label'){
       const text=prompt('Texto de etiqueta:');
       if(text) st.drawings.push({id,type:'label',x:a.x,y:a.y,text});
@@ -4108,15 +5922,2694 @@ document.querySelectorAll('#pCmdBody .btn').forEach(btn=>{
 })();
 </script>
   
+
+<script>
+/* =========================
+   AIRPORT OPS SYSTEM (v1)
+   - Airports are drawings of type 'airport' stored in st.drawings (synced)
+   - UI panel: Aeropuertos (right)
+   - Commands: Takeoff / Landing / Abort
+========================= */
+(function(){
+  if(!window.st) return;
+  st.drawings = st.drawings || [];
+  st.planes = st.planes || [];
+
+  function airports(){ return (st.drawings||[]).filter(d=>d && d.type==='airport'); }
+
+  function getPlaneById(id){ return (st.planes||[]).find(p=>p.id===id); }
+  function getAptById(id){ return airports().find(a=>a.id===id); }
+
+  function nmToFt3deg(nm){ return Math.max(0, nm * 318); } // ~3° glideslope
+
+  function angleDiff(a,b){
+    let d = ((b - a + 540) % 360) - 180;
+    return Math.abs(d);
+  }
+  function bearing(fromX, fromY, toX, toY){
+    // bearing degrees (0=N) used in your sim
+    const dx = toX - fromX;
+    const dy = toY - fromY;
+    return (Math.atan2(dx, -dy) * 180/Math.PI + 360) % 360;
+  }
+
+  function repaintAirports(){
+    const aptSel = document.getElementById('aptSelect');
+    const planeSel = document.getElementById('aptPlane');
+    if(!aptSel || !planeSel) return;
+
+    const apts = airports();
+    const planes = st.planes || [];
+
+    const prevA = aptSel.value;
+    aptSel.innerHTML = '';
+    apts.forEach(a=>{
+      const opt=document.createElement('option');
+      opt.value=a.id;
+      opt.textContent = `${a.name||a.id} • RWY ${(a.hdg||0).toFixed(0)}°`;
+      aptSel.appendChild(opt);
+    });
+    if(prevA) aptSel.value = prevA;
+
+    const prevP = planeSel.value;
+    planeSel.innerHTML = '';
+    planes.forEach(p=>{
+      const opt=document.createElement('option');
+      opt.value=p.id;
+      opt.textContent = `${p.id} — ${p.name||''}`;
+      planeSel.appendChild(opt);
+    });
+    if(prevP) planeSel.value = prevP;
+  }
+  window.repaintAirports = repaintAirports;
+
+  // ---- Delete airport ----
+  function deleteAirport(id){
+    const i = (st.drawings||[]).findIndex(d=>d && d.type==='airport' && d.id===id);
+    if(i>=0) st.drawings.splice(i,1);
+    try{ scheduleSync && scheduleSync(); }catch(e){}
+    repaintAirports();
+  }
+
+  // ---- Ops State Machine ----
+  function setOps(p, ops){
+    p.ops = ops;
+  }
+
+  function chooseRunway(apt, p){
+    const hdg = (apt.hdg||0)%360;
+    const hdgOpp = (hdg+180)%360;
+
+    // choose which direction is closer to current heading
+    const d1 = angleDiff(p.hdg||p.tgtHdg||0, hdg);
+    const d2 = angleDiff(p.hdg||p.tgtHdg||0, hdgOpp);
+
+    const finalHdg = (d1<=d2) ? hdg : hdgOpp;
+
+    // runway threshold point: 1 NM "ahead" from center opposite to landing direction
+    const rad = (finalHdg-90)*Math.PI/180;
+    const thrX = (apt.x||0) - Math.cos(rad)*1.0;
+    const thrY = (apt.y||0) - Math.sin(rad)*1.0;
+
+    // FAF: 10 NM out on extended centerline
+    const fafX = thrX - Math.cos(rad)*10.0;
+    const fafY = thrY - Math.sin(rad)*10.0;
+
+    return { finalHdg, thrX, thrY, fafX, fafY, rad };
+  }
+
+  function orderLanding(pid, aptId){
+    const p = getPlaneById(pid);
+    const apt = getAptById(aptId);
+    if(!p || !apt) return;
+
+    const rwy = chooseRunway(apt, p);
+    setOps(p, { mode:'landing', aptId:aptId, phase:'toFAF', ...rwy, ts:Date.now() });
+
+    if(window.logEvent) logEvent(`ATC: ${p.name||p.id} autorizado a aterrizar en ${apt.name||apt.id} RWY ${Math.round(rwy.finalHdg)}°`);
+  }
+
+  function orderTakeoff(pid, aptId){
+    const p = getPlaneById(pid);
+    const apt = getAptById(aptId);
+    if(!p || !apt) return;
+
+    const rwy = chooseRunway(apt, p);
+    // place at threshold
+    p.x = rwy.thrX;
+    p.y = rwy.thrY;
+    p.alt = 0;
+    p.tgtAlt = 0;
+    p.spd = 0;
+    p.tgtSpd = 0;
+    p.hdg = rwy.finalHdg;
+    p.tgtHdg = rwy.finalHdg;
+
+    setOps(p, { mode:'takeoff', aptId:aptId, phase:'roll', ...rwy, ts:Date.now() });
+
+    if(window.logEvent) logEvent(`ATC: ${p.name||p.id} autorizado a despegar de ${apt.name||apt.id} RWY ${Math.round(rwy.finalHdg)}°`);
+  }
+
+  function abortOps(pid){
+    const p = getPlaneById(pid);
+    if(p) p.ops = null;
+    if(window.logEvent) logEvent(`ATC: ${p?.name||pid} abortó procedimiento`);
+  }
+
+  window.orderLanding = orderLanding;
+  window.orderTakeoff = orderTakeoff;
+  window.abortOps = abortOps;
+
+  // ---- Apply ops before physics ----
+  const _origUpdatePlane = window.updatePlane;
+  if(typeof _origUpdatePlane === 'function'){
+    window.updatePlane = function(p, dt){
+      try{
+        if(p && p.ops){
+          const ops = p.ops;
+          const apt = getAptById(ops.aptId);
+          if(!apt){ p.ops=null; }
+          else if(ops.mode==='landing'){
+            // distance to threshold
+            const dThr = Math.hypot((ops.thrX - p.x), (ops.thrY - p.y));
+            const dFaf = Math.hypot((ops.fafX - p.x), (ops.fafY - p.y));
+
+            if(ops.phase==='toFAF'){
+              p.tgtHdg = bearing(p.x,p.y, ops.fafX, ops.fafY);
+              p.tgtSpd = Math.max(200, Math.min(320, (p.tgtSpd||p.spd||280)));
+              p.tgtAlt = Math.max(p.tgtAlt||p.alt||5000, 5000);
+              if(dFaf < 0.7){ ops.phase='final'; }
+            } else if(ops.phase==='final'){
+              // lock centerline + glide
+              p.tgtHdg = ops.finalHdg;
+              const gsAlt = nmToFt3deg(dThr);
+              p.tgtAlt = Math.min(p.alt, gsAlt + 50);
+              p.tgtSpd = Math.max(140, Math.min(180, (p.tgtSpd||p.spd||160)));
+
+              // flare & touchdown
+              if(dThr < 0.35 && p.alt < 200){
+                ops.phase='flare';
+              }
+            } else if(ops.phase==='flare'){
+              p.tgtHdg = ops.finalHdg;
+              p.tgtAlt = 0;
+              p.tgtSpd = 120;
+              if(p.alt < 20){
+                ops.phase='rollout';
+                p.alt = 0; p.tgtAlt = 0;
+              }
+            } else if(ops.phase==='rollout'){
+              p.tgtHdg = ops.finalHdg;
+              p.tgtAlt = 0;
+              p.tgtSpd = 0;
+              if((p.spd||0) < 10){
+                p.spd=0; p.tgtSpd=0;
+                ops.phase='landed';
+                p.ops = {mode:'landed', aptId: ops.aptId, ts:Date.now()};
+                if(window.logEvent) logEvent(`ATC: ${p.name||p.id} aterrizado`);
+              }
+            }
+          } else if(ops.mode==='takeoff'){
+            p.tgtHdg = ops.finalHdg;
+            if(ops.phase==='roll'){
+              p.tgtAlt = 0;
+              p.tgtSpd = 160;
+              if((p.spd||0) >= 150){
+                ops.phase='rotate';
+              }
+            } else if(ops.phase==='rotate'){
+              p.tgtSpd = 220;
+              p.tgtAlt = 3000;
+              if(p.alt > 2500){
+                ops.phase='depart';
+              }
+            } else if(ops.phase==='depart'){
+              p.tgtSpd = 350;
+              p.tgtAlt = Math.max(p.tgtAlt||p.alt, 8000);
+              // clear after some time
+              if(Date.now()-ops.ts > 120000){
+                p.ops = null;
+                if(window.logEvent) logEvent(`ATC: ${p.name||p.id} salida completada`);
+              }
+            }
+          }
+        }
+      }catch(e){ console.warn('ops error', e); }
+
+      return _origUpdatePlane(p, dt);
+    };
+  } else {
+    console.warn('Airport ops: updatePlane not found');
+  }
+
+  // ---- UI bindings ----
+  document.addEventListener('click', (e)=>{
+    const t=e.target;
+    if(!t) return;
+    if(t.id==='aptLand'){
+      const pid = document.getElementById('aptPlane')?.value;
+      const aid = document.getElementById('aptSelect')?.value;
+      if(pid && aid) orderLanding(pid, aid);
+    }
+    if(t.id==='aptTo'){
+      const pid = document.getElementById('aptPlane')?.value;
+      const aid = document.getElementById('aptSelect')?.value;
+      if(pid && aid) orderTakeoff(pid, aid);
+    }
+    if(t.id==='aptAbort'){
+      const pid = document.getElementById('aptPlane')?.value;
+      if(pid) abortOps(pid);
+    }
+    if(t.id==='aptDel'){
+      const aid = document.getElementById('aptSelect')?.value;
+      if(aid && confirm('¿Eliminar este aeropuerto?')) deleteAirport(aid);
+    }
+  });
+
+  // keep panel updated
+  const _safe = window.safeRepaints;
+  window.safeRepaints = function(){
+    try{ _safe && _safe(); }catch(e){}
+    try{ repaintAirports(); }catch(e){}
+  };
+
+  // initial
+  setTimeout(repaintAirports, 400);
+
+})();
+</script>
+
+
+<!-- === AIRPORT CREATION + INTERNATIONAL RWY GRAPHICS PATCH (v2) === -->
+<script>
+(function(){
+  // Prevent double-patching
+  if(window.__APT_PATCH_V2__) return;
+  window.__APT_PATCH_V2__ = true;
+
+  // Helpers
+  const $ = (s,r=document)=>r.querySelector(s);
+  const $$ = (s,r=document)=>Array.from(r.querySelectorAll(s));
+  function clamp(v,a,b){ return Math.max(a,Math.min(b,v)); }
+  function pad2(n){ n=String(n); return n.length===1?("0"+n):n; }
+  function rwyNumberFromHdg(h){ // nearest 10°, 01..36
+    const n = Math.round(((h%360)+360)%360 / 10) || 36;
+    return pad2(n);
+  }
+  function snapDeg(h, step=5){
+    return (Math.round(h/step)*step+360)%360;
+  }
+
+  // Wait until core globals exist
+  function ready(){
+    return window.st && window.cvs && window.ctx &&
+           typeof window.toWorld==="function" &&
+           typeof window.toScreen==="function";
+  }
+
+  function ensureAirportToolUI(){
+    const drawBody = document.getElementById("pDrawBody") || document.getElementById("pDraw");
+    if(!drawBody) return;
+
+    // Add tool button inside the existing tools row (no duplicates)
+    if(!document.getElementById("btnToolAirport")){
+      const btn = document.createElement("button");
+      btn.id = "btnToolAirport";
+      btn.className = "btn mini tool focusable";
+      btn.setAttribute("data-tool","airport");
+      btn.textContent = "Aeropuerto";
+      // Place next to other tool buttons
+      const row = drawBody.querySelector(".row") || drawBody;
+      row.appendChild(btn);
+
+      // Bind like other tool buttons
+      btn.addEventListener("click", ()=>{
+        window.tool = window.tool || {tool:'none'};
+        window.tool.tool = "airport";
+        window.tool.drawing = false;
+        window.tool.a = null;
+        window.tool.b = null;
+        showAirportHelp(true);
+      });
+    }
+
+    // Add help/instructions (single instance)
+    if(!document.getElementById("airportHelp")){
+      const help = document.createElement("div");
+      help.id = "airportHelp";
+      help.className = "card mini";
+      help.style.display = "none";
+      help.innerHTML = `
+        <strong>Modo Aeropuerto</strong><br>
+        <span class="pill">Cómo crear</span><br>
+        1) Pulsa <b>Aeropuerto</b><br>
+        2) En el radar: <b>click y arrastra</b> para orientar la pista<br>
+        3) Suelta para crear. Se te pedirá <b>ICAO</b> (opcional) y se generará la RWY.<br>
+        <span class="pill">Tips</span> SHIFT = snap 10° • Arrastre corto = pista más corta
+      `;
+      drawBody.appendChild(help);
+    }
+  }
+
+  function showAirportHelp(on){
+    const h = document.getElementById("airportHelp");
+    if(h) h.style.display = on ? "" : "none";
+  }
+
+  // Create an airport drawing
+  function createAirportFromDrag(a,b){
+    const dx = b.x - a.x;
+    const dy = b.y - a.y;
+    const distNM = Math.max(0.6, Math.hypot(dx,dy)); // minimum visual runway length in NM
+    // Heading in sim: 0=N, 90=E. We used bearing formula used elsewhere.
+    let hdg = (Math.atan2(dx, -dy) * 180/Math.PI + 360) % 360;
+    // snap
+    const step = window.__APT_SNAP_STEP__ || 10;
+    hdg = snapDeg(hdg, step);
+
+    const cx = (a.x + b.x)/2;
+    const cy = (a.y + b.y)/2;
+
+    const icao = (prompt("ICAO del aeropuerto (opcional):", "") || "").trim().toUpperCase();
+    const rwy = rwyNumberFromHdg(hdg);
+    const name = icao ? `${icao}` : `APT ${rwy}`;
+
+    const apt = {
+      id: "APT-"+Math.random().toString(36).slice(2,6).toUpperCase(),
+      type: "airport",
+      x: cx, y: cy,
+      hdg: hdg,
+      lenNM: clamp(distNM, 0.6, 5.0),
+      widNM: 0.08, // ~500 ft (international feel)
+      icao: icao,
+      rwy: rwy,
+      name: name
+    };
+    window.st.drawings = window.st.drawings || [];
+    window.st.drawings.push(apt);
+
+    try{ window.ensureDrawingName && ensureDrawingName(apt); }catch(_){}
+    try{ window.safeRepaints && safeRepaints(); }catch(_){}
+    try{ window.scheduleSync && scheduleSync(); }catch(_){}
+    try{ window.repaintAirports && repaintAirports(); }catch(_){}
+  }
+
+  // International runway render
+  function drawAirportIntl(d){
+    const s = toScreen(d.x, d.y);
+    const len = (d.lenNM || 2.0) * window.zoom * window.PX_PER_NM;
+    const wid = (d.widNM || 0.08) * window.zoom * window.PX_PER_NM;
+
+    const ang = ((d.hdg||0) * Math.PI/180);
+
+    // transform to runway coordinate system
+    ctx.save();
+    ctx.translate(s.x, s.y);
+    ctx.rotate(ang);
+
+    // asphalt
+    ctx.fillStyle = "rgba(200,200,200,0.10)";
+    ctx.strokeStyle = "rgba(255,234,0,0.80)";
+    ctx.lineWidth = 1.2;
+    ctx.beginPath();
+    ctx.rect(-wid/2, -len/2, wid, len);
+    ctx.fill();
+    ctx.stroke();
+
+    // centerline dashed (international)
+    ctx.strokeStyle = "rgba(255,255,255,0.55)";
+    ctx.lineWidth = 1;
+    ctx.setLineDash([6,8]);
+    ctx.beginPath();
+    ctx.moveTo(0, -len/2 + 12);
+    ctx.lineTo(0,  len/2 - 12);
+    ctx.stroke();
+    ctx.setLineDash([]);
+
+    // threshold bars (piano keys)
+    const bars = 6;
+    const barW = wid*0.12;
+    const barH = 10;
+    ctx.fillStyle = "rgba(255,255,255,0.60)";
+    for(let i=0;i<bars;i++){
+      const x = -wid/2 + (i+1)*(wid/(bars+1)) - barW/2;
+      // near both thresholds
+      ctx.fillRect(x, -len/2 + 6, barW, barH);
+      ctx.fillRect(x,  len/2 - 6 - barH, barW, barH);
+    }
+
+    // aiming point blocks
+    const aimY = len*0.22;
+    const aimW = wid*0.22;
+    const aimH = 10;
+    ctx.fillRect(-wid*0.20 - aimW/2, -len/2 + aimY, aimW, aimH);
+    ctx.fillRect(+wid*0.20 - aimW/2, -len/2 + aimY, aimW, aimH);
+    ctx.fillRect(-wid*0.20 - aimW/2,  len/2 - aimY - aimH, aimW, aimH);
+    ctx.fillRect(+wid*0.20 - aimW/2,  len/2 - aimY - aimH, aimW, aimH);
+
+    // runway numbers at both ends
+    const rwy = (d.rwy || rwyNumberFromHdg(d.hdg||0));
+    const opp = rwyNumberFromHdg((d.hdg||0)+180);
+    ctx.font = "bold 12px monospace";
+    ctx.textAlign = "center";
+    ctx.textBaseline = "middle";
+    ctx.fillStyle = "rgba(255,255,255,0.70)";
+    ctx.fillText(rwy, 0, -len/2 + 28);
+    ctx.rotate(Math.PI); // flip for opposite end
+    ctx.fillText(opp, 0, -len/2 + 28);
+    ctx.rotate(-Math.PI);
+
+    ctx.restore();
+
+    // ICAO label outside
+    const label = (d.icao||d.name||d.id||"APT").toUpperCase();
+    ctx.fillStyle = "#ffea00";
+    ctx.font = "12px monospace";
+    ctx.textAlign = "left";
+    ctx.fillText(label, s.x + 10, s.y - 10);
+  }
+
+  function hookDrawShapes(){
+    if(window.__APT_DRAW_HOOKED__) return;
+    window.__APT_DRAW_HOOKED__ = true;
+
+    const orig = window.drawShapes;
+    if(typeof orig !== "function") return;
+
+    window.drawShapes = function(){
+      // draw original shapes first
+      orig();
+
+      // draw airports on top (if any)
+      try{
+        const apts = (window.st.drawings||[]).filter(d=>d && d.type==="airport");
+        apts.forEach(drawAirportIntl);
+      }catch(e){ console.warn("draw airport fail", e); }
+    };
+  }
+
+  function hookAirportToolDrag(){
+    if(window.__APT_TOOL_HOOKED__) return;
+    window.__APT_TOOL_HOOKED__ = true;
+
+    // Use same tool object used by draw editor
+    window.tool = window.tool || {tool:'none',drawing:false,a:null,b:null};
+
+    // Drag to define runway heading/length
+    cvs.addEventListener("mousedown", (e)=>{
+      if(e.button!==0 || e.altKey) return;
+      if(window.tool.tool!=="airport") return;
+      const r=cvs.getBoundingClientRect();
+      const w=toWorld(e.clientX-r.left, e.clientY-r.top);
+      window.tool.drawing = true;
+      window.tool.a = {x:w.x, y:w.y};
+      window.tool.b = {x:w.x, y:w.y};
+      // prevent measure/dragging plane
+      e.preventDefault(); e.stopPropagation();
+      showAirportHelp(true);
+    }, true);
+
+    window.addEventListener("mousemove", (e)=>{
+      if(!window.tool.drawing || window.tool.tool!=="airport") return;
+      if((e.buttons||0)!==1) return;
+      const r=cvs.getBoundingClientRect();
+      const w=toWorld(e.clientX-r.left, e.clientY-r.top);
+      window.tool.b = {x:w.x, y:w.y};
+    }, true);
+
+    window.addEventListener("mouseup", (e)=>{
+      if(!window.tool.drawing || window.tool.tool!=="airport") return;
+      window.tool.drawing = false;
+      const a = window.tool.a, b = window.tool.b;
+      window.tool.a=null; window.tool.b=null;
+      if(a && b){
+        createAirportFromDrag(a,b);
+      }
+      e.preventDefault(); e.stopPropagation();
+    }, true);
+
+    // Preview runway while dragging (using your existing preview mechanism)
+    const origDrawShapes = window.drawShapes;
+    // We'll rely on your existing preview dashed lines, but add runway preview
+    if(typeof origDrawShapes === "function" && !window.__APT_PREVIEW__){
+      window.__APT_PREVIEW__ = true;
+      window.drawShapes = function(){
+        origDrawShapes();
+        try{
+          if(window.tool && window.tool.drawing && window.tool.tool==="airport" && window.tool.a && window.tool.b){
+            const a=window.tool.a, b=window.tool.b;
+            const dx=b.x-a.x, dy=b.y-a.y;
+            const distNM=Math.max(0.6, Math.hypot(dx,dy));
+            let hdg=(Math.atan2(dx, -dy)*180/Math.PI+360)%360;
+            hdg = snapDeg(hdg, 10);
+            const tmp={x:(a.x+b.x)/2,y:(a.y+b.y)/2,hdg:hdg,lenNM:distNM,widNM:0.08,rwy:rwyNumberFromHdg(hdg),icao:""};
+            // draw semi-transparent preview
+            ctx.save();
+            ctx.globalAlpha = 0.6;
+            drawAirportIntl(tmp);
+            ctx.restore();
+          }
+        }catch(_){}
+      };
+    }
+  }
+
+  // Boot
+  const boot = ()=>{
+    if(!ready()) return false;
+    ensureAirportToolUI();
+    hookDrawShapes();
+    hookAirportToolDrag();
+
+    // Hide help when tool changes away
+    document.addEventListener("click", (e)=>{
+      const t=e.target;
+      if(t && t.classList && t.classList.contains("tool") && t.getAttribute("data-tool")!=="airport"){
+        showAirportHelp(false);
+      }
+    }, true);
+
+    return true;
+  };
+
+  // Try now; otherwise retry briefly
+  if(!boot()){
+    let tries=0;
+    const iv=setInterval(()=>{
+      tries++;
+      if(boot() || tries>40) clearInterval(iv);
+    }, 150);
+  }
+})();
+</script>
+<!-- === END AIRPORT CREATION + INTERNATIONAL RWY GRAPHICS PATCH === -->
+
+
+<!-- === AIRWY TOOL + RWY EDIT + OPS SELECTOR SYNC (v3) === -->
+<script>
+(function(){
+  if(window.__AIRWY_PATCH_V3__) return;
+  window.__AIRWY_PATCH_V3__ = true;
+
+  const $ = (s,r=document)=>r.querySelector(s);
+  const $$ = (s,r=document)=>Array.from(r.querySelectorAll(s));
+  const pad2 = (n)=> (String(n).length===1?("0"+n):String(n));
+  const rwyNum = (hdg)=>{ const n = Math.round((((hdg%360)+360)%360)/10) || 36; return pad2(n); };
+  const snapDeg = (h,step=5)=> (Math.round(h/step)*step+360)%360;
+
+  function ensureUI(){
+    const drawBody = document.getElementById("pDrawBody") || document.getElementById("pDraw");
+    if(!drawBody) return;
+
+    // Insert AIRWY button near other tool buttons (no duplicates)
+    if(!document.getElementById("btnToolAIRWY")){
+      const btn = document.createElement("button");
+      btn.id = "btnToolAIRWY";
+      btn.className = "btn mini tool focusable";
+      btn.setAttribute("data-tool","airwy");
+      btn.textContent = "AIRWY";
+      // place in first tools row if exists
+      const row = drawBody.querySelector(".row") || drawBody;
+      row.appendChild(btn);
+
+      btn.addEventListener("click", ()=>{
+        window.tool = window.tool || {tool:'none',drawing:false,a:null,b:null};
+        window.tool.tool = "airwy";
+        window.tool.drawing = false;
+        window.tool.a=null; window.tool.b=null;
+        showHelp(true);
+      });
+    }
+
+    if(!document.getElementById("airwyHelp")){
+      const help = document.createElement("div");
+      help.id = "airwyHelp";
+      help.className = "card mini";
+      help.style.display = "none";
+      help.innerHTML = `
+        <strong>Modo AIRWY (Editar RWY)</strong><br>
+        <span class="pill">Cómo usar</span><br>
+        1) Pulsa <b>AIRWY</b><br>
+        2) En el radar: <b>click y arrastra</b> desde (o cerca) del aeropuerto hacia la nueva dirección<br>
+        3) Suelta: se actualiza el <b>HDG/RWY</b> del aeropuerto más cercano y se dibuja una línea entrecortada.<br>
+        SHIFT = snap 10°
+      `;
+      drawBody.appendChild(help);
+    }
+  }
+
+  function showHelp(on){
+    const h = document.getElementById("airwyHelp");
+    if(h) h.style.display = on ? "" : "none";
+  }
+
+  function nearestAirport(wx, wy, tolNM=3){
+    const apts = (window.st && window.st.drawings) ? st.drawings.filter(d=>d && d.type==="airport") : [];
+    let best=null, dBest=1e9;
+    apts.forEach(a=>{
+      const d = Math.hypot((a.x-wx),(a.y-wy));
+      if(d<dBest){ dBest=d; best=a; }
+    });
+    return (best && dBest<=tolNM) ? best : null;
+  }
+
+  function addAirwyLine(a,b){
+    st.drawings = st.drawings || [];
+    const id = "AWY-"+Math.random().toString(36).slice(2,6).toUpperCase();
+    st.drawings.push({id, type:"airwy", x:a.x, y:a.y, ex:b.x, ey:b.y});
+  }
+
+  function setAirportHeadingFromLine(apt, a, b){
+    const dx = b.x - a.x;
+    const dy = b.y - a.y;
+    let hdg = (Math.atan2(dx, -dy) * 180/Math.PI + 360) % 360;
+    const step = (window.event && window.event.shiftKey) ? 10 : 5;
+    hdg = snapDeg(hdg, step);
+    apt.hdg = hdg;
+    apt.rwy = rwyNum(hdg);
+    apt.name = apt.icao ? apt.icao : (`APT ${apt.rwy}`);
+  }
+
+  function hookAirwyDrag(){
+    if(window.__AIRWY_DRAG_HOOKED__) return;
+    window.__AIRWY_DRAG_HOOKED__ = true;
+
+    if(!window.cvs || typeof toWorld!=="function") return;
+    window.tool = window.tool || {tool:'none',drawing:false,a:null,b:null};
+
+    cvs.addEventListener("mousedown", (e)=>{
+      if(e.button!==0 || e.altKey) return;
+      if(tool.tool!=="airwy") return;
+      const r=cvs.getBoundingClientRect();
+      const w=toWorld(e.clientX-r.left, e.clientY-r.top);
+      tool.drawing = true;
+      tool.a = {x:w.x, y:w.y};
+      tool.b = {x:w.x, y:w.y};
+      e.preventDefault(); e.stopPropagation();
+      showHelp(true);
+    }, true);
+
+    window.addEventListener("mousemove", (e)=>{
+      if(!tool.drawing || tool.tool!=="airwy") return;
+      if((e.buttons||0)!==1) return;
+      const r=cvs.getBoundingClientRect();
+      const w=toWorld(e.clientX-r.left, e.clientY-r.top);
+      tool.b = {x:w.x, y:w.y};
+    }, true);
+
+    window.addEventListener("mouseup", (e)=>{
+      if(!tool.drawing || tool.tool!=="airwy") return;
+      tool.drawing = false;
+      const a=tool.a, b=tool.b;
+      tool.a=null; tool.b=null;
+      if(a && b){
+        const apt = nearestAirport(a.x, a.y, 4) || nearestAirport((a.x+b.x)/2, (a.y+b.y)/2, 4);
+        if(apt){
+          setAirportHeadingFromLine(apt, a, b);
+        }
+        addAirwyLine(a,b);
+        try{ window.scheduleSync && scheduleSync(); }catch(_){}
+      }
+      e.preventDefault(); e.stopPropagation();
+    }, true);
+  }
+
+  // Render AIRWY dashed lines and runway preview while dragging
+  function hookDrawAirwy(){
+    if(window.__AIRWY_DRAW_HOOKED__) return;
+    window.__AIRWY_DRAW_HOOKED__ = true;
+
+    const orig = window.drawShapes;
+    if(typeof orig !== "function") return;
+
+    window.drawShapes = function(){
+      orig();
+      try{
+        // draw existing airwy objects
+        const arr = (st.drawings||[]).filter(d=>d && d.type==="airwy");
+        arr.forEach(d=>{
+          const s = toScreen(d.x,d.y);
+          const e = toScreen(d.ex,d.ey);
+          ctx.save();
+          ctx.strokeStyle = "rgba(255,234,0,0.85)";
+          ctx.lineWidth = 1.0;
+          ctx.setLineDash([6,6]);
+          ctx.beginPath();
+          ctx.moveTo(s.x,s.y);
+          ctx.lineTo(e.x,e.y);
+          ctx.stroke();
+          ctx.setLineDash([]);
+          ctx.restore();
+        });
+
+        // preview while dragging
+        if(tool && tool.drawing && tool.tool==="airwy" && tool.a && tool.b){
+          const s = toScreen(tool.a.x, tool.a.y);
+          const e = toScreen(tool.b.x, tool.b.y);
+          ctx.save();
+          ctx.strokeStyle = "rgba(255,234,0,0.65)";
+          ctx.lineWidth = 1.0;
+          ctx.setLineDash([6,6]);
+          ctx.beginPath();
+          ctx.moveTo(s.x,s.y);
+          ctx.lineTo(e.x,e.y);
+          ctx.stroke();
+          ctx.setLineDash([]);
+          ctx.restore();
+        }
+      }catch(_){}
+    };
+  }
+
+  // ---- OPS SELECTORS SYNC ----
+  // Some builds create airport/plane selects for landing/takeoff. We keep them always in sync with st.planes.
+  function syncOpsSelects(){
+    const selPlane1 = document.getElementById("opsPlaneSel") || document.getElementById("planeOpsSelect") || document.getElementById("planeSelect");
+    const selPlane2 = document.getElementById("opsPlaneSelTO") || document.getElementById("planeOpsSelectTO") || document.getElementById("planeSelectTO");
+
+    const planes = (window.st && Array.isArray(st.planes)) ? st.planes : [];
+    const makeOpts = (sel)=>{
+      if(!sel) return;
+      const cur = sel.value;
+      sel.innerHTML = "";
+      planes.forEach(p=>{
+        const opt=document.createElement("option");
+        opt.value = p.id;
+        opt.textContent = `${p.id} — ${p.name||p.id}`;
+        sel.appendChild(opt);
+      });
+      // restore if possible
+      if(cur && planes.some(p=>p.id===cur)) sel.value = cur;
+    };
+    makeOpts(selPlane1);
+    makeOpts(selPlane2);
+  }
+
+  function hookPlaneAddButtons(){
+    if(window.__AIRWY_PLANEADD_HOOKED__) return;
+    window.__AIRWY_PLANEADD_HOOKED__ = true;
+
+    // Keep selects updated every repaintPlanesList + after add buttons
+    if(typeof window.repaintPlanesList === "function"){
+      const orig = window.repaintPlanesList;
+      window.repaintPlanesList = function(){
+        orig();
+        try{ syncOpsSelects(); }catch(_){}
+      };
+    }
+
+    // Also patch add buttons to sync immediately
+    ["addFighter","addCom"].forEach(id=>{
+      const b = document.getElementById(id);
+      if(!b) return;
+      b.addEventListener("click", ()=> setTimeout(syncOpsSelects, 0), true);
+    });
+
+    // Periodic safety sync (lightweight)
+    setInterval(()=>{ try{ syncOpsSelects(); }catch(_){ } }, 1500);
+  }
+
+  function boot(){
+    if(!window.st || !window.cvs || !window.ctx) return false;
+    ensureUI();
+    hookAirwyDrag();
+    hookDrawAirwy();
+    hookPlaneAddButtons();
+    return true;
+  }
+
+  if(!boot()){
+    let tries=0;
+    const iv=setInterval(()=>{
+      tries++;
+      if(boot() || tries>40) clearInterval(iv);
+    }, 150);
+  }
+})();
+</script>
+<!-- === END AIRWY TOOL + RWY EDIT + OPS SELECTOR SYNC === -->
+
+
+<!-- === AIRPORT OPS + AIRWY FIX + REALISTIC PROCEDURES (v4) === -->
+<script>
+(function(){
+  if(window.__APT_V4__) return;
+  window.__APT_V4__ = true;
+
+  const $=(s,r=document)=>r.querySelector(s);
+  const $$=(s,r=document)=>Array.from(r.querySelectorAll(s));
+  const FT_PER_NM_AT_3DEG = 318.0; // ~ 3° glideslope
+  const MIN_FINAL_NM = 8.0;
+  const FLARE_FT = 50;
+  const ROLL_OUT_SPD_KTS = 40;
+
+  const pad2=n=>String(n).padStart(2,'0');
+  const rwyNum=hdg=>{
+    const n = Math.round((((hdg%360)+360)%360)/10) || 36;
+    return pad2(n);
+  };
+  const snapDeg=(h,step)=>((Math.round(h/step)*step)+360)%360;
+
+  function ready(){
+    return window.st && document.getElementById('radar') && typeof toWorld==='function' && typeof toScreen==='function';
+  }
+
+  // ----- Airports live in st.drawings as {type:'airport'} -----
+  function airports(){
+    return (st.drawings||[]).filter(d=>d && d.type==='airport');
+  }
+
+  function nearestAirport(x,y,tolNM=6){
+    let best=null, dBest=1e9;
+    airports().forEach(a=>{
+      const d=Math.hypot(a.x-x,a.y-y);
+      if(d<dBest){ dBest=d; best=a; }
+    });
+    return (best && dBest<=tolNM)?best:null;
+  }
+
+  // ----- UI injection (AIRWY button must appear) -----
+  function injectButtons(){
+    const drawBody = document.getElementById('pDrawBody') || document.getElementById('pDraw');
+    if(!drawBody) return;
+
+    // Find the first tools row in draw body
+    const toolRow = drawBody.querySelector('.row') || drawBody;
+
+    // AIRWY button (no duplicates)
+    if(!document.getElementById('btnToolAIRWY')){
+      const btn=document.createElement('button');
+      btn.id='btnToolAIRWY';
+      btn.className='btn mini tool focusable';
+      btn.setAttribute('data-tool','airwy');
+      btn.textContent='AIRWY';
+      toolRow.appendChild(btn);
+
+      btn.addEventListener('click', ()=>{
+        window.tool = window.tool || {tool:'none',drawing:false,a:null,b:null};
+        tool.tool='airwy';
+        tool.drawing=false; tool.a=null; tool.b=null;
+        showAirwyHelp(true);
+      }, true);
+    }
+
+    // AIRWY help
+    if(!document.getElementById('airwyHelp')){
+      const help=document.createElement('div');
+      help.id='airwyHelp';
+      help.className='card mini';
+      help.style.display='none';
+      help.innerHTML = `
+        <strong>AIRWY</strong> (editar rumbo RWY)<br>
+        1) Pulsa <b>AIRWY</b><br>
+        2) En el radar: <b>click y arrastra</b> desde el aeropuerto hacia el nuevo rumbo<br>
+        3) Suelta: actualiza el HDG/RWY del aeropuerto y deja guía entrecortada.<br>
+        SHIFT = snap 10°
+      `;
+      drawBody.appendChild(help);
+    }
+  }
+  function showAirwyHelp(on){
+    const h=document.getElementById('airwyHelp');
+    if(h) h.style.display = on ? '' : 'none';
+  }
+
+  // ----- AIRWY drawing + RWY edit -----
+  function ensureAirwyHooks(){
+    if(window.__AIRWY_HOOKS_V4__) return;
+    window.__AIRWY_HOOKS_V4__ = true;
+
+    const cvs=document.getElementById('radar');
+
+    window.tool = window.tool || {tool:'none',drawing:false,a:null,b:null};
+
+    // Add dashed line objects into drawings
+    function addAirwyLine(a,b){
+      st.drawings = st.drawings || [];
+      st.drawings.push({id:'AWY-'+Math.random().toString(36).slice(2,6).toUpperCase(), type:'airwy', x:a.x,y:a.y, ex:b.x, ey:b.y});
+    }
+
+    function setAirportHeading(apt, a, b, shift){
+      const dx=b.x-a.x, dy=b.y-a.y;
+      let hdg=(Math.atan2(dx, -dy)*180/Math.PI+360)%360;
+      hdg = snapDeg(hdg, shift?10:5);
+      apt.hdg = hdg;
+      apt.rwy = rwyNum(hdg);
+      apt.name = apt.icao ? apt.icao : (`APT ${apt.rwy}`);
+    }
+
+    cvs.addEventListener('mousedown', (e)=>{
+      if(e.button!==0 || e.altKey) return;
+      if(tool.tool!=='airwy') return;
+      const r=cvs.getBoundingClientRect();
+      const w=toWorld(e.clientX-r.left, e.clientY-r.top);
+      tool.drawing=true; tool.a={x:w.x,y:w.y}; tool.b={x:w.x,y:w.y};
+      e.preventDefault(); e.stopPropagation();
+    }, true);
+
+    window.addEventListener('mousemove', (e)=>{
+      if(!tool.drawing || tool.tool!=='airwy') return;
+      if((e.buttons||0)!==1) return;
+      const r=cvs.getBoundingClientRect();
+      const w=toWorld(e.clientX-r.left, e.clientY-r.top);
+      tool.b={x:w.x,y:w.y};
+    }, true);
+
+    window.addEventListener('mouseup', (e)=>{
+      if(!tool.drawing || tool.tool!=='airwy') return;
+      tool.drawing=false;
+      const a=tool.a, b=tool.b;
+      tool.a=null; tool.b=null;
+      if(a && b){
+        // Prefer airport near start point; fallback to mid
+        const mid={x:(a.x+b.x)/2, y:(a.y+b.y)/2};
+        const apt = nearestAirport(a.x,a.y,8) || nearestAirport(mid.x,mid.y,8);
+        if(apt) setAirportHeading(apt, a, b, e.shiftKey);
+        addAirwyLine(a,b);
+        try{ scheduleSync && scheduleSync(); }catch(_){}
+        try{ repaintAirports && repaintAirports(); }catch(_){}
+      }
+      e.preventDefault(); e.stopPropagation();
+    }, true);
+
+    // Draw dashed lines & preview by extending drawShapes once
+    if(typeof window.drawShapes==='function' && !window.__AIRWY_DRAW_V4__){
+      window.__AIRWY_DRAW_V4__=true;
+      const orig=window.drawShapes;
+      window.drawShapes=function(){
+        orig();
+        try{
+          const list=(st.drawings||[]).filter(d=>d && d.type==='airwy');
+          list.forEach(d=>{
+            const s=toScreen(d.x,d.y), e=toScreen(d.ex,d.ey);
+            ctx.save();
+            ctx.strokeStyle='rgba(255,234,0,0.85)';
+            ctx.lineWidth=1.0;
+            ctx.setLineDash([6,6]);
+            ctx.beginPath(); ctx.moveTo(s.x,s.y); ctx.lineTo(e.x,e.y); ctx.stroke();
+            ctx.setLineDash([]);
+            ctx.restore();
+          });
+          if(tool && tool.drawing && tool.tool==='airwy' && tool.a && tool.b){
+            const s=toScreen(tool.a.x,tool.a.y), e=toScreen(tool.b.x,tool.b.y);
+            ctx.save();
+            ctx.strokeStyle='rgba(255,234,0,0.55)';
+            ctx.lineWidth=1.0;
+            ctx.setLineDash([6,6]);
+            ctx.beginPath(); ctx.moveTo(s.x,s.y); ctx.lineTo(e.x,e.y); ctx.stroke();
+            ctx.setLineDash([]);
+            ctx.restore();
+          }
+        }catch(_){}
+      };
+    }
+  }
+
+  // ----- Airport Ops Panel: ALWAYS sync planes + airports (immediate) -----
+  function ensureAirportPanel(){
+    // try find an existing airport panel; otherwise create one in right column
+    let panel = document.getElementById('pAirports');
+    if(panel) return;
+
+    const right = document.getElementById('right');
+    if(!right) return;
+
+    panel = document.createElement('section');
+    panel.id='pAirports';
+    panel.className='panel';
+    panel.innerHTML = `
+      <div class="panel-header"><h3>Aeropuertos</h3><span class="toggle" data-target="#pAirBody">▾</span></div>
+      <div id="pAirBody" class="panel-body">
+        <div class="row">
+          <select id="aptSel" class="ghost focusable" style="flex:1"></select>
+          <button id="aptRefresh" class="btn mini focusable">🗑</button>
+        </div>
+        <div class="row">
+          <select id="planeSelOps" class="ghost focusable" style="flex:1"></select>
+          <select id="opSel" class="ghost focusable" style="width:120px">
+            <option value="LAND">LAND</option>
+            <option value="DEPART">DEPART</option>
+            <option value="RANDOM">RANDOM</option>
+          </select>
+        </div>
+        <div class="row">
+          <button id="doLand" class="btn mini focusable">🛬 LAND</button>
+          <button id="doDep" class="btn mini focusable">🛫 DEPART</button>
+          <button id="doAbort" class="btn mini focusable">⛔ ABORT</button>
+        </div>
+        <div class="mini" id="aptHint" style="opacity:.85"></div>
+      </div>
+    `;
+    right.prepend(panel);
+
+    // rebind toggle on dynamically created panel
+    const tgl = panel.querySelector('.toggle');
+    if(tgl && typeof window.togglePanel==='function'){
+      tgl.addEventListener('click',()=>togglePanel(tgl));
+    }else if(tgl){
+      tgl.addEventListener('click',()=>{
+        const tgt = tgl.getAttribute('data-target');
+        const b = document.querySelector(tgt);
+        if(!b) return;
+        const v = b.style.display!=='none';
+        b.style.display = v?'none':'';
+        tgl.textContent = v?'▸':'▾';
+      });
+    }
+
+    panel.querySelector('#aptRefresh').addEventListener('click', ()=>{ syncAirportOpsUI(true); }, true);
+    panel.querySelector('#doLand').addEventListener('click', ()=>{
+      const pid = panel.querySelector('#planeSelOps').value;
+      const aid = panel.querySelector('#aptSel').value;
+      if(pid && aid) orderLandingReal(pid, aid);
+    }, true);
+    panel.querySelector('#doDep').addEventListener('click', ()=>{
+      const pid = panel.querySelector('#planeSelOps').value;
+      const aid = panel.querySelector('#aptSel').value;
+      if(pid && aid) orderTakeoffReal(pid, aid);
+    }, true);
+    panel.querySelector('#doAbort').addEventListener('click', ()=>{
+      const pid = panel.querySelector('#planeSelOps').value;
+      const p = (st.planes||[]).find(x=>x.id===pid);
+      if(p){ p.ops=null; p.opsTag=''; }
+    }, true);
+  }
+
+  function syncAirportOpsUI(force){
+    ensureAirportPanel();
+    const aptSel = document.getElementById('aptSel');
+    const planeSel = document.getElementById('planeSelOps');
+    const hint = document.getElementById('aptHint');
+    if(!aptSel || !planeSel) return;
+
+    const apts = airports();
+    const planes = (st.planes||[]);
+
+    const curA = aptSel.value;
+    aptSel.innerHTML='';
+    apts.forEach(a=>{
+      const opt=document.createElement('option');
+      opt.value = a.id;
+      opt.textContent = `${(a.icao||a.name||a.id)} RWY ${a.rwy||rwyNum(a.hdg||0)}`;
+      aptSel.appendChild(opt);
+    });
+    if(curA && apts.some(a=>a.id===curA)) aptSel.value=curA;
+
+    const curP = planeSel.value;
+    planeSel.innerHTML='';
+    planes.forEach(p=>{
+      const opt=document.createElement('option');
+      opt.value=p.id;
+      opt.textContent=`${p.id} — ${p.name||p.id}`;
+      planeSel.appendChild(opt);
+    });
+    if(curP && planes.some(p=>p.id===curP)) planeSel.value=curP;
+
+    if(hint){
+      hint.textContent = `AEROPUERTOS: ${apts.length} • AVIONES: ${planes.length}`;
+    }
+  }
+
+  // Hook into plane & drawing updates so UI syncs regardless of creation order
+  function hookSyncPoints(){
+    if(window.__APT_SYNCPOINTS_V4__) return;
+    window.__APT_SYNCPOINTS_V4__ = true;
+
+    // Wrap repaintPlanesList
+    if(typeof window.repaintPlanesList==='function'){
+      const orig=window.repaintPlanesList;
+      window.repaintPlanesList=function(){
+        orig();
+        try{ syncAirportOpsUI(false); }catch(_){}
+      };
+    }
+
+    // Wrap ensureDrawingName if exists (called on drawings add)
+    if(typeof window.ensureDrawingName==='function'){
+      const orig=window.ensureDrawingName;
+      window.ensureDrawingName=function(d){
+        const r=orig(d);
+        try{ syncAirportOpsUI(false); }catch(_){}
+        return r;
+      };
+    }
+
+    // Wrap scheduleSync (cloud sync scheduler) if exists
+    if(typeof window.scheduleSync==='function'){
+      const orig=window.scheduleSync;
+      window.scheduleSync=function(){
+        const r=orig();
+        try{ syncAirportOpsUI(false); }catch(_){}
+        return r;
+      };
+    }
+
+    // Add button hooks for +caza/+com
+    ['addFighter','addCom'].forEach(id=>{
+      const b=document.getElementById(id);
+      if(b) b.addEventListener('click', ()=>setTimeout(()=>syncAirportOpsUI(true),0), true);
+    });
+
+    // Periodic safety
+    setInterval(()=>{ try{ syncAirportOpsUI(false);}catch(_){ } }, 1200);
+  }
+
+  // ----- Realistic-ish procedures (simple, stable, aviation-shaped) -----
+  function ktToNmps(kts){ return kts/3600.0; }
+  function ftPerMinFromKtsAndAngle(kts, deg){ // approx: VS = GS * tan(angle)
+    const nmps = ktToNmps(kts);
+    const ftps = nmps * 6076.12 * Math.tan(deg*Math.PI/180);
+    return ftps*60;
+  }
+
+  function runwayThreshold(apt, which){ // which: 'near' for approach direction (hdg), 'far' opposite
+    const len = (apt.lenNM||2.0);
+    const hdg = (apt.hdg||0);
+    const ang = (hdg-90)*Math.PI/180;
+    // runway axis vector in world coords for hdg
+    const vx = Math.cos(ang);
+    const vy = Math.sin(ang);
+    // center to thresholds
+    const half = len/2;
+    if(which==='near'){
+      return {x: apt.x - vx*half, y: apt.y - vy*half, hdg: hdg}; // approach toward +vx/+vy
+    }else{
+      return {x: apt.x + vx*half, y: apt.y + vy*half, hdg: (hdg+180)%360};
+    }
+  }
+
+  function orderLandingReal(pid, aptId){
+    const p=(st.planes||[]).find(x=>x.id===pid);
+    const apt=airports().find(a=>a.id===aptId);
+    if(!p||!apt) return;
+
+    const thr = runwayThreshold(apt,'near');
+    // Initial fix: a point on extended centerline 8-12 NM out
+    const finalNM = Math.max(MIN_FINAL_NM, Math.min(12, (p.alt||12000)/FT_PER_NM_AT_3DEG));
+    const ang = (thr.hdg-90)*Math.PI/180;
+    const vx = Math.cos(ang), vy = Math.sin(ang);
+    const fix = {x: thr.x - vx*finalNM, y: thr.y - vy*finalNM};
+
+    p.ops = {
+      kind:'landing',
+      aptId: apt.id,
+      phase:'intercept',
+      fix: fix,
+      thr: {x:thr.x,y:thr.y,hdg:thr.hdg},
+      gsDeg: 3.0
+    };
+    p.opsTag = 'LAND';
+  }
+
+  function orderTakeoffReal(pid, aptId){
+    const p=(st.planes||[]).find(x=>x.id===pid);
+    const apt=airports().find(a=>a.id===aptId);
+    if(!p||!apt) return;
+
+    const thr = runwayThreshold(apt,'near');
+    // Place at threshold, aligned runway
+    p.x = thr.x; p.y = thr.y;
+    p.hdg = thr.hdg; p.tgtHdg = thr.hdg;
+    p.alt = 0; p.tgtAlt = 0;
+    // speed in your sim is km/h-ish; but labels convert; we keep your internal
+    p.spd = 0; p.tgtSpd = 0;
+
+    p.ops = {
+      kind:'takeoff',
+      aptId: apt.id,
+      phase:'roll',
+      hdg: thr.hdg,
+      vr_kts: 140, // rotate speed typical light jet
+      v2_kts: 160,
+      accel_kts: 6, // per second
+      climb_ftpm: 2500
+    };
+    p.opsTag = 'DEPART';
+  }
+
+  // Update ops each sim tick by wrapping updatePlane
+  function hookOpsUpdate(){
+    if(window.__OPS_UPDATE_V4__) return;
+    window.__OPS_UPDATE_V4__ = true;
+
+    // Wrap updatePlane function if exists
+    if(typeof window.updatePlane === 'function'){
+      const orig = window.updatePlane;
+      window.updatePlane = function(p, dt){
+        // Apply flight ops BEFORE physics to set targets
+        try{ updateOps(p, dt); }catch(_){}
+        return orig(p, dt);
+      };
+    } else {
+      // fallback: periodic
+      setInterval(()=>{ (st.planes||[]).forEach(p=>updateOps(p, 0.2)); }, 200);
+    }
+  }
+
+  function updateOps(p, dt){
+    if(!p || !p.ops) return;
+    const kind=p.ops.kind;
+    const apt = airports().find(a=>a.id===p.ops.aptId);
+    if(!apt){ p.ops=null; p.opsTag=''; return; }
+
+    if(kind==='landing'){
+      const thr = p.ops.thr;
+      const fix = p.ops.fix;
+
+      const dxF = fix.x - p.x, dyF = fix.y - p.y;
+      const distFix = Math.hypot(dxF, dyF);
+      const dxT = thr.x - p.x, dyT = thr.y - p.y;
+      const distThr = Math.hypot(dxT, dyT);
+
+      // Heading control: intercept fix then track runway heading
+      const brgFix = (Math.atan2(dxF, -dyF)*180/Math.PI+360)%360;
+      const brgThr = (Math.atan2(dxT, -dyT)*180/Math.PI+360)%360;
+
+      if(p.ops.phase==='intercept'){
+        p.tgtHdg = brgFix;
+        // slow to approach speed gradually
+        const appKts = 160;
+        p.tgtSpd = Math.max(220, appKts*1.852); // internal uses km/h style in label; keep reasonable
+        // descend to glide intercept height
+        const desiredAlt = Math.max(2000, distThr*FT_PER_NM_AT_3DEG);
+        p.tgtAlt = desiredAlt;
+        if(distFix < 0.6){
+          p.ops.phase='final';
+        }
+      } else if(p.ops.phase==='final'){
+        // track runway centerline to threshold
+        p.tgtHdg = thr.hdg;
+        // glideslope: altitude should be ~ distance to threshold * 318 ft/NM
+        const gsAlt = Math.max(0, distThr*FT_PER_NM_AT_3DEG);
+        p.tgtAlt = gsAlt;
+
+        // speed schedule
+        const vappKts = 140;
+        p.tgtSpd = Math.max(180, vappKts*1.852);
+
+        if(gsAlt < FLARE_FT + 10 && distThr < 0.8){
+          p.ops.phase='flare';
+        }
+      } else if(p.ops.phase==='flare'){
+        p.tgtHdg = thr.hdg;
+        p.tgtAlt = 0;
+        // reduce speed smoothly
+        p.tgtSpd = Math.max(0, p.tgtSpd - 60*dt);
+        if(p.alt <= 5 && (p.spd*0.539957) <= ROLL_OUT_SPD_KTS){
+          p.ops.phase='landed';
+          p.opsTag=''; // keep tag? user wants LAND displayed in data block while active. We'll clear when done.
+          p.spd=0; p.tgtSpd=0; p.alt=0; p.tgtAlt=0;
+          p.ops=null;
+        }
+      }
+      return;
+    }
+
+    if(kind==='takeoff'){
+      const hdg = p.ops.hdg;
+      p.tgtHdg = hdg;
+
+      // Internal speed units: your code converts to kts by *KMH2KTS, so internal is km/h. Convert targets accordingly.
+      const curKts = (p.spd||0) * (1/1.852);
+      const vr = p.ops.vr_kts;
+      const v2 = p.ops.v2_kts;
+
+      if(p.ops.phase==='roll'){
+        // accelerate on runway
+        const nextKts = curKts + (p.ops.accel_kts*dt*10); // beefy accel
+        const tgtKts = Math.min(nextKts, v2+40);
+        p.tgtSpd = tgtKts * 1.852;
+        p.tgtAlt = 0;
+
+        if(curKts >= vr){
+          p.ops.phase='rotate';
+        }
+      } else if(p.ops.phase==='rotate'){
+        // rotate, start climb
+        p.tgtSpd = Math.max(p.tgtSpd, v2*1.852);
+        p.tgtAlt = Math.max(300, (p.alt||0) + 800*dt);
+        if((p.alt||0) > 300){
+          p.ops.phase='climb';
+        }
+      } else if(p.ops.phase==='climb'){
+        // climb to 3000 ft then departure
+        p.tgtAlt = Math.max(3000, (p.alt||0) + 1200*dt);
+        // accelerate after positive rate
+        p.tgtSpd = Math.max(p.tgtSpd, (v2+60)*1.852);
+        if((p.alt||0) >= 3000){
+          p.ops.phase='departed';
+          // Keep DEPART tag a bit longer, then clear
+          setTimeout(()=>{ try{ if(p.opsTag==='DEPART') p.opsTag=''; }catch(_){ } }, 6000);
+          p.ops=null;
+        }
+      }
+      return;
+    }
+  }
+
+  // ----- Boot sequence -----
+  function boot(){
+    if(!ready()) return false;
+    injectButtons();
+    ensureAirwyHooks();
+    ensureAirportPanel();
+    syncAirportOpsUI(true);
+    hookSyncPoints();
+    hookOpsUpdate();
+    return true;
+  }
+
+  if(!boot()){
+    let tries=0;
+    const iv=setInterval(()=>{
+      tries++;
+      if(boot() || tries>60) clearInterval(iv);
+    }, 150);
+  }
+
+  // expose commands
+  window.orderLandingReal = orderLandingReal;
+  window.orderTakeoffReal = orderTakeoffReal;
+
+})();
+</script>
+<!-- === END AIRPORT OPS + AIRWY FIX + REALISTIC PROCEDURES (v4) === -->
+
+
+<!-- === PATCH v5: Remove duplicate airports panel + LAND/DEPART tags + click-to-select plane === -->
+<script>
+(function(){
+  if(window.__APT_V5__) return;
+  window.__APT_V5__ = true;
+
+  // --- Remove any duplicate "Aeropuertos" panels except the v4 one (id=pAirports) ---
+  document.addEventListener('DOMContentLoaded', ()=>{
+    try{
+      const panels = Array.from(document.querySelectorAll('#right .panel'));
+      const airportPanels = panels.filter(p=>{
+        const h = p.querySelector('.panel-header h3');
+        return h && h.textContent.trim().toLowerCase()==='aeropuertos';
+      });
+      // keep first with id pAirports if present
+      let keep = document.getElementById('pAirports') || airportPanels[0];
+      airportPanels.forEach(p=>{
+        if(p!==keep && p.parentElement) p.parentElement.removeChild(p);
+      });
+    }catch(_){}
+  });
+
+  // --- Improve tag logic: LAND clears on touchdown; DEPART clears at 10000 ft ---
+  // Wrap orderLandingReal / orderTakeoffReal if present
+  const oldLand = window.orderLandingReal;
+  if(typeof oldLand==='function'){
+    window.orderLandingReal = function(pid, aid){
+      const p = (window.st && st.planes||[]).find(x=>x.id===pid);
+      if(p) p.opsTag='LAND';
+      return oldLand(pid, aid);
+    };
+  }
+  const oldDep = window.orderTakeoffReal;
+  if(typeof oldDep==='function'){
+    window.orderTakeoffReal = function(pid, aid){
+      const p = (window.st && st.planes||[]).find(x=>x.id===pid);
+      if(p) p.opsTag='DEPART';
+      // Keep opsTag until 10000 ft in updateOps logic below
+      return oldDep(pid, aid);
+    };
+  }
+
+  // Wrap updateOps inside v4 by wrapping updatePlane again to enforce end conditions
+  if(typeof window.updatePlane==='function' && !window.__APT_V5_WRAPUP__){
+    window.__APT_V5_WRAPUP__ = true;
+    const origUpdatePlane = window.updatePlane;
+    window.updatePlane = function(p, dt){
+      const res = origUpdatePlane(p, dt);
+
+      try{
+        // LAND: when alt and speed are essentially zero, hold position and clear tag
+        if(p && p.opsTag==='LAND'){
+          // if plane is basically on ground and stopped, clear tag but keep stopped
+          const kts = (p.spd||0) * (1/1.852);
+          if((p.alt||0) <= 1 && kts <= 5){
+            p.alt = 0; p.tgtAlt = 0;
+            p.spd = 0; p.tgtSpd = 0;
+            p.opsTag = ''; // clear LAND once actually landed
+          }
+        }
+
+        // DEPART: clear at 10000 ft (or higher). Keep tag even if ops finished earlier.
+        if(p && p.opsTag==='DEPART'){
+          if((p.alt||0) >= 10000){
+            p.opsTag = '';
+          }
+        }
+      }catch(_){}
+
+      return res;
+    };
+  }
+
+  // --- Click a plane to auto-select it in the Airports panel ---
+  function planeAt(wx, wy){
+    const planes = (window.st && st.planes) ? st.planes : [];
+    let best=null, dBest=1e9;
+    planes.forEach(pl=>{
+      const d = Math.hypot((pl.x-wx),(pl.y-wy));
+      if(d<dBest){ dBest=d; best=pl; }
+    });
+    // tolerance in NM scaled with zoom
+    const tol = 12/( (window.zoom||1) * (window.PX_PER_NM||20) ); // pixels->nm approx
+    return (best && dBest<=tol)?best:null;
+  }
+
+  document.addEventListener('DOMContentLoaded', ()=>{
+    const cvs = document.getElementById('radar');
+    if(!cvs || typeof toWorld!=='function') return;
+
+    cvs.addEventListener('click', (e)=>{
+      // only when not drawing other tools (avoid breaking)
+      if(window.tool && tool.tool && tool.tool!=='none' && tool.tool!=='airport' && tool.tool!=='airwy') return;
+      const r=cvs.getBoundingClientRect();
+      const w=toWorld(e.clientX-r.left, e.clientY-r.top);
+      const p = planeAt(w.x, w.y);
+      if(!p) return;
+
+      const sel = document.getElementById('planeSelOps');
+      if(sel){
+        sel.value = p.id;
+        // flash for feedback
+        sel.classList.add('flash');
+        setTimeout(()=>sel.classList.remove('flash'),250);
+      }
+    }, true);
+  });
+
+})();
+</script>
+<!-- === END PATCH v5 === -->
+
+
+<!-- === PATCH v6: Remove AIRWY help + Delete selected airport + Show airport heading in list === -->
+<script>
+(function(){
+  if(window.__APT_V6__) return;
+  window.__APT_V6__ = true;
+
+  function pad3(n){ n=Math.round(((n%360)+360)%360); return String(n).padStart(3,'0'); }
+  function rwyNum(hdg){
+    const n = Math.round((((hdg%360)+360)%360)/10) || 36;
+    return String(n).padStart(2,'0');
+  }
+
+  // Remove any remaining AIRWY help nodes if created elsewhere
+  document.addEventListener('DOMContentLoaded', ()=>{
+    try{
+      const h = document.getElementById('airwyHelp');
+      if(h && h.parentElement) h.parentElement.removeChild(h);
+    }catch(_){}
+  });
+
+  function airports(){
+    return (window.st && st.drawings) ? st.drawings.filter(d=>d && d.type==='airport') : [];
+  }
+
+  function deleteSelectedAirport(){
+    const sel = document.getElementById('aptSel');
+    if(!sel) return;
+    const id = sel.value;
+    if(!id) return;
+
+    if(window.st && Array.isArray(st.drawings)){
+      const before = st.drawings.length;
+      st.drawings = st.drawings.filter(d=>!(d && d.type==='airport' && d.id===id));
+      if(before !== st.drawings.length){
+        try{ window.scheduleSync && scheduleSync(); }catch(_){}
+        try{ window.repaintNav && repaintNav(); }catch(_){}
+        try{ window.repaintAlt && repaintAlt(); }catch(_){}
+        try{ window.repaintPlanesList && repaintPlanesList(); }catch(_){}
+      }
+    }
+    try{ window.syncAirportOpsUI && syncAirportOpsUI(true); }catch(_){}
+  }
+
+  // Bind delete behavior to the button formerly used to refresh airports
+  document.addEventListener('DOMContentLoaded', ()=>{
+    const btn = document.getElementById('aptRefresh');
+    if(!btn) return;
+
+    btn.replaceWith(btn.cloneNode(true));
+    const b2 = document.getElementById('aptRefresh');
+    if(!b2) return;
+    b2.textContent = '🗑';
+    b2.title = 'Eliminar aeropuerto seleccionado';
+    b2.addEventListener('click', (e)=>{
+      e.preventDefault();
+      e.stopPropagation();
+      deleteSelectedAirport();
+    }, true);
+  });
+
+  // Wrap syncAirportOpsUI to show airport name + RWY + HDG
+  if(typeof window.syncAirportOpsUI === 'function'){
+    const orig = window.syncAirportOpsUI;
+    window.syncAirportOpsUI = function(force){
+      orig(force);
+      try{
+        const aptSel = document.getElementById('aptSel');
+        if(!aptSel) return;
+        const cur = aptSel.value;
+        const apts = airports();
+        aptSel.innerHTML='';
+        apts.forEach(a=>{
+          const hdg = (a.hdg==null)?0:a.hdg;
+          const opt=document.createElement('option');
+          opt.value=a.id;
+          const name = (a.icao||a.name||a.id);
+          const rwy = (a.rwy||rwyNum(hdg));
+          opt.textContent = `${name} RWY ${rwy} HDG ${pad3(hdg)}°`;
+          aptSel.appendChild(opt);
+        });
+        if(cur && apts.some(a=>a.id===cur)) aptSel.value=cur;
+      }catch(_){}
+    };
+    try{ window.syncAirportOpsUI(true); }catch(_){}
+  }
+
+})();
+</script>
+<!-- === END PATCH v6 === -->
+
+
+<!-- === PATCH v7: Full landing to stop + taxi to apron === -->
+<script>
+(function(){
+  if(window.__APT_V7__) return;
+  window.__APT_V7__ = true;
+
+  // --- unit helpers (sim uses x/y in NM, speed internally km/h) ---
+  const KMH2KTS = 0.539957;
+  function kmhToNmps(kmh){ return (kmh*KMH2KTS)/3600; }
+  function ktsToKmh(kts){ return (kts/ KMH2KTS); }
+  function clamp(v,a,b){ return Math.max(a, Math.min(b,v)); }
+  function angToRad(d){ return d*Math.PI/180; }
+  function bearingDeg(from,to){
+    const dx = to.x - from.x, dy = to.y - from.y;
+    return (Math.atan2(dx, -dy)*180/Math.PI+360)%360;
+  }
+  function unitFromHdg(hdg){
+    // hdg 0=N,90=E in this sim (bearing uses atan2(dx,-dy))
+    const a = angToRad(hdg);
+    return {x: Math.sin(a), y: -Math.cos(a)};
+  }
+  function dist(a,b){ return Math.hypot(a.x-b.x, a.y-b.y); }
+
+  function airports(){
+    return (window.st && st.drawings) ? st.drawings.filter(d=>d && d.type==='airport') : [];
+  }
+  function getAirport(id){ return airports().find(a=>a.id===id); }
+
+  // Compute runway geometry: threshold near (approach) and far, plus apron point
+  function runwayGeom(apt){
+    const len = (apt.lenNM || 2.0);
+    const hdg = (apt.hdg||0);
+    const u = unitFromHdg(hdg);
+    const half = len/2;
+    const thrNear = { x: apt.x - u.x*half, y: apt.y - u.y*half, hdg: hdg };
+    const thrFar  = { x: apt.x + u.x*half, y: apt.y + u.y*half, hdg: (hdg+180)%360 };
+    // apron: offset 0.25 NM to the right of runway mid, and 0.15 NM toward far end
+    const right = unitFromHdg((hdg+90)%360);
+    const apron = { x: apt.x + right.x*0.25 + u.x*0.15, y: apt.y + right.y*0.25 + u.y*0.15 };
+    return {len,hdg,u,thrNear,thrFar,apron};
+  }
+
+  // Override orderLandingReal with "complete landing" state machine
+  const oldOrderLand = window.orderLandingReal;
+  if(typeof oldOrderLand === 'function'){
+    window.orderLandingReal = function(pid, aptId){
+      const p = (st.planes||[]).find(x=>x.id===pid);
+      const apt = getAirport(aptId);
+      if(!p || !apt) return;
+      const g = runwayGeom(apt);
+
+      // Build an IAF on extended centerline: based on altitude (3° ~318 ft/NM)
+      const ftPerNm3 = 318;
+      const finalNm = clamp(Math.max(8, (p.alt||12000)/ftPerNm3), 8, 14);
+      const iaf = { x: g.thrNear.x - g.u.x*finalNm, y: g.thrNear.y - g.u.y*finalNm };
+
+      p.ops = {
+        kind: 'landing_full',
+        aptId: aptId,
+        phase: 'vector_to_iaf',
+        g: { hdg: g.hdg, u: g.u, thrNear: g.thrNear, thrFar: g.thrFar, apron: g.apron, len: g.len },
+        iaf: iaf,
+        gsDeg: 3.0,
+        touchdown: { x: g.thrNear.x + g.u.x*0.25, y: g.thrNear.y + g.u.y*0.25 }, // 0.25 NM past threshold
+        flareFt: 50
+      };
+      p.opsTag = 'LAND';
+      // Let base function set some defaults too (doesn't hurt)
+      try{ oldOrderLand(pid, aptId); }catch(_){}
+    };
+  }
+
+  // Wrap updatePlane to enforce runway roll + taxi
+  if(typeof window.updatePlane === 'function' && !window.__APT_V7_WRAP__){
+    window.__APT_V7_WRAP__ = true;
+    const origUpdatePlane = window.updatePlane;
+
+    window.updatePlane = function(p, dt){
+      // If our landing_full is active, compute targets and optionally override ground motion
+      try{
+        if(p && p.ops && p.ops.kind === 'landing_full'){
+          const ops = p.ops;
+          const g = ops.g;
+          const pos = {x:p.x, y:p.y};
+          const iaf = ops.iaf;
+          const thr = g.thrNear;
+          const td  = ops.touchdown;
+
+          const dIaf = dist(pos, iaf);
+          const dThr = dist(pos, thr);
+
+          // Speed schedule (km/h internal)
+          const v210 = ktsToKmh(210);
+          const v170 = ktsToKmh(170);
+          const v145 = ktsToKmh(145);
+          const v30  = ktsToKmh(30);
+          const taxi = ktsToKmh(15);
+
+          if(ops.phase === 'vector_to_iaf'){
+            p.tgtHdg = bearingDeg(pos, iaf);
+            p.tgtSpd = v210;
+            // descend to intercept glideslope at IAF (~2500-4000ft)
+            const desiredAlt = Math.max(2500, dThr*318);
+            p.tgtAlt = desiredAlt;
+            if(dIaf < 0.8) ops.phase = 'final';
+          }
+
+          if(ops.phase === 'final'){
+            p.tgtHdg = g.hdg;
+            p.tgtSpd = (dThr > 5) ? v170 : v145;
+            // 3° glideslope to threshold
+            const gsAlt = Math.max(0, dThr*318);
+            p.tgtAlt = gsAlt;
+            // enter flare close-in
+            if(gsAlt < ops.flareFt+15 && dThr < 0.9) ops.phase = 'flare';
+          }
+
+          if(ops.phase === 'flare'){
+            p.tgtHdg = g.hdg;
+            p.tgtAlt = 0;
+            p.tgtSpd = Math.max(v30, (p.tgtSpd||v145) - 120*dt);
+            // touchdown trigger
+            if((p.alt||0) <= 5 && dThr < 0.8){
+              ops.phase = 'rollout';
+              // snap to touchdown point so we are ON runway
+              p.x = td.x; p.y = td.y;
+              p.alt = 0; p.tgtAlt = 0;
+              // keep some speed for rollout
+              p.spd = Math.max(p.spd||0, ktsToKmh(120));
+            }
+          }
+
+          // Ground phases: we override motion so the plane actually stops and taxis
+          if(ops.phase === 'rollout'){
+            // Force on-ground state
+            p.alt = 0; p.tgtAlt = 0;
+            p.tgtHdg = g.hdg;
+            // decelerate to 15 kts then taxi
+            const curKts = (p.spd||0)*KMH2KTS;
+            const decel = 14; // kts per second
+            const nextKts = Math.max(0, curKts - decel*dt);
+            p.spd = ktsToKmh(nextKts);
+            p.tgtSpd = p.spd;
+
+            // move along runway axis manually (NM)
+            const nmps = (nextKts)/3600;
+            p.x += g.u.x * nmps * dt;
+            p.y += g.u.y * nmps * dt;
+
+            // when slow enough, begin taxi to apron
+            if(nextKts <= 25){
+              ops.phase = 'taxi';
+              // set heading toward apron
+              p.hdg = g.hdg;
+            }
+          }
+
+          if(ops.phase === 'taxi'){
+            p.alt = 0; p.tgtAlt = 0;
+            const ap = g.apron;
+            const dAp = dist({x:p.x,y:p.y}, ap);
+            p.tgtHdg = bearingDeg({x:p.x,y:p.y}, ap);
+            p.tgtSpd = taxi;
+            // gentle taxi speed control
+            const curKts = (p.spd||0)*KMH2KTS;
+            const tgtKts = 15;
+            const accel = 6;
+            const nextKts = clamp(curKts + (tgtKts-curKts)*clamp(accel*dt/10,0,1), 0, tgtKts);
+            p.spd = ktsToKmh(nextKts);
+
+            // move toward apron based on current heading
+            const u = unitFromHdg(p.tgtHdg||p.hdg||0);
+            const nmps = nextKts/3600;
+            p.x += u.x * nmps * dt;
+            p.y += u.y * nmps * dt;
+
+            if(dAp < 0.05){
+              // stop at apron
+              p.x = ap.x; p.y = ap.y;
+              p.spd = 0; p.tgtSpd = 0;
+              p.alt = 0; p.tgtAlt = 0;
+              // clear LAND tag and ops
+              p.opsTag = '';
+              p.ops = null;
+            }
+          }
+
+          // During ground phases, prevent double integration by zeroing before base update
+          if(ops && (ops.phase==='rollout' || ops.phase==='taxi')){
+            const savedSpd = p.spd;
+            const savedAlt = p.alt;
+            // neutralize base motion for this tick
+            const tmpSpd = p.spd; p.spd = 0;
+            const res = origUpdatePlane(p, dt);
+            // restore after base update
+            p.spd = savedSpd;
+            p.alt = savedAlt;
+            return res;
+          }
+        }
+      }catch(_){}
+
+      return origUpdatePlane(p, dt);
+    };
+  }
+
+})();
+</script>
+<!-- === END PATCH v7 === -->
+
+
+<!-- === PATCH v8: Random takeoff spawn + Manual airport heading input === -->
+<script>
+(function(){
+  if(window.__APT_V8__) return;
+  window.__APT_V8__ = true;
+
+  function pad2(n){ return String(n).padStart(2,'0'); }
+  function norm360(h){ h = ((+h)%360+360)%360; return h; }
+  function rwyNum(h){
+    const n = Math.round(norm360(h)/10) || 36;
+    return pad2(n);
+  }
+  function airports(){
+    return (window.st && Array.isArray(st.drawings)) ? st.drawings.filter(d=>d && d.type==='airport') : [];
+  }
+  function getAirport(id){ return airports().find(a=>a.id===id); }
+
+  // --- Add manual heading controls to Airports panel ---
+  function injectHdgControls(){
+    const body = document.getElementById('pAirBody');
+    const aptSel = document.getElementById('aptSel');
+    if(!body || !aptSel) return;
+    if(document.getElementById('aptHdgInput')) return;
+
+    const row = document.createElement('div');
+    row.className = 'row';
+    row.innerHTML = `
+      <input id="aptHdgInput" class="ghost focusable" type="number" min="0" max="359" step="1" style="width:120px" placeholder="HDG">
+      <button id="aptSetHdg" class="btn mini focusable">SET HDG</button>
+    `;
+
+    // Insert after first row (airport selector row)
+    const rows = Array.from(body.querySelectorAll('.row'));
+    if(rows.length >= 1){
+      body.insertBefore(row, rows[0].nextSibling);
+    } else {
+      body.appendChild(row);
+    }
+
+    function refreshInputFromSelected(){
+      const a = getAirport(aptSel.value);
+      const inp = document.getElementById('aptHdgInput');
+      if(a && inp) inp.value = Math.round(norm360(a.hdg||0));
+    }
+    aptSel.addEventListener('change', refreshInputFromSelected, true);
+    setTimeout(refreshInputFromSelected, 0);
+
+    document.getElementById('aptSetHdg').addEventListener('click', (e)=>{
+      e.preventDefault(); e.stopPropagation();
+      const a = getAirport(aptSel.value);
+      const inp = document.getElementById('aptHdgInput');
+      if(!a || !inp) return;
+      const hdg = norm360(inp.value);
+      a.hdg = hdg;
+      a.rwy = rwyNum(hdg);
+      a.name = a.icao ? a.icao : (`APT ${a.rwy}`);
+      try{ window.scheduleSync && scheduleSync(); }catch(_){}
+      try{ window.repaintNav && repaintNav(); }catch(_){}
+      try{ window.repaintAlt && repaintAlt(); }catch(_){}
+      try{ window.syncAirportOpsUI && syncAirportOpsUI(true); }catch(_){}
+    }, true);
+  }
+
+  // --- Random takeoff: plane can spawn anywhere on map and then depart ---
+  function randomSpawnBounds(){
+    const span = (window.st && st.worldSpanNM) ? st.worldSpanNM : 240;
+    const half = span/2;
+    return {minX:-half, maxX:half, minY:-half, maxY:half};
+  }
+
+  function doRandomDepart(pid){
+    const p = (st.planes||[]).find(x=>x.id===pid);
+    if(!p) return;
+
+    const b = randomSpawnBounds();
+    const rx = b.minX + Math.random()*(b.maxX-b.minX);
+    const ry = b.minY + Math.random()*(b.maxY-b.minY);
+    const hdg = Math.random()*360;
+
+    p.x = rx; p.y = ry;
+    p.hdg = hdg; p.tgtHdg = hdg;
+    p.alt = 0; p.tgtAlt = 0;
+    p.spd = 0; p.tgtSpd = 0;
+    p.opsTag = 'DEPART';
+
+    p.ops = {
+      kind:'takeoff',
+      aptId: 'RANDOM',
+      phase:'roll',
+      hdg: hdg,
+      vr_kts: 140,
+      v2_kts: 160,
+      accel_kts: 6,
+      climb_ftpm: 2500
+    };
+  }
+
+  function rebindDepartButton(){
+    const btn = document.getElementById('doDep');
+    if(!btn) return;
+    if(btn.dataset.v8bound === '1') return;
+    btn.dataset.v8bound = '1';
+
+    btn.replaceWith(btn.cloneNode(true));
+    const b2 = document.getElementById('doDep');
+    if(!b2) return;
+
+    b2.addEventListener('click', ()=>{
+      const pid = document.getElementById('planeSelOps')?.value;
+      const aid = document.getElementById('aptSel')?.value;
+      const mode = document.getElementById('opSel')?.value || 'DEPART';
+      if(!pid) return;
+
+      if(mode === 'RANDOM'){
+        doRandomDepart(pid);
+        try{ window.repaintPlanesList && repaintPlanesList(); }catch(_){}
+        try{ window.repaintNav && repaintNav(); }catch(_){}
+        try{ window.repaintAlt && repaintAlt(); }catch(_){}
+        try{ window.syncAirportOpsUI && syncAirportOpsUI(true); }catch(_){}
+        return;
+      }
+      if(pid && aid && typeof window.orderTakeoffReal === 'function'){
+        window.orderTakeoffReal(pid, aid);
+      }
+    }, true);
+  }
+
+  function boot(){
+    injectHdgControls();
+    rebindDepartButton();
+  }
+
+  let tries=0;
+  const iv=setInterval(()=>{
+    tries++;
+    boot();
+    if(document.getElementById('aptHdgInput') && document.getElementById('doDep')) clearInterval(iv);
+    if(tries>80) clearInterval(iv);
+  }, 150);
+
+  document.addEventListener('DOMContentLoaded', boot);
+
+})();
+</script>
+<!-- === END PATCH v8 === -->
+
+
+<!-- === PATCH v9: Keep airport name on HDG change + Move Airport button to panel + Fix LAND === -->
+<script>
+(function(){
+  if(window.__APT_V9__) return;
+  window.__APT_V9__ = true;
+
+  const KMH2KTS = 0.539957;
+  function ktsToKmh(kts){ return kts / KMH2KTS; }
+  function norm360(h){ return ((+h)%360+360)%360; }
+  function pad2(n){ return String(n).padStart(2,'0'); }
+  function rwyNum(h){ const n=Math.round(norm360(h)/10)||36; return pad2(n); }
+  function angToRad(d){ return d*Math.PI/180; }
+  function unitFromHdg(h){ const a=angToRad(h); return {x:Math.sin(a), y:-Math.cos(a)}; }
+  function dist(a,b){ return Math.hypot(a.x-b.x, a.y-b.y); }
+  function bearingDeg(from,to){
+    const dx=to.x-from.x, dy=to.y-from.y;
+    return (Math.atan2(dx, -dy)*180/Math.PI+360)%360;
+  }
+  function clamp(v,a,b){ return Math.max(a, Math.min(b,v)); }
+
+  function airports(){
+    return (window.st && Array.isArray(st.drawings)) ? st.drawings.filter(d=>d && d.type==='airport') : [];
+  }
+  function getAirport(id){ return airports().find(a=>a.id===id); }
+
+  // --- 1) Move "Aeropuerto" tool button next to SET HDG, remove from draw tools ---
+  function moveAirportButton(){
+    // remove/hide old draw-tool airport button(s)
+    try{
+      const old = document.getElementById('btnToolAirport');
+      if(old && old.parentElement) old.parentElement.removeChild(old);
+    }catch(_){}
+    // also remove by id used in early versions
+    try{
+      const old2 = document.getElementById('airportToolBtn');
+      if(old2 && old2.parentElement) old2.parentElement.removeChild(old2);
+    }catch(_){}
+
+    const body = document.getElementById('pAirBody');
+    const setBtn = document.getElementById('aptSetHdg');
+    if(!body || !setBtn) return;
+
+    // Create Airport tool button beside SET HDG
+    if(!document.getElementById('aptToolAirport')){
+      const btn = document.createElement('button');
+      btn.id = 'aptToolAirport';
+      btn.className = 'btn mini focusable';
+      btn.textContent = 'Aeropuerto';
+      btn.title = 'Crear aeropuerto en el radar (click y arrastra)';
+      setBtn.insertAdjacentElement('afterend', btn);
+
+      btn.addEventListener('click', ()=>{
+        window.tool = window.tool || {tool:'none',drawing:false,a:null,b:null};
+        tool.tool='airport';
+        tool.drawing=false; tool.a=null; tool.b=null;
+      }, true);
+    }
+  }
+
+  // --- 2) Keep airport NAME when changing HDG (only update hdg/rwy) ---
+  function rebindSetHdgNoRename(){
+    const btn = document.getElementById('aptSetHdg');
+    if(!btn) return;
+    if(btn.dataset.v9bound==='1') return;
+    btn.dataset.v9bound='1';
+
+    btn.replaceWith(btn.cloneNode(true));
+    const b2 = document.getElementById('aptSetHdg');
+    const aptSel = document.getElementById('aptSel');
+    const inp = document.getElementById('aptHdgInput');
+    if(!b2 || !aptSel || !inp) return;
+
+    b2.addEventListener('click', (e)=>{
+      e.preventDefault(); e.stopPropagation();
+      const a = getAirport(aptSel.value);
+      if(!a) return;
+      const hdg = norm360(inp.value);
+      a.hdg = hdg;
+      a.rwy = rwyNum(hdg);
+      // IMPORTANT: do NOT touch a.name or a.icao
+      try{ window.scheduleSync && scheduleSync(); }catch(_){}
+      try{ window.syncAirportOpsUI && syncAirportOpsUI(true); }catch(_){}
+    }, true);
+  }
+
+  // --- 3) Fix LAND: ensure our landing_full is not overwritten and completes on selected airport ---
+  function runwayGeom(apt){
+    const len = (apt.lenNM || 2.0);
+    const hdg = (apt.hdg||0);
+    const u = unitFromHdg(hdg);
+    const half=len/2;
+    const thrNear={x:apt.x-u.x*half, y:apt.y-u.y*half, hdg:hdg};
+    const apronRight = unitFromHdg((hdg+90)%360);
+    const apron={x:apt.x + apronRight.x*0.25 + u.x*0.15, y:apt.y + apronRight.y*0.25 + u.y*0.15};
+    return {len,hdg,u,thrNear,apron};
+  }
+
+  function orderLandingFull(pid, aptId){
+    const p=(st.planes||[]).find(x=>x.id===pid);
+    const apt=getAirport(aptId);
+    if(!p||!apt) return;
+
+    const g=runwayGeom(apt);
+    const ftPerNm3=318;
+    const finalNm = clamp(Math.max(8, (p.alt||12000)/ftPerNm3), 8, 14);
+    const iaf={x:g.thrNear.x - g.u.x*finalNm, y:g.thrNear.y - g.u.y*finalNm};
+
+    p.ops = {
+      kind:'landing_full_v9',
+      aptId: aptId,
+      phase:'vector_to_iaf',
+      iaf: iaf,
+      thr: g.thrNear,
+      u: g.u,
+      hdg: g.hdg,
+      apron: g.apron
+    };
+    p.opsTag='LAND';
+  }
+
+  // Rebind LAND button to our fixed landing
+  function rebindLandButton(){
+    const btn = document.getElementById('doLand');
+    if(!btn) return;
+    if(btn.dataset.v9bound==='1') return;
+    btn.dataset.v9bound='1';
+
+    btn.replaceWith(btn.cloneNode(true));
+    const b2 = document.getElementById('doLand');
+    if(!b2) return;
+    b2.addEventListener('click', ()=>{
+      const pid = document.getElementById('planeSelOps')?.value;
+      const aid = document.getElementById('aptSel')?.value;
+      if(pid && aid) orderLandingFull(pid, aid);
+    }, true);
+  }
+
+  // Update loop: wrap updatePlane to drive landing phases reliably
+  function hookLandingUpdate(){
+    if(typeof window.updatePlane!=='function' || window.__APT_V9_UPD__) return;
+    window.__APT_V9_UPD__=true;
+
+    const orig = window.updatePlane;
+    window.updatePlane = function(p, dt){
+      try{
+        if(p && p.ops && p.ops.kind==='landing_full_v9'){
+          const ops=p.ops;
+          const pos={x:p.x,y:p.y};
+          const dIaf = dist(pos, ops.iaf);
+          const dThr = dist(pos, ops.thr);
+
+          const v210=ktsToKmh(210), v170=ktsToKmh(170), v145=ktsToKmh(145), v30=ktsToKmh(30), taxi=ktsToKmh(15);
+
+          if(ops.phase==='vector_to_iaf'){
+            p.tgtHdg = bearingDeg(pos, ops.iaf);
+            p.tgtSpd = v210;
+            p.tgtAlt = Math.max(2500, dThr*318);
+            if(dIaf < 0.8) ops.phase='final';
+          } else if(ops.phase==='final'){
+            p.tgtHdg = ops.hdg;
+            p.tgtSpd = (dThr > 5) ? v170 : v145;
+            p.tgtAlt = Math.max(0, dThr*318);
+            if(p.tgtAlt < 65 && dThr < 0.9) ops.phase='flare';
+          } else if(ops.phase==='flare'){
+            p.tgtHdg = ops.hdg;
+            p.tgtAlt = 0;
+            p.tgtSpd = Math.max(v30, (p.tgtSpd||v145) - 140*dt);
+            if((p.alt||0) <= 5 && dThr < 0.9){
+              ops.phase='rollout';
+              // snap to runway near threshold, on centerline
+              p.x = ops.thr.x + ops.u.x*0.20;
+              p.y = ops.thr.y + ops.u.y*0.20;
+              p.alt = 0; p.tgtAlt = 0;
+              p.spd = Math.max(p.spd||0, ktsToKmh(120));
+            }
+          } else if(ops.phase==='rollout'){
+            p.alt=0; p.tgtAlt=0;
+            p.tgtHdg = ops.hdg;
+            // decel and move along runway axis
+            const curKts = (p.spd||0)*KMH2KTS;
+            const nextKts = Math.max(0, curKts - 14*dt);
+            p.spd = ktsToKmh(nextKts);
+            p.tgtSpd = p.spd;
+            const nmps = nextKts/3600;
+            p.x += ops.u.x * nmps * dt;
+            p.y += ops.u.y * nmps * dt;
+            if(nextKts <= 25) ops.phase='taxi';
+          } else if(ops.phase==='taxi'){
+            p.alt=0; p.tgtAlt=0;
+            const dAp = dist({x:p.x,y:p.y}, ops.apron);
+            p.tgtHdg = bearingDeg({x:p.x,y:p.y}, ops.apron);
+            p.tgtSpd = taxi;
+            const curKts = (p.spd||0)*KMH2KTS;
+            const nextKts = clamp(curKts + (15-curKts)*clamp(dt*0.8,0,1), 0, 15);
+            p.spd = ktsToKmh(nextKts);
+            const u = unitFromHdg(p.tgtHdg||p.hdg||0);
+            const nmps = nextKts/3600;
+            p.x += u.x * nmps * dt;
+            p.y += u.y * nmps * dt;
+            if(dAp < 0.05){
+              p.x=ops.apron.x; p.y=ops.apron.y;
+              p.spd=0; p.tgtSpd=0;
+              p.alt=0; p.tgtAlt=0;
+              p.opsTag='';
+              p.ops=null;
+            }
+          }
+
+          // During rollout/taxi, prevent base double-move by running base with neutral speed
+          if(ops.phase==='rollout' || ops.phase==='taxi'){
+            const savedSpd=p.spd, savedAlt=p.alt;
+            p.spd=0;
+            const res=orig(p, dt);
+            p.spd=savedSpd; p.alt=savedAlt;
+            return res;
+          }
+        }
+      }catch(_){}
+      return orig(p, dt);
+    };
+  }
+
+  function boot(){
+    moveAirportButton();
+    rebindSetHdgNoRename();
+    rebindLandButton();
+    hookLandingUpdate();
+  }
+
+  let tries=0;
+  const iv=setInterval(()=>{
+    tries++;
+    boot();
+    if(document.getElementById('aptToolAirport') && document.getElementById('aptSetHdg') && document.getElementById('doLand')) clearInterval(iv);
+    if(tries>80) clearInterval(iv);
+  }, 150);
+
+  document.addEventListener('DOMContentLoaded', boot);
+
+})();
+</script>
+<!-- === END PATCH v9 === -->
+
+
+<!-- === PATCH v10: One-shot draw tools + Tactical report land/depart + Live altitude panel === -->
+<script>
+(function(){
+  if(window.__APT_V10__) return;
+  window.__APT_V10__ = true;
+
+  // -------- 1) One-shot draw tools (auto return to NONE after one use) --------
+  // Goal: you click a tool, use it once, then tool resets so ruler/measure works immediately.
+  (function oneShotTools(){
+    window.tool = window.tool || {tool:'none',drawing:false,a:null,b:null};
+
+    let startedWithTool = null;
+
+    // Detect start of a drawing action
+    const cvs = document.getElementById('radar');
+    if(cvs){
+      cvs.addEventListener('mousedown', (e)=>{
+        if(e.button!==0 || e.altKey) return; // keep ALT-based ruler intact
+        if(!window.tool || !tool.tool || tool.tool==='none') return;
+        startedWithTool = tool.tool;
+      }, true);
+    }
+
+    // After mouseup (creation), reset tool to none if it was a drawing-type tool
+    window.addEventListener('mouseup', (e)=>{
+      if(!startedWithTool) return;
+      // if the tool is still active and we are not in a drag anymore, reset
+      try{
+        const t = startedWithTool;
+        // one-shot for drawing tools + airport tools
+        const oneShot = new Set(['point','line','circle','square','bullseye','label','airport','airwy']);
+        if(oneShot.has(t)){
+          // let existing handlers finish first
+          setTimeout(()=>{
+            try{
+              if(window.tool && tool.tool===t){
+                tool.tool='none';
+                tool.drawing=false; tool.a=null; tool.b=null;
+              }
+            }catch(_){}
+          }, 0);
+        }
+      }catch(_){}
+      startedWithTool = null;
+    }, true);
+  })();
+
+  // -------- 2) Tactical report: log landings and departures --------
+  function safeLog(msg){
+    try{ if(typeof window.logEvent==='function') logEvent(msg); }catch(_){}
+  }
+  function airportNameById(id){
+    try{
+      const a = (window.st && st.drawings) ? (st.drawings||[]).find(d=>d && d.type==='airport' && d.id===id) : null;
+      if(!a) return id || '';
+      return (a.icao || a.name || a.id) + (a.rwy ? (' RWY '+a.rwy) : '');
+    }catch(_){ return id || ''; }
+  }
+
+  // Hook updatePlane to detect completion events without spamming
+  if(typeof window.updatePlane==='function' && !window.__APT_V10_UPD__){
+    window.__APT_V10_UPD__ = true;
+    const orig = window.updatePlane;
+    window.updatePlane = function(p, dt){
+      const res = orig(p, dt);
+      try{
+        if(!p) return res;
+
+        // Landing completed: stopped on ground and LAND tag cleared recently
+        if(p._wasLandTag && !p.opsTag){
+          // Only if we know it was landing related and on ground
+          const kts = (p.spd||0)*0.539957;
+          if((p.alt||0) <= 1 && kts <= 1){
+            if(!p._reportedLanded){
+              const aptId = (p.ops && p.ops.aptId) ? p.ops.aptId : (p._lastAptId||'');
+              safeLog(`REPORTE TACTICO: ${p.name||p.id} ATERRIZÓ EN ${airportNameById(aptId)}`);
+              p._reportedLanded = true;
+              // reset depart report so it can report later again
+              p._reportedDeparted = false;
+            }
+          }
+          p._wasLandTag = false;
+        }
+
+        // Track when LAND active so we can report after it clears
+        if(p.opsTag === 'LAND'){
+          p._wasLandTag = true;
+          if(p.ops && p.ops.aptId) p._lastAptId = p.ops.aptId;
+        }
+
+        // Departure report: when DEPART clears at/after 10000 ft or tag cleared
+        if(p.opsTag === 'DEPART'){
+          p._wasDepartTag = true;
+          p._reportedDeparted = false; // allow new report
+        }
+        if(p._wasDepartTag && !p.opsTag){
+          if(!p._reportedDeparted){
+            safeLog(`REPORTE TACTICO: ${p.name||p.id} DESPEGÓ (DEPART COMPLETADO)`);
+            p._reportedDeparted = true;
+            p._wasDepartTag = false;
+            // allow landing report later
+            p._reportedLanded = false;
+          }
+        }
+      }catch(_){}
+      return res;
+    };
+  }
+
+  // Also log immediately when buttons are pressed (optional, but helpful)
+  document.addEventListener('click', (e)=>{
+    const t = e.target;
+    if(!t) return;
+    try{
+      if(t.id==='doLand'){
+        const pid = document.getElementById('planeSelOps')?.value;
+        const aid = document.getElementById('aptSel')?.value;
+        if(pid && aid){
+          const p = (st.planes||[]).find(x=>x.id===pid);
+          safeLog(`REPORTE TACTICO: ${p?.name||pid} INICIA LAND A ${airportNameById(aid)}`);
+          if(p){ p._wasLandTag = true; p._lastAptId = aid; p._reportedLanded = false; }
+        }
+      }
+      if(t.id==='doDep'){
+        const pid = document.getElementById('planeSelOps')?.value;
+        if(pid){
+          const p = (st.planes||[]).find(x=>x.id===pid);
+          safeLog(`REPORTE TACTICO: ${p?.name||pid} INICIA DEPART`);
+          if(p){ p._wasDepartTag = true; p._reportedDeparted = false; }
+        }
+      }
+    }catch(_){}
+  }, true);
+
+  // -------- 3) Live altitude panel: force repaintAlt regularly --------
+  (function liveAlt(){
+    if(window.__ALT_LIVE_V10__) return;
+    window.__ALT_LIVE_V10__ = true;
+
+    setInterval(()=>{
+      try{
+        if(!window.st || st.paused) return;
+        if(typeof window.repaintAlt==='function') repaintAlt();
+      }catch(_){}
+    }, 400);
+  })();
+
+})();
+</script>
+<!-- === END PATCH v10 === -->
+
+
+<!-- === PATCH v11: UI cleanup + airport labels + polygon/oval tools === -->
+<script>
+(function(){
+  if(window.__APT_V11__) return;
+  window.__APT_V11__ = true;
+
+  const $=(s,r=document)=>r.querySelector(s);
+  const $$=(s,r=document)=>Array.from(r.querySelectorAll(s));
+
+  // ---------- 1) Remove "Aeropuerto" & "Seleccionar" buttons from draw tool UI ----------
+  document.addEventListener('DOMContentLoaded', ()=>{
+    try{
+      // Remove by id if present
+      ['btnToolAirport','airportToolBtn'].forEach(id=>{
+        const el=document.getElementById(id);
+        if(el && el.parentElement) el.parentElement.removeChild(el);
+      });
+
+      // Remove any tool button whose text equals "Aeropuerto" or "Seleccionar" inside pDraw
+      const pDraw = document.getElementById('pDraw');
+      if(pDraw){
+        $$('.tool, button', pDraw).forEach(b=>{
+          const txt=(b.textContent||'').trim().toLowerCase();
+          if(txt==='aeropuerto' || txt==='seleccionar'){
+            if(b.parentElement) b.parentElement.removeChild(b);
+          }
+        });
+      }
+    }catch(_){}
+  });
+
+  // ---------- 2) Remove LAND/DEPART/RANDOM dropdown from Airports panel ----------
+  document.addEventListener('DOMContentLoaded', ()=>{
+    try{
+      const opSel = document.getElementById('opSel');
+      if(opSel && opSel.parentElement){
+        opSel.parentElement.removeChild(opSel);
+      }
+    }catch(_){}
+  });
+
+  // ---------- 3) Airport label above the airport, never on runway (screen-space offset) ----------
+  // We wrap the international airport drawing function effect by drawing label after runway with smart offset.
+  function pad3(n){ n=Math.round(((n%360)+360)%360); return String(n).padStart(3,'0'); }
+  function rwyNum(h){
+    const n = Math.round((((h%360)+360)%360)/10) || 36;
+    return String(n).padStart(2,'0');
+  }
+  function airportLabel(d){
+    const name = (d.icao||d.name||d.id||'APT').toUpperCase();
+    const hdg = (d.hdg==null)?0:d.hdg;
+    const rwy = (d.rwy||rwyNum(hdg));
+    return `${name} RWY ${rwy}`;
+  }
+
+  // Add label drawer on top of drawRadar (post draw)
+  if(typeof window.drawRadar==='function' && !window.__APT_LABEL_HOOKED__){
+    window.__APT_LABEL_HOOKED__ = true;
+    const origDraw = window.drawRadar;
+    window.drawRadar = function(){
+      origDraw();
+      try{
+        if(!window.st || !window.ctx || typeof toScreen!=='function') return;
+        const apts = (st.drawings||[]).filter(d=>d && d.type==='airport');
+        // screen-space offset increases slightly with zoom to keep label away from runway
+        const z = window.zoom || 1;
+        const dy = -22 - Math.min(18, z*6); // move up more when zoomed in
+        ctx.save();
+        ctx.font = "12px monospace";
+        ctx.textAlign = "center";
+        ctx.textBaseline = "bottom";
+        ctx.fillStyle = "#ffea00";
+        // subtle shadow to improve readability without covering runway graphics
+        ctx.shadowColor = "rgba(0,0,0,0.6)";
+        ctx.shadowBlur = 4;
+        apts.forEach(a=>{
+          const s = toScreen(a.x,a.y);
+          ctx.fillText(airportLabel(a), s.x, s.y + dy);
+        });
+        ctx.restore();
+      }catch(_){}
+    };
+  }
+
+  // ---------- 4) Polygon + Oval(Holding Racetrack) tools in Draw panel ----------
+  // Polygon: click to add vertices, double-click to finish, right-click to cancel
+  // Oval/Hold: click-drag defines major axis, release creates racetrack-like oval (caps + centerline)
+  function ensureToolButtons(){
+    const drawBody = document.getElementById('pDrawBody') || document.getElementById('pDraw');
+    if(!drawBody) return;
+
+    // Find a place to insert (first row with tools)
+    const row = drawBody.querySelector('.row') || drawBody;
+
+    function addBtn(id, label, toolName){
+      if(document.getElementById(id)) return;
+      const btn=document.createElement('button');
+      btn.id=id;
+      btn.className='btn mini tool focusable';
+      btn.setAttribute('data-tool', toolName);
+      btn.textContent=label;
+      row.appendChild(btn);
+      btn.addEventListener('click', ()=>{
+        window.tool = window.tool || {tool:'none',drawing:false,a:null,b:null};
+        tool.tool = toolName;
+        tool.drawing = false;
+        tool.a=null; tool.b=null;
+        // initialize polygon state
+        if(toolName==='polygon'){
+          window.__polyPoints = [];
+          window.__polyActive = true;
+        }
+      }, true);
+    }
+
+    addBtn('btnToolPolygon','Polígono','polygon');
+    addBtn('btnToolHold','Óvalo/Hold','holdoval');
+  }
+
+  function worldPointFromEvent(e){
+    const cvs=document.getElementById('radar');
+    const r=cvs.getBoundingClientRect();
+    return toWorld(e.clientX-r.left, e.clientY-r.top);
+  }
+
+  function addDrawing(obj){
+    st.drawings = st.drawings || [];
+    st.drawings.push(obj);
+    try{ window.ensureDrawingName && ensureDrawingName(obj); }catch(_){}
+    try{ window.scheduleSync && scheduleSync(); }catch(_){}
+  }
+
+  function hookPolygonTool(){
+    if(window.__POLY_HOOKED__) return;
+    window.__POLY_HOOKED__ = true;
+
+    const cvs=document.getElementById('radar');
+    if(!cvs) return;
+
+    // Single click adds a vertex
+    cvs.addEventListener('click', (e)=>{
+      if(!window.tool || tool.tool!=='polygon') return;
+      if(e.button!==0) return;
+      e.preventDefault(); e.stopPropagation();
+      const w=worldPointFromEvent(e);
+      window.__polyPoints = window.__polyPoints || [];
+      window.__polyPoints.push({x:w.x,y:w.y});
+    }, true);
+
+    // Double click finishes polygon
+    cvs.addEventListener('dblclick', (e)=>{
+      if(!window.tool || tool.tool!=='polygon') return;
+      e.preventDefault(); e.stopPropagation();
+      const pts = (window.__polyPoints||[]);
+      if(pts.length>=3){
+        const id='PG-'+Math.random().toString(36).slice(2,6).toUpperCase();
+        addDrawing({id, type:'polygon', pts: pts.slice()});
+      }
+      window.__polyPoints = [];
+      window.__polyActive = false;
+      // one-shot reset handled by v10 one-shot tool reset on mouseup; but dblclick might not fire mouseup; reset here too
+      tool.tool='none';
+    }, true);
+
+    // Right-click cancels
+    cvs.addEventListener('contextmenu', (e)=>{
+      if(!window.tool || tool.tool!=='polygon') return;
+      e.preventDefault();
+      window.__polyPoints = [];
+      window.__polyActive = false;
+      tool.tool='none';
+    }, true);
+
+    // Draw preview polyline by wrapping drawShapes once
+    if(typeof window.drawShapes==='function' && !window.__POLY_PREVIEW__){
+      window.__POLY_PREVIEW__=true;
+      const orig=window.drawShapes;
+      window.drawShapes=function(){
+        orig();
+        try{
+          if(tool && tool.tool==='polygon' && (window.__polyPoints||[]).length){
+            const pts=window.__polyPoints;
+            ctx.save();
+            ctx.strokeStyle='rgba(255,234,0,0.7)';
+            ctx.lineWidth=1.2;
+            ctx.setLineDash([5,5]);
+            ctx.beginPath();
+            const s0=toScreen(pts[0].x,pts[0].y);
+            ctx.moveTo(s0.x,s0.y);
+            for(let i=1;i<pts.length;i++){
+              const si=toScreen(pts[i].x,pts[i].y);
+              ctx.lineTo(si.x,si.y);
+            }
+            ctx.stroke();
+            ctx.setLineDash([]);
+            ctx.restore();
+          }
+        }catch(_){}
+      };
+    }
+  }
+
+  function hookHoldOvalTool(){
+    if(window.__HOLD_HOOKED__) return;
+    window.__HOLD_HOOKED__ = true;
+    const cvs=document.getElementById('radar');
+    if(!cvs) return;
+
+    window.tool = window.tool || {tool:'none',drawing:false,a:null,b:null};
+
+    cvs.addEventListener('mousedown', (e)=>{
+      if(e.button!==0 || e.altKey) return;
+      if(tool.tool!=='holdoval') return;
+      e.preventDefault(); e.stopPropagation();
+      const w=worldPointFromEvent(e);
+      tool.drawing=true;
+      tool.a={x:w.x,y:w.y};
+      tool.b={x:w.x,y:w.y};
+    }, true);
+
+    window.addEventListener('mousemove', (e)=>{
+      if(!tool.drawing || tool.tool!=='holdoval') return;
+      if((e.buttons||0)!==1) return;
+      const w=worldPointFromEvent(e);
+      tool.b={x:w.x,y:w.y};
+    }, true);
+
+    window.addEventListener('mouseup', (e)=>{
+      if(!tool.drawing || tool.tool!=='holdoval') return;
+      tool.drawing=false;
+      const a=tool.a, b=tool.b;
+      tool.a=null; tool.b=null;
+
+      const id='HD-'+Math.random().toString(36).slice(2,6).toUpperCase();
+      // store as holdoval: center, hdg, major/minor radii
+      const cx=(a.x+b.x)/2, cy=(a.y+b.y)/2;
+      const dx=b.x-a.x, dy=b.y-a.y;
+      const major = Math.max(0.8, Math.hypot(dx,dy)); // NM
+      let hdg = (Math.atan2(dx, -dy)*180/Math.PI+360)%360;
+      const minor = Math.max(0.25, major*0.28); // racetrack width
+      addDrawing({id, type:'holdoval', x:cx,y:cy, hdg:hdg, major:major, minor:minor});
+
+      // return to none for one-shot behavior
+      tool.tool='none';
+
+      e.preventDefault(); e.stopPropagation();
+    }, true);
+
+    // Render holdoval and polygon objects by extending drawShapes
+    if(typeof window.drawShapes==='function' && !window.__HOLD_DRAW__){
+      window.__HOLD_DRAW__=true;
+      const orig=window.drawShapes;
+      window.drawShapes=function(){
+        orig();
+        try{
+          const drawings=(st.drawings||[]);
+
+          // polygons
+          drawings.filter(d=>d && d.type==='polygon').forEach(d=>{
+            const pts=d.pts||[];
+            if(pts.length<3) return;
+            ctx.save();
+            ctx.strokeStyle='rgba(255,234,0,0.85)';
+            ctx.lineWidth=1.3;
+            ctx.beginPath();
+            const s0=toScreen(pts[0].x,pts[0].y);
+            ctx.moveTo(s0.x,s0.y);
+            for(let i=1;i<pts.length;i++){
+              const si=toScreen(pts[i].x,pts[i].y);
+              ctx.lineTo(si.x,si.y);
+            }
+            ctx.closePath();
+            ctx.stroke();
+            ctx.restore();
+          });
+
+          // holdoval racetrack (two semicircles + straight segments)
+          drawings.filter(d=>d && d.type==='holdoval').forEach(d=>{
+            const s=toScreen(d.x,d.y);
+            const z=window.zoom||1;
+            const PX_PER_NM = window.PX_PER_NM || 20;
+            const majorPx = (d.major||2.0)*z*PX_PER_NM;
+            const minorPx = (d.minor||0.6)*z*PX_PER_NM;
+            const ang = (d.hdg||0)*Math.PI/180;
+
+            ctx.save();
+            ctx.translate(s.x,s.y);
+            ctx.rotate(ang);
+            ctx.strokeStyle='rgba(255,234,0,0.85)';
+            ctx.lineWidth=1.2;
+
+            // Draw racetrack outline
+            const r = minorPx/2;
+            const halfStraight = Math.max(0, (majorPx/2 - r));
+
+            ctx.beginPath();
+            // start at top of left semicircle
+            ctx.moveTo(-halfStraight, -r);
+            // left semicircle
+            ctx.arc(-halfStraight, 0, r, -Math.PI/2, Math.PI/2);
+            // bottom straight
+            ctx.lineTo(halfStraight, r);
+            // right semicircle
+            ctx.arc(halfStraight, 0, r, Math.PI/2, -Math.PI/2);
+            // top straight closes
+            ctx.closePath();
+            ctx.stroke();
+
+            // centerline (pattern feel)
+            ctx.setLineDash([5,7]);
+            ctx.beginPath();
+            ctx.moveTo(-halfStraight, 0);
+            ctx.lineTo(halfStraight, 0);
+            ctx.stroke();
+            ctx.setLineDash([]);
+
+            ctx.restore();
+          });
+
+          // preview holdoval while dragging
+          if(tool && tool.tool==='holdoval' && tool.drawing && tool.a && tool.b){
+            const a=tool.a,b=tool.b;
+            const cx=(a.x+b.x)/2, cy=(a.y+b.y)/2;
+            const dx=b.x-a.x, dy=b.y-a.y;
+            const major=Math.max(0.8, Math.hypot(dx,dy));
+            const minor=Math.max(0.25, major*0.28);
+            let hdg=(Math.atan2(dx, -dy)*180/Math.PI+360)%360;
+            const tmp={type:'holdoval',x:cx,y:cy,hdg:hdg,major:major,minor:minor};
+            // draw preview by temporarily pushing into a mini draw
+            const s=toScreen(tmp.x,tmp.y);
+            const z=window.zoom||1;
+            const PX_PER_NM = window.PX_PER_NM || 20;
+            const majorPx = (tmp.major)*z*PX_PER_NM;
+            const minorPx = (tmp.minor)*z*PX_PER_NM;
+            const ang = (tmp.hdg)*Math.PI/180;
+            ctx.save();
+            ctx.translate(s.x,s.y);
+            ctx.rotate(ang);
+            ctx.globalAlpha=0.6;
+            ctx.strokeStyle='rgba(255,234,0,0.85)';
+            ctx.lineWidth=1.2;
+            const r=minorPx/2;
+            const halfStraight=Math.max(0, (majorPx/2 - r));
+            ctx.beginPath();
+            ctx.moveTo(-halfStraight, -r);
+            ctx.arc(-halfStraight, 0, r, -Math.PI/2, Math.PI/2);
+            ctx.lineTo(halfStraight, r);
+            ctx.arc(halfStraight, 0, r, Math.PI/2, -Math.PI/2);
+            ctx.closePath();
+            ctx.stroke();
+            ctx.restore();
+          }
+
+        }catch(_){}
+      };
+    }
+  }
+
+  function boot(){
+    if(!window.st || typeof toWorld!=='function' || typeof toScreen!=='function') return false;
+    ensureToolButtons();
+    hookPolygonTool();
+    hookHoldOvalTool();
+    return true;
+  }
+
+  let tries=0;
+  const iv=setInterval(()=>{
+    tries++;
+    if(boot() || tries>60) clearInterval(iv);
+  }, 150);
+
+})();
+</script>
+<!-- === END PATCH v11 === -->
+
 </body>
 </html>
 B Y     W   A   L   L   A   C   E // v2.1
-
-
-
-
-
-
-
-
-
