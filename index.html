@@ -1,4 +1,4 @@
-ESTE SIMULADOR SE ENCUENTRA EN FASE DE PRUEBA - PUEDEN OCURRIR ERRORES DURANTE EL FUNCIONAMIENTO 2.3
+ESTE SIMULADOR SE ENCUENTRA EN FASE DE PRUEBA - PUEDEN OCURRIR ERRORES DURANTE EL FUNCIONAMIENTO // 2.3 // KEEP TRAINING
 <!DOCTYPE html>
 <html lang="es">
 <head>
@@ -2164,6 +2164,153 @@ canvas#radar {
 })();
 </script>
 <!-- === END PATCH v19 === -->
+
+
+<!-- === PATCH v20: Hard-hide/remove FT/M buttons + Robust RWY end numbers rendering === -->
+<style>
+/* HARD HIDE any FT/M buttons inside Alt panel (even if recreated later) */
+#pAlt button,
+#pAltBody button{
+  /* keep other buttons visible; only hide FT/M via attribute below */
+}
+#pAlt button[data-altunit="1"],
+#pAltBody button[data-altunit="1"]{ display:none !important; }
+
+/* Also hide by text-match fallbacks using :has where supported (safe if unsupported) */
+#pAltBody button.altUnitBtn, #pAlt button.altUnitBtn { display:none !important; }
+</style>
+
+<script>
+(function(){
+  if(window.__APT_V20__) return;
+  window.__APT_V20__ = true;
+
+  const $$=(s,r=document)=>Array.from(r.querySelectorAll(s));
+
+  // ---- 1) Remove/hide FT & M buttons in altitude panel permanently ----
+  function markAndHideAltButtons(){
+    const alt = document.getElementById('pAltBody') || document.getElementById('pAlt');
+    if(!alt) return;
+    $$('button', alt).forEach(b=>{
+      const t=(b.textContent||'').trim().toLowerCase();
+      if(t==='ft' || t==='m'){
+        b.classList.add('altUnitBtn');
+        b.setAttribute('data-altunit','1');
+        // remove to avoid any init issues from listeners
+        try{ b.remove(); }catch(_){}
+      }
+    });
+  }
+
+  // MutationObserver: if any script recreates FT/M, remove instantly
+  function observeAlt(){
+    const alt = document.getElementById('pAltBody') || document.getElementById('pAlt');
+    if(!alt) return;
+    if(window.__ALT_OBS_V20__) return;
+    window.__ALT_OBS_V20__ = true;
+    const mo = new MutationObserver(()=>{ markAndHideAltButtons(); });
+    mo.observe(alt, {childList:true, subtree:true});
+  }
+
+  // ---- 2) RWY end numbers: ensure they render and stay visible ----
+  function norm360(h){ return ((+h)%360+360)%360; }
+  function pad2(n){ return String(n).padStart(2,'0'); }
+  function rwyNum(h){ const n=Math.round(norm360(h)/10)||36; return pad2(n); }
+  function angToRad(d){ return d*Math.PI/180; }
+  function unitFromHdg(h){ const a=angToRad(h); return {x:Math.sin(a), y:-Math.cos(a)}; }
+  function airports(){
+    return (window.st && Array.isArray(st.drawings)) ? st.drawings.filter(d=>d && d.type==='airport') : [];
+  }
+
+  function drawRwyEndNumbers(){
+    try{
+      if(!window.ctx || !window.st || typeof toScreen!=='function') return;
+      const z = window.zoom || 1;
+      // Slightly smaller than airport name label (~12px). Use 11-14 range.
+      const px = Math.max(11, Math.min(14, 11 + z*0.7));
+
+      ctx.save();
+      ctx.font = `bold ${px}px monospace`;
+      ctx.textAlign='center';
+      ctx.textBaseline='middle';
+      ctx.shadowColor='rgba(0,0,0,0.65)';
+      ctx.shadowBlur=6;
+
+      airports().forEach(a=>{
+        const len = (a.lenNM||2.0);
+        const hdg = norm360(a.hdg||0);
+        const opp = norm360(hdg+180);
+        const u = unitFromHdg(hdg);
+        const half = len/2;
+
+        // Thresholds (runway ends)
+        const thr1 = {x:a.x-u.x*half, y:a.y-u.y*half}; // end "hdg"
+        const thr2 = {x:a.x+u.x*half, y:a.y+u.y*half}; // opposite end
+
+        const s1 = toScreen(thr1.x, thr1.y);
+        const s2 = toScreen(thr2.x, thr2.y);
+
+        const r1 = a.rwy || rwyNum(hdg);
+        const r2 = rwyNum(opp);
+
+        // Place numbers JUST OUTSIDE each runway end (at the end), not inside
+        const off = 18; // px
+        const uPx = {x:u.x*off, y:u.y*off};
+
+        function drawAt(sx,sy,rotDeg,txt){
+          ctx.save();
+          ctx.translate(sx,sy);
+          ctx.rotate(angToRad(rotDeg));
+          ctx.lineWidth=3;
+          ctx.strokeStyle='rgba(0,0,0,0.9)';
+          ctx.strokeText(txt,0,0);
+          ctx.fillStyle='rgba(255,255,255,0.96)';
+          ctx.fillText(txt,0,0);
+          ctx.restore();
+        }
+
+        // End 1 (outside)
+        drawAt(s1.x - uPx.x, s1.y - uPx.y, hdg, r1);
+        // End 2 (outside other end)
+        drawAt(s2.x + uPx.x, s2.y + uPx.y, opp, r2);
+      });
+
+      ctx.restore();
+    }catch(_){}
+  }
+
+  // Robustly wrap drawRadar even if other patches overwrite it later
+  function hookDrawRadar(){
+    if(typeof window.drawRadar!=='function') return;
+    const fn = window.drawRadar;
+    if(fn.__rwyWrappedV20) return;
+    function wrapped(){
+      fn();
+      drawRwyEndNumbers();
+    }
+    wrapped.__rwyWrappedV20 = true;
+    // Preserve name for debugging
+    window.drawRadar = wrapped;
+  }
+
+  function boot(){
+    markAndHideAltButtons();
+    observeAlt();
+    hookDrawRadar();
+  }
+
+  document.addEventListener('DOMContentLoaded', boot);
+  // Keep re-hooking briefly in case drawRadar is replaced during init
+  let tries=0;
+  const iv=setInterval(()=>{
+    tries++;
+    boot();
+    if(tries>80) clearInterval(iv);
+  }, 100);
+
+})();
+</script>
+<!-- === END PATCH v20 === -->
 
 </head>
 <body>
@@ -8612,4 +8759,6 @@ document.querySelectorAll('#pCmdBody .btn').forEach(btn=>{
 
 </body>
 </html>
-B Y     W   A   L   L   A   C   E // v2.1
+B Y     W   A   L   L   A   C   E 
+
+
