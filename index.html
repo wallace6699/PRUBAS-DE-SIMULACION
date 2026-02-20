@@ -1,4 +1,4 @@
-ESTE SIMULADOR SE ENCUENTRA EN FASE DE PRUEBA - PUEDEN OCURRIR ERRORES DURANTE EL FUNCIONAMIENTO 2.3 
+ESTE SIMULADOR SE ENCUENTRA EN FASE DE PRUEBA - PUEDEN OCURRIR ERRORES DURANTE EL FUNCIONAMIENTO 2.4
 <!DOCTYPE html>
 <html lang="es">
 <head>
@@ -64,13 +64,21 @@ document.getElementById('cancelDelete').onclick = ()=>{
 
   async function pushStateToCloud(local) {
     if (!local) return;
+
+    // ⚠️ LOCAL ONLY (no sync): Data Block offsets (tagDx/tagDy), unidades, predicción
+    // Enviamos a la nube el estado compartido, pero sin esas preferencias locales.
+    const planesClean = Array.isArray(local.planes) ? local.planes.map(p=>{
+      if(!p || typeof p !== 'object') return p;
+      const q = {...p};
+      delete q.tagDx;
+      delete q.tagDy;
+      return q;
+    }) : local.planes;
+
     const payload = {
-      planes: local.planes,
+      planes: planesClean,
       roles: local.roles,
-      drawings: local.drawings, 
-      mode: local.mode,
-      metric: local.metric,
-      altUnit: local.altUnit,
+      drawings: local.drawings,
       lastWriteBy: currentUID,
       missiles: local.missiles,
       lastUpdate: serverTimestamp()
@@ -86,9 +94,10 @@ document.getElementById('cancelDelete').onclick = ()=>{
       else if (v.planes && typeof v.planes === "object") st.planes = Object.values(v.planes);
       if (v.roles) st.roles = v.roles; 
       if (v.drawings) st.drawings = v.drawings;
-      if (v.mode) st.mode = v.mode;if (typeof v.metric === "boolean") st.metric = v.metric;
-      if (v.altUnit) st.altUnit = v.altUnit;
       if (v.missiles) st.missiles = v.missiles;
+
+      // Reaplicar offsets locales de Data Block (no se sincronizan)
+      if (window.__applyLocalTagOffsets) window.__applyLocalTagOffsets();
 
       repaintPlanesList && repaintPlanesList();
       repaintNav && repaintNav();
@@ -1088,6 +1097,90 @@ let st={
   pairs:[],
   radarFail:false
 };
+
+/* ===== LOCAL ONLY: Unidades + Predicción + Data Block offsets (NO se sincroniza) ===== */
+const __ROOM_LOCAL = (location.hash || "").replace(/^#/, "").trim() || "sala-default";
+const __PREF_KEY = `SETCA_local_prefs_v1_${__ROOM_LOCAL}`;
+const __TAG_KEY  = `SETCA_tag_offsets_v1_${__ROOM_LOCAL}`;
+
+function __lsLoad(key, fallback){
+  try{
+    const v = localStorage.getItem(key);
+    return v ? JSON.parse(v) : fallback;
+  }catch(_){ return fallback; }
+}
+function __lsSave(key, obj){
+  try{ localStorage.setItem(key, JSON.stringify(obj)); }catch(_){}
+}
+
+let __localPrefs = __lsLoad(__PREF_KEY, {});
+let __tagOffsets = __lsLoad(__TAG_KEY, {});
+let __tagSaveT = null;
+
+function __saveTagOffsetsSoon(){
+  if(__tagSaveT) return;
+  __tagSaveT = setTimeout(()=>{
+    __tagSaveT = null;
+    __lsSave(__TAG_KEY, __tagOffsets);
+  }, 250);
+}
+
+window.__setLocalTagOffset = (id, dx, dy)=>{
+  if(!id) return;
+  __tagOffsets[id] = {dx: +dx || 0, dy: +dy || 0};
+  __saveTagOffsetsSoon();
+};
+
+window.__applyLocalTagOffsets = ()=>{
+  if(!window.st || !Array.isArray(st.planes)) return;
+  for(const p of st.planes){
+    const t = __tagOffsets[p.id];
+    if(t && typeof t.dx === 'number' && typeof t.dy === 'number'){
+      p.tagDx = t.dx;
+      p.tagDy = t.dy;
+    }
+  }
+};
+
+window.__saveLocalPrefs = ()=>{
+  __localPrefs.metric = !!st.metric;
+  __localPrefs.altUnit = (st.altUnit === 'm') ? 'm' : 'ft';
+  __localPrefs.predMin = Math.max(0, Math.min(60, (st.predMin|0)));
+  __localPrefs.mode = (st.mode || 'digital');
+  __lsSave(__PREF_KEY, __localPrefs);
+};
+
+window.__updateLocalUI = ()=>{
+  const bm = document.getElementById('uMetric');
+  const bi = document.getElementById('uImperial');
+  if(bm && bi){
+    bm.classList.toggle('hi', !!st.metric);
+    bi.classList.toggle('hi', !st.metric);
+  }
+  const pv = document.getElementById('predVal');
+  if(pv) pv.textContent = String(st.predMin|0);
+
+  const bft = document.getElementById('altFt');
+  const bm2 = document.getElementById('altM');
+  if(bft && bm2){
+    const u = (st.altUnit === 'm') ? 'm' : 'ft';
+    bft.classList.toggle('hi', u === 'ft');
+    bm2.classList.toggle('hi', u === 'm');
+  }
+};
+
+// Aplicar preferencias locales al iniciar (antes de que se pinten los paneles)
+(function __applyLocalPrefsNow(){
+  if(typeof __localPrefs.metric === 'boolean') st.metric = __localPrefs.metric;
+  if(__localPrefs.altUnit === 'm' || __localPrefs.altUnit === 'ft') st.altUnit = __localPrefs.altUnit;
+  if(Number.isFinite(__localPrefs.predMin)) st.predMin = Math.max(0, Math.min(60, (__localPrefs.predMin|0)));
+  if(typeof __localPrefs.mode === 'string' && __localPrefs.mode) st.mode = __localPrefs.mode;
+})();
+window.addEventListener('DOMContentLoaded', ()=>{
+  if(window.__applyLocalTagOffsets) window.__applyLocalTagOffsets();
+  if(window.__updateLocalUI) window.__updateLocalUI();
+});
+
 setupAirports();
 
 // === FORMATION CONSTANTS (sourced) ===
@@ -3075,8 +3168,8 @@ $('#toggleLabels').onclick = ()=>{
 };
 $('#reportBtn').onclick=()=>{ $('#report').style.display='block'; renderReport(); };
 $('#closeReport').onclick=()=>{ $('#report').style.display='none'; };
-$('#uMetric').onclick=()=>{ st.metric=true; repaintNav(); repaintStudent(); repaintAlt(); flash($('#uMetric')); };
-$('#uImperial').onclick=()=>{ st.metric=false; repaintNav(); repaintStudent(); repaintAlt(); flash($('#uImperial')); };
+$('#uMetric').onclick=()=>{ st.metric=true; if(window.__saveLocalPrefs) window.__saveLocalPrefs(); repaintNav(); repaintStudent(); repaintAlt(); if(window.__updateLocalUI) window.__updateLocalUI(); flash($('#uMetric')); };
+$('#uImperial').onclick=()=>{ st.metric=false; if(window.__saveLocalPrefs) window.__saveLocalPrefs(); repaintNav(); repaintStudent(); repaintAlt(); if(window.__updateLocalUI) window.__updateLocalUI(); flash($('#uImperial')); };
 $('#windSpd').onchange=e=>{ st.windKmh = st.metric?(+e.target.value||0):((+e.target.value||0)*KTS2KMH); flash(e.target); };
 $('#windDir').onchange=e=>{ st.windDir = +e.target.value||0; flash(e.target); };
 $('#failRadar').onclick=e=>{ st.radarFail=!st.radarFail; e.currentTarget.classList.toggle('hi',st.radarFail); flash(e.currentTarget); };
@@ -3274,9 +3367,9 @@ window.addEventListener('DOMContentLoaded', bindAptoUI);
 
 
 
-$('#modeDigital').onclick=()=>{ st.mode='digital'; flash($('#modeDigital')); };
-$('#predPlus').onclick=()=>{ st.predMin=Math.min(60,st.predMin+1); $('#predVal').textContent=st.predMin; flash($('#predPlus')); };
-$('#predMinus').onclick=()=>{ st.predMin=Math.max(0,st.predMin-1); $('#predVal').textContent=st.predMin; flash($('#predMinus')); };
+$('#modeDigital').onclick=()=>{ st.mode='digital'; if(window.__saveLocalPrefs) window.__saveLocalPrefs(); flash($('#modeDigital')); };
+$('#predPlus').onclick=()=>{ st.predMin=Math.min(60,st.predMin+1); if(window.__saveLocalPrefs) window.__saveLocalPrefs(); if(window.__updateLocalUI) window.__updateLocalUI(); flash($('#predPlus')); };
+$('#predMinus').onclick=()=>{ st.predMin=Math.max(0,st.predMin-1); if(window.__saveLocalPrefs) window.__saveLocalPrefs(); if(window.__updateLocalUI) window.__updateLocalUI(); flash($('#predMinus')); };
 $('#addFighter').onclick=()=>{
   const n=st.planes.length+1,id='R'+n,nm=id;
   const p={name:nm,id,x:(Math.random()*200-100),y:(Math.random()*200-100),hdg:Math.random()*360,spd:420,tgtSpd:420,alt:20000+(Math.random()*6000|0),tgtAlt:20000+(Math.random()*6000|0),turn:2,tgtHdg:Math.random()*360,ghosts:[],lastDet:0,fail:{comms:false,eng:'none',cab:'none',gear:false,bird:false},kills:0,fuel:100,jamming:false};
@@ -3289,8 +3382,8 @@ $('#addCom').onclick=()=>{
   st.planes.push(p); st.roles[id]='Civilian'; repaintPlanesList(); repaintNav(); repaintPairs(); repaintAlt(); flash($('#addCom'));
 };
 
-$('#altFt').onclick=()=>{ st.altUnit='ft'; repaintAlt(); flash($('#altFt')); };
-$('#altM').onclick=()=>{ st.altUnit='m'; repaintAlt(); flash($('#altM')); };
+$('#altFt').onclick=()=>{ st.altUnit='ft'; if(window.__saveLocalPrefs) window.__saveLocalPrefs(); repaintAlt(); if(window.__updateLocalUI) window.__updateLocalUI(); flash($('#altFt')); };
+$('#altM').onclick=()=>{ st.altUnit='m'; if(window.__saveLocalPrefs) window.__saveLocalPrefs(); repaintAlt(); if(window.__updateLocalUI) window.__updateLocalUI(); flash($('#altM')); };
 $('#doPair').onclick=()=>{
   const a=$('#pairA').value,b=$('#pairB').value;
   if(a&&b&&a!==b){
@@ -4843,6 +4936,8 @@ document.querySelectorAll('#pCmdBody .btn').forEach(btn=>{
   cvs.addEventListener('mousedown', e=>{
     if(e.button !== 0 || !e.ctrlKey) return;
 
+    if(window.__applyLocalTagOffsets) window.__applyLocalTagOffsets();
+
     const r = cvs.getBoundingClientRect();
     const mx = e.clientX - r.left;
     const my = e.clientY - r.top;
@@ -4876,6 +4971,7 @@ document.querySelectorAll('#pCmdBody .btn').forEach(btn=>{
     if(!draggingTag) return;
     draggingTag.tagDx += (e.clientX - tagStart.x);
     draggingTag.tagDy += (e.clientY - tagStart.y);
+    if(window.__setLocalTagOffset) window.__setLocalTagOffset(draggingTag.id, draggingTag.tagDx, draggingTag.tagDy);
     tagStart = { x: e.clientX, y: e.clientY };
   });
 
