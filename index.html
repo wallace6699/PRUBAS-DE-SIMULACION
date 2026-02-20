@@ -584,6 +584,9 @@ canvas#radar {
 .btn-grid.small{
   grid-template-columns:repeat(auto-fit, minmax(90px, 1fr));
 }
+.btn-grid.radar3{
+  grid-template-columns:repeat(3, 1fr);
+}
 .cmd-row-2{
   display:flex;
   gap:8px;
@@ -610,6 +613,31 @@ canvas#radar {
 }
 .coord-grid input{width:100%}
 
+
+/* ===== APTO selector (LOCAL) ===== */
+.aptoOverlay{position:fixed;inset:0;display:none;align-items:center;justify-content:center;background:rgba(0,0,0,.60);z-index:9998}
+.aptoCard{width:min(720px,92vw);max-height:82vh;background:#0b0f0c;color:#eaffea;border:1px solid rgba(46,231,79,.35);border-radius:12px;box-shadow:0 18px 48px rgba(0,0,0,.65);display:flex;flex-direction:column;overflow:hidden}
+.aptoHead{display:flex;align-items:center;justify-content:space-between;padding:10px 12px;border-bottom:1px solid rgba(46,231,79,.18)}
+.aptoTitle{font-weight:800;letter-spacing:.3px}
+.aptoBody{padding:10px 12px;display:flex;flex-direction:column;gap:10px;overflow:hidden}
+.aptoRow{display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap}
+.aptoLocal{font-size:11px;opacity:.85;border:1px solid rgba(255,224,102,.35);padding:2px 7px;border-radius:999px;color:#ffe066}
+.aptoSeg{display:grid;grid-template-columns:1fr 1fr 1fr;gap:6px}
+.aptoSeg .btn{width:100%}
+#aptoSearch{width:100%;padding:7px 10px;border-radius:8px;border:1px solid rgba(255,255,255,.14);background:#08110b;color:#eaffea;outline:none}
+.aptoCustom{display:flex;flex-direction:column;gap:8px}
+.aptoCustom.hidden{display:none}
+.aptoList{flex:1;max-height:44vh;overflow:auto;border:1px solid rgba(255,255,255,.12);border-radius:10px;background:rgba(0,0,0,.22);padding:6px}
+.aptoItem{display:flex;gap:8px;align-items:flex-start;padding:6px 6px;border-radius:8px}
+.aptoItem:hover{background:rgba(46,231,79,.06)}
+.aptoItem input{margin-top:2px}
+.aptoItem .t{font-size:12px;line-height:1.15}
+.aptoItem .s{font-size:11px;opacity:.72;margin-top:2px}
+.aptoActions{display:flex;gap:6px}
+.aptoActions .btn{flex:1}
+.aptoFoot{display:flex;gap:8px;padding:10px 12px;border-top:1px solid rgba(46,231,79,.18)}
+.aptoFoot .btn{flex:1}
+
 </style>
 </head>
 <body>
@@ -619,7 +647,7 @@ canvas#radar {
 
   <button id="start" style="display:none" class="btn focusable">▶️ Iniciar</button>
   <button id="pause" class="btn focusable">⏸️ Pausar</button>
-  <button id="toggleLabels" class="btn focusable">🧷 Etiquetas</button>
+<button id="toggleLabels" class="btn focusable">🧷 Etiquetas</button>
   <button id="reportBtn" class="btn focusable">📝 Reporte Táctico</button>
 
   <button
@@ -648,10 +676,11 @@ canvas#radar {
 
         <div class="group">
           <div class="group-title">Radar</div>
-          <div class="btn-grid small">
+          <div class="btn-grid small radar3">
             <button id="failRadar" class="btn mini focusable">Falla Radar</button>
             <button id="toggleSweep" class="btn mini focusable">Haz Radar</button>
-          </div>
+                      <button id="toggleAirports" class="btn mini focusable">APTO</button>
+</div>
         </div>
 
         <div class="group">
@@ -765,12 +794,12 @@ canvas#radar {
           <button class="btn mini tool focusable" data-tool="bullseye">Bullseye</button>
           <button class="btn mini tool focusable" data-tool="label">Etiqueta</button>
         </div>
-
-        <div class="coord-grid">
-          <input id="coordX" class="ghost focusable" type="number" placeholder="X (NM)">
-          <input id="coordY" class="ghost focusable" type="number" placeholder="Y (NM)">
-          <button id="place" class="btn mini focusable">Crear</button>
+<div class="coord-grid">
+          <input id="coordLat" class="ghost focusable" type="text" placeholder="Lat (DMS o decimal)">
+          <input id="coordLon" class="ghost focusable" type="text" placeholder="Lon (DMS o decimal)">
+          <button id="placeLL" class="btn mini focusable">Crear (Coord)</button>
         </div>
+
       </div>
     </section>
 
@@ -795,6 +824,243 @@ function flash(el){el.classList.add('flash');setTimeout(()=>el.classList.remove(
 /* ===== Constantes / Estado ===== */
 const NM2KM=1.852,KTS2KMH=1.852,KMH2KTS=1/1.852,FT2M=0.3048;
 const MAX_RANGE_NM=1000,GRID_STEP_NM=10,PX_PER_NM=20;
+/* ===== Aeropuertos (Perú) / Centro radar =====
+   Coordenadas en grados decimales (lat/lon). Posición local en NM relativa al centro (SPJC).
+*/
+const CENTER_AIRPORT = { icao:'SPJC', iata:'LIM', name:'Jorge Chávez', city:'Lima', lat:-12.0219, lon:-77.1143 };
+const AIRPORTS_PE = [
+  {icao:'SPJC', iata:'LIM', name:"Jorge Chávez International Airport", city:"Lima", lat:-12.0219, lon:-77.114305, type:'large_airport', primary:true},
+  {icao:'PE-0001', iata:'', name:"Lagunas Airstrip", city:"Lagunas", lat:-5.2475, lon:-75.678, type:'small_airport'},
+  {icao:'PE-0003', iata:'', name:"Cabo Pantoja Airstrip", city:"Cabo Pantoja", lat:-0.952, lon:-75.179731, type:'small_airport'},
+  {icao:'PE-0004', iata:'', name:"Santa Maria de Fatima Airport", city:'', lat:-11.940815, lon:-68.994212, type:'small_airport'},
+  {icao:'PE-0005', iata:'', name:"Kirigueti Airfield", city:"Kirigueti", lat:-11.574279, lon:-73.128657, type:'closed'},
+  {icao:'PE-0007', iata:'', name:"Pucallpa West Airport", city:"Pucallpa", lat:-8.361953, lon:-74.656877, type:'small_airport'},
+  {icao:'PE-0008', iata:'', name:"Saramuro Airport", city:"Saramuro", lat:-4.707892, lon:-74.876733, type:'small_airport'},
+  {icao:'PE-0010', iata:'', name:"Pativilca Airstrip", city:"Pativilca", lat:-10.705015, lon:-77.800884, type:'small_airport'},
+  {icao:'PE-0011', iata:'', name:"Patao Airport", city:"Barranca", lat:-10.714039, lon:-77.746854, type:'small_airport'},
+  {icao:'PE-0012', iata:'', name:"Chinchero International Airport (Under Construction)", city:"Chinchero", lat:-13.3915, lon:-72.069, type:'closed'},
+  {icao:'PE-0013', iata:'', name:"Pucallpa Air Force Heliport", city:"Pucallpa", lat:-8.3515, lon:-74.5819, type:'heliport'},
+  {icao:'PE-0014', iata:'', name:"Misión SAM Airport", city:"Pucallpa", lat:-8.35681, lon:-74.66043, type:'small_airport'},
+  {icao:'PE-0015', iata:'', name:"Puerto Anapati Heliport", city:"Puerto Anapati", lat:-11.92859, lon:-73.9877, type:'heliport'},
+  {icao:'PE-0016', iata:'', name:"Micaela Bastidas Morales Heliport", city:"Misión", lat:-11.857, lon:-73.9589, type:'heliport'},
+  {icao:'PE-0017', iata:'', name:"Puerto Ocopa Heliport", city:"Puerto Ocopa", lat:-11.14793, lon:-74.30629, type:'heliport'},
+  {icao:'PE-0018', iata:'', name:"Tanquin Heliport", city:"Tanquin", lat:-12.12632, lon:-74.07599, type:'heliport'},
+  {icao:'PE-0019', iata:'', name:"Tamburco Airport", city:"Tamburco", lat:-13.56872, lon:-72.82457, type:'small_airport'},
+  {icao:'PE-0020', iata:'', name:"Diospi Suyana Hospital Heliport", city:"Curahuasi", lat:-13.54249, lon:-72.70599, type:'heliport'},
+  {icao:'PE-0021', iata:'', name:"Pichari Airport", city:"Sivia", lat:-12.50306, lon:-73.85287, type:'small_airport'},
+  {icao:'PE-0022', iata:'', name:"Camposol Chao Airport", city:"Virú", lat:-8.58173, lon:-78.68142, type:'small_airport'},
+  {icao:'PE-0024', iata:'', name:"Yapatera Airport", city:"Yapatera", lat:-5.06777, lon:-80.14731, type:'small_airport'},
+  {icao:'PE-0025', iata:'', name:"Huacho Airport", city:"Santa María", lat:-11.11008, lon:-77.55382, type:'small_airport'},
+  {icao:'PE-0027', iata:'', name:"San Bartolo Airport", city:"San Bartolo", lat:-12.38084, lon:-76.78206, type:'small_airport'},
+  {icao:'PE-0028', iata:'', name:"Chilca Airport", city:"Chilca", lat:-12.50469, lon:-76.74428, type:'closed'},
+  {icao:'PE-0029', iata:'', name:"Las Plumas Airport", city:"Cerro Azul", lat:-12.91902, lon:-76.49186, type:'small_airport'},
+  {icao:'PE-0030', iata:'', name:"Aeroclub Alas del Mar", city:"Santa María del Mar", lat:-12.40001, lon:-76.76806, type:'small_airport'},
+  {icao:'PE-0031', iata:'', name:"Aldora Airport", city:"Paita", lat:-5.15176, lon:-80.94737, type:'closed'},
+  {icao:'PE-0032', iata:'', name:"Chivay Airport", city:"Chivay", lat:-15.63627, lon:-71.61376, type:'small_airport'},
+  {icao:'PE-0034', iata:'', name:"Central FAP Hospital Helipad", city:"Miraflores", lat:-12.103711, lon:-77.030216, type:'heliport'},
+  {icao:'PE-0035', iata:'', name:"Collique Airport", city:"Collique Bajo", lat:-11.9287, lon:-77.061096, type:'closed'},
+  {icao:'PE-0036', iata:'', name:"Camana Airport", city:"Camana", lat:-16.606999, lon:-72.697649, type:'closed'},
+  {icao:'PE-0037', iata:'', name:"Satipo Airport", city:"Satipo", lat:-11.2625, lon:-74.647778, type:'closed'},
+  {icao:'PE-0038', iata:'', name:"Puerto Ocopa Airport", city:"Puerto Ocopa", lat:-11.143755, lon:-74.307153, type:'closed'},
+  {icao:'PE-0039', iata:'', name:"Paramonga Airport", city:"Paramonga", lat:-10.667, lon:-77.833, type:'closed'},
+  {icao:'PE-0040', iata:'', name:"Requena Airport", city:"Requena", lat:-5.078026, lon:-73.856404, type:'closed'},
+  {icao:'PE-0041', iata:'', name:"Bayóvar Airport", city:"Bayóvar", lat:-5.83075, lon:-81.025803, type:'closed'},
+  {icao:'PE-0042', iata:'', name:"Chincha Airport", city:"Chincha", lat:-13.37036, lon:-76.11276, type:'closed'},
+  {icao:'PE-0043', iata:'', name:"Ica Airport", city:"Ica", lat:-14.2001, lon:-75.573898, type:'closed'},
+  {icao:'PE-0044', iata:'', name:"Ancón Airport", city:"Ancón", lat:-11.7947, lon:-77.180901, type:'closed'},
+  {icao:'PE-0045', iata:'', name:"Sullana Airport", city:"Sullana", lat:-4.903889, lon:-80.68528, type:'closed'},
+  {icao:'PE-0046', iata:'', name:"San Juan Aposento Airport", city:"San Juan Aposento", lat:-15.3539, lon:-75.167099, type:'closed'},
+  {icao:'PE-0047', iata:'', name:"Barranca Airport", city:"Barranca", lat:-10.75, lon:-77.76667, type:'closed'},
+  {icao:'PE-0048', iata:'', name:"Cunocuno Airport", city:"Cunocuno", lat:-15.977222, lon:-73.10833, type:'closed'},
+  {icao:'PE-0049', iata:'', name:"Fausa Airport", city:"Fausa", lat:-14.7094, lon:-71.731102, type:'closed'},
+  {icao:'PE-0050', iata:'', name:"Olmos Airport", city:"Olmos", lat:-5.984722, lon:-79.745277, type:'closed'},
+  {icao:'PE-0051', iata:'', name:"Lobitos Airport", city:"Lobitos", lat:-4.448611, lon:-81.275558, type:'closed'},
+  {icao:'PE-0052', iata:'', name:"Santa Maria Airport", city:"Santa María", lat:-11.983334, lon:-77.0, type:'closed'},
+  {icao:'PE-0053', iata:'', name:"Zorritos Airport", city:"Contralmirante Villar", lat:-3.67374, lon:-80.652397, type:'closed'},
+  {icao:'PE-0054', iata:'', name:"Pomacocha Airport", city:"Pomacocha", lat:-15.1792, lon:-73.274399, type:'closed'},
+  {icao:'PE-0055', iata:'', name:"Tintay Airport", city:"Tintay", lat:-13.959167, lon:-73.185837, type:'closed'},
+  {icao:'PE-0056', iata:'BLP', name:"Huallaga Airport", city:"Bellavista", lat:-7.06056, lon:-76.582199, type:'small_airport'},
+  {icao:'PE-0057', iata:'', name:"La Perla Naval Base Heliport", city:"Callao", lat:-12.070465, lon:-77.105331, type:'heliport'},
+  {icao:'PE-0058', iata:'', name:"Naval Medical Center Heliport", city:"Callao", lat:-12.060212, lon:-77.092275, type:'heliport'},
+  {icao:'SOML', iata:'', name:"Malin Airport", city:"Malin", lat:-7.63333, lon:-78.650002, type:'small_airport'},
+  {icao:'SPAA', iata:'', name:"Caraz Airport", city:"Ancash", lat:-9.051429, lon:-77.810143, type:'small_airport'},
+  {icao:'SPAB', iata:'', name:"Huancabamba Airport", city:"Huancabamba", lat:-5.25677, lon:-79.442902, type:'small_airport'},
+  {icao:'SPAC', iata:'', name:"Ciro Alegria Airport", city:"Santa María de Nieva", lat:-4.607492, lon:-77.940935, type:'small_airport'},
+  {icao:'SPAG', iata:'', name:"Aguaytia Airport", city:"Aguaytia", lat:-9.03741, lon:-75.509201, type:'small_airport'},
+  {icao:'SPAI', iata:'', name:"Urpay Airport", city:"Pataz", lat:-8.3495, lon:-77.3985, type:'small_airport'},
+  {icao:'SPAL', iata:'', name:"Alao Airport", city:"El Dorado", lat:-6.5, lon:-76.716698, type:'small_airport'},
+  {icao:'SPAP', iata:'', name:"Picota Airport", city:"Picota", lat:-6.909451, lon:-76.32909, type:'small_airport'},
+  {icao:'SPAR', iata:'ALD', name:"Alerta Airport", city:"Fortaleza", lat:-11.65018, lon:-69.229614, type:'small_airport'},
+  {icao:'SPAS', iata:'AOP', name:"Alferez FAP Alfredo Vladimir Sara Bauer Airport", city:"Andoas", lat:-2.79613, lon:-76.466599, type:'small_airport'},
+  {icao:'SPAT', iata:'', name:"Aguas Calientes Airport", city:"Aguas Calientes", lat:-8.83333, lon:-74.683296, type:'small_airport'},
+  {icao:'SPAY', iata:'AYX', name:"Teniente General Gerardo Pérez Pinedo Airport", city:"Atalaya", lat:-10.7291, lon:-73.766502, type:'medium_airport'},
+  {icao:'SPBB', iata:'MBP', name:"Moyobamba Airport", city:"Moyobamba", lat:-6.018889, lon:-76.988327, type:'small_airport'},
+  {icao:'SPBC', iata:'', name:"Caballococha Airport", city:"Caballococha", lat:-3.91686, lon:-70.508202, type:'medium_airport'},
+  {icao:'SPBJ', iata:'', name:"Buncuyo", city:"Ramón Castilla", lat:-6.516667, lon:-74.583333, type:'small_airport'},
+  {icao:'SPBL', iata:'', name:"Bolognesi Airport", city:"Bolognesi", lat:-10.029555, lon:-73.943375, type:'small_airport'},
+  {icao:'SPBQ', iata:'', name:"Nuevo Acari Airport", city:"San Isidro", lat:-15.45003, lon:-74.74423, type:'small_airport'},
+  {icao:'SPBR', iata:'IBP', name:"Iberia Airport", city:"Iberia", lat:-11.4116, lon:-69.488701, type:'medium_airport'},
+  {icao:'SPBS', iata:'', name:"Bellavista Airport", city:"Jeberos", lat:-5.28839, lon:-76.292099, type:'small_airport'},
+  {icao:'SPBT', iata:'', name:"Obenteni Airport", city:"Obenteni", lat:-10.755137, lon:-74.221749, type:'small_airport'},
+  {icao:'SPCC', iata:'', name:"Ciudad Constitución Airport", city:"Ciudad Constitución", lat:-9.865278, lon:-75.008888, type:'small_airport'},
+  {icao:'SPCG', iata:'', name:"Casa Grande Airport", city:"Ascope", lat:-7.743889, lon:-79.186386, type:'small_airport'},
+  {icao:'SPCH', iata:'', name:"Tocache Airport", city:"Tocache", lat:-8.195356, lon:-76.530241, type:'small_airport'},
+  {icao:'SPCI', iata:'', name:"Campamento De Ilo Aerodrome", city:'', lat:-17.615403, lon:-71.330883, type:'small_airport'},
+  {icao:'SPCL', iata:'PCL', name:"Cap FAP David Abenzur Rengifo International Airport", city:"Pucallpa", lat:-8.378064, lon:-74.574495, type:'large_airport'},
+  {icao:'SPCM', iata:'', name:"Contamana Airport", city:"Contamana", lat:-7.335827, lon:-74.992531, type:'small_airport'},
+  {icao:'SPCP', iata:'', name:"Pucacaca Airport", city:"Pucacaca", lat:-6.843543, lon:-76.33959, type:'small_airport'},
+  {icao:'SPCR', iata:'', name:"Acarí Airbase Airport", city:"Acarí", lat:-15.5, lon:-74.666672, type:'small_airport'},
+  {icao:'SPCT', iata:'', name:"Chota Airport", city:"Chota", lat:-6.55, lon:-78.650002, type:'small_airport'},
+  {icao:'SPCV', iata:'', name:"Quempiri Airfield", city:"Cutivireni", lat:-11.876932, lon:-73.916868, type:'small_airport'},
+  {icao:'SPDN', iata:'', name:"Colonia Angamos Airport", city:"Colonia Angamos", lat:-5.137125, lon:-72.867889, type:'small_airport'},
+  {icao:'SPDO', iata:'', name:"Mollendo Airport", city:"Mollendo", lat:-17.045401, lon:-71.983704, type:'small_airport'},
+  {icao:'SPDR', iata:'TDP', name:"Trompeteros Airport", city:"Corrientes", lat:-3.80601, lon:-75.039299, type:'small_airport'},
+  {icao:'SPDS', iata:'', name:"Cuajone Botiflaca Airport", city:"Cuajone", lat:-17.070833, lon:-70.770833, type:'small_airport'},
+  {icao:'SPDU', iata:'', name:"Pueblo Libre Del Codo Airport", city:'', lat:-9.664617, lon:-75.285337, type:'small_airport'},
+  {icao:'SPEB', iata:'', name:"Pebas Airport", city:"Loreto", lat:-3.3333, lon:-71.816704, type:'small_airport'},
+  {icao:'SPEE', iata:'', name:"El Estrecho Airport", city:'', lat:-2.45406, lon:-72.670601, type:'small_airport'},
+  {icao:'SPEN', iata:'', name:"Iscozasin Airport", city:"Iscozasin", lat:-10.183, lon:-75.150002, type:'small_airport'},
+  {icao:'SPEO', iata:'CHM', name:"FAP Lieutenant Jaime Andres de Montreuil Morales Airport", city:"Chimbote", lat:-9.14961, lon:-78.523804, type:'medium_airport'},
+  {icao:'SPEP', iata:'', name:"Puerto Esperanza Airport", city:"Esperanza", lat:-9.76813, lon:-70.706497, type:'small_airport'},
+  {icao:'SPEQ', iata:'', name:"Cesar Torke Podesta Airport", city:"Moquegua", lat:-17.179001, lon:-70.930801, type:'small_airport'},
+  {icao:'SPEZ', iata:'', name:"Puerto Bermudez Airport", city:"Oxapampa", lat:-10.2992, lon:-74.937202, type:'small_airport'},
+  {icao:'SPGB', iata:'', name:"Galilea Airport", city:'', lat:-4.03188, lon:-77.758797, type:'small_airport'},
+  {icao:'SPGL', iata:'CGL', name:"Chagual Airport", city:'', lat:-7.797624, lon:-77.651249, type:'small_airport'},
+  {icao:'SPGM', iata:'TGI', name:"Tingo Maria Airport", city:"Tingo Maria", lat:-9.289667, lon:-76.005058, type:'small_airport'},
+  {icao:'SPGP', iata:'', name:"Güeppi­ Airport", city:'', lat:-0.119056, lon:-75.247902, type:'small_airport'},
+  {icao:'SPGS', iata:'', name:"Lagunas Airport", city:"Cajamarca", lat:-6.9, lon:-78.633331, type:'small_airport'},
+  {icao:'SPGT', iata:'', name:"Puerto Victoria Airport", city:"Puerto Victoria", lat:-9.90261, lon:-74.964104, type:'small_airport'},
+  {icao:'SPGU', iata:'', name:"Baguá Airport", city:"Baguá", lat:-5.634722, lon:-78.530556, type:'small_airport'},
+  {icao:'SPHC', iata:'', name:"Chala Airport", city:"Puerto Chala", lat:-15.80703, lon:-74.28699, type:'small_airport'},
+  {icao:'SPHI', iata:'CIX', name:"Capitán FAP José A. Quiñones González International Airport", city:"Chiclayo", lat:-6.789223, lon:-79.828254, type:'large_airport'},
+  {icao:'SPHO', iata:'AYP', name:"Air Force Colonel Alfredo Mendivil Duarte Airport", city:"Ayacucho", lat:-13.1548, lon:-74.204399, type:'medium_airport'},
+  {icao:'SPHU', iata:'', name:"Huancayo Airport", city:"Huancayo", lat:-12.0699, lon:-75.198502, type:'small_airport'},
+  {icao:'SPHV', iata:'', name:"Huánuco Viejo Airport", city:"Huánuco Viejo", lat:-9.92632, lon:-76.233902, type:'small_airport'},
+  {icao:'SPHY', iata:'ANS', name:"Andahuaylas Airport", city:"Andahuaylas", lat:-13.7064, lon:-73.350403, type:'small_airport'},
+  {icao:'SPHZ', iata:'ATA', name:"Comandante FAP German Arias Graziani Airport", city:"Anta", lat:-9.34744, lon:-77.598396, type:'medium_airport'},
+  {icao:'SPID', iata:'', name:"Teniente Bergerie Airport", city:"Iquitos", lat:-3.7422, lon:-73.2604, type:'small_airport'},
+  {icao:'SPIL', iata:'UMI', name:"Quincemil Air Base", city:"Quince Mil", lat:-13.231357, lon:-70.75145, type:'small_airport'},
+  {icao:'SPIN', iata:'', name:"Iñapari Airport", city:"Iñapari", lat:-10.979, lon:-69.559402, type:'small_airport'},
+  {icao:'SPIR', iata:'', name:"Patria Airport", city:"Pillcopata", lat:-12.966295, lon:-71.429936, type:'small_airport'},
+  {icao:'SPIS', iata:'', name:"Pias Airport", city:"Pataz", lat:-7.92062, lon:-77.52518, type:'small_airport'},
+  {icao:'SPIT', iata:'', name:"Paita Airport", city:"Paita Wesr", lat:-5.08595, lon:-81.152802, type:'small_airport'},
+  {icao:'SPIY', iata:'', name:"Yauri Airport", city:"Yauri", lat:-14.796129, lon:-71.431818, type:'small_airport'},
+  {icao:'SPIZ', iata:'UCZ', name:"Uchiza Airport", city:"Uchiza", lat:-8.467, lon:-76.349998, type:'small_airport'},
+  {icao:'SPJA', iata:'RIJ', name:"Juan Simons Vela Airport", city:"Rioja", lat:-6.06786, lon:-77.160004, type:'medium_airport'},
+  {icao:'SPJB', iata:'', name:"Pampa Grande Airport", city:"Pampa Grande", lat:-7.61447, lon:-78.06159, type:'small_airport'},
+  {icao:'SPJE', iata:'JAE', name:"Shumba Airport", city:"Jaén", lat:-5.59248, lon:-78.774002, type:'medium_airport'},
+  {icao:'SPJI', iata:'JJI', name:"Juanjui Airport", city:"Juanjuí", lat:-7.1691, lon:-76.7286, type:'medium_airport'},
+  {icao:'SPJJ', iata:'JAU', name:"Francisco Carle Airport", city:"Jauja", lat:-11.7831, lon:-75.473396, type:'medium_airport'},
+  {icao:'SPJL', iata:'JUL', name:"Inca Manco Capac International Airport", city:"Juliaca", lat:-15.467689, lon:-70.15653, type:'large_airport'},
+  {icao:'SPJN', iata:'SJA', name:"San Juan de Marcona Airport", city:"San Juan de Marcona", lat:-15.357508, lon:-75.135005, type:'small_airport'},
+  {icao:'SPJR', iata:'CJA', name:"Mayor General FAP Armando Revoredo Iglesias Airport", city:"Cajamarca", lat:-7.13918, lon:-78.489403, type:'medium_airport'},
+  {icao:'SPKI', iata:'', name:"Kiteni Airport", city:"La Convención", lat:-12.648669, lon:-73.036579, type:'small_airport'},
+  {icao:'SPLA', iata:'', name:"Luisiana Airport", city:"Luisiana", lat:-12.673815, lon:-73.710266, type:'small_airport'},
+  {icao:'SPLC', iata:'', name:"Mariano Melgar Airport", city:"La Joya", lat:-16.7915, lon:-71.886597, type:'small_airport'},
+  {icao:'SPLD', iata:'', name:"Celendín Airport", city:"Celendín", lat:-6.8676, lon:-78.149902, type:'small_airport'},
+  {icao:'SPLG', iata:'', name:"Lagarto Nuevo Airport", city:"Lagarto", lat:-12.6416, lon:-69.837502, type:'small_airport'},
+  {icao:'SPLH', iata:'', name:"Las Dunas Airport", city:"Ica", lat:-14.03561, lon:-75.76004, type:'small_airport'},
+  {icao:'SPLN', iata:'RIM', name:"San Nicolas Airport", city:"Rodriguez de Mendoza", lat:-6.39231, lon:-77.501198, type:'small_airport'},
+  {icao:'SPLO', iata:'ILQ', name:"General Jorge Fernandez Maldon Airport", city:"Ilo", lat:-17.695, lon:-71.344002, type:'medium_airport'},
+  {icao:'SPLP', iata:'', name:"Las Palmas Air Base", city:"Chorrillos", lat:-12.1607, lon:-76.998901, type:'small_airport'},
+  {icao:'SPLS', iata:'', name:"Zorrillos Airport", city:"Zorrillos", lat:-8.417, lon:-75.133003, type:'small_airport'},
+  {icao:'SPLX', iata:'', name:"Lib Mandi Metropolitan Airport", city:"San Bartolo", lat:-12.38875, lon:-76.75834, type:'small_airport'},
+  {icao:'SPME', iata:'TBP', name:"Captain Pedro Canga Rodríguez International Airport", city:"Tumbes", lat:-3.552074, lon:-80.381086, type:'medium_airport'},
+  {icao:'SPMF', iata:'MZA', name:"Mayor PNP Nancy Flores Paucar Airport", city:"Mazamari", lat:-11.3254, lon:-74.535598, type:'small_airport'},
+  {icao:'SPMS', iata:'YMS', name:"Moises Benzaquen Rengifo Airport", city:"Yurimaguas", lat:-5.89377, lon:-76.118202, type:'medium_airport'},
+  {icao:'SPNC', iata:'HUU', name:"Alferez Fap David Figueroa Fernandini Airport", city:"Huánuco", lat:-9.87881, lon:-76.204803, type:'medium_airport'},
+  {icao:'SPNH', iata:'', name:"Laguna Choclococha Airport", city:"Choclococha", lat:-13.1657, lon:-75.071999, type:'small_airport'},
+  {icao:'SPNM', iata:'', name:"Nuevo Mundo Airport", city:"Nuevo Mundo", lat:-11.5415, lon:-73.142197, type:'small_airport'},
+  {icao:'SPNP', iata:'', name:"Ventilla Airport", city:"Ventilla", lat:-15.85131, lon:-70.05871, type:'small_airport'},
+  {icao:'SPNR', iata:'', name:"Ricrán Airport", city:"Ricrán", lat:-10.77795, lon:-76.251312, type:'small_airport'},
+  {icao:'SPNT', iata:'', name:"Intuto Airport", city:"Intuto", lat:-3.583, lon:-74.75, type:'small_airport'},
+  {icao:'SPNU', iata:'', name:"Manu Airport", city:"Manu", lat:-12.289721, lon:-70.890199, type:'small_airport'},
+  {icao:'SPOA', iata:'SQU', name:"Saposoa Airport", city:"Plaza Saposoa", lat:-6.96003, lon:-76.768402, type:'small_airport'},
+  {icao:'SPON', iata:'', name:"Orellana Airport", city:"Orellana", lat:-6.896733, lon:-75.153182, type:'small_airport'},
+  {icao:'SPOR', iata:'', name:"Orcopampa Airport", city:"Orcopampa", lat:-15.315232, lon:-72.352095, type:'small_airport'},
+  {icao:'SPOV', iata:'', name:"Shiringayoc/Hacienda Hda Mejia Airport", city:"Leon Velarde", lat:-11.9, lon:-69.167, type:'small_airport'},
+  {icao:'SPOY', iata:'', name:"Atico Airport", city:"Atico", lat:-16.232846, lon:-73.605652, type:'small_airport'},
+  {icao:'SPPB', iata:'', name:"Tipishsa Airport", city:"Puerto Breu", lat:-9.53306, lon:-72.756897, type:'small_airport'},
+  {icao:'SPPE', iata:'', name:"Palmapampa Airport", city:"Palmapampa", lat:-12.763889, lon:-73.652778, type:'small_airport'},
+  {icao:'SPPH', iata:'', name:"Pampa Hermosa Airport", city:"Pampa Hermosa", lat:-7.206774, lon:-75.297559, type:'small_airport'},
+  {icao:'SPPL', iata:'', name:"Playa Airport", city:"Trismaje", lat:-8.51782, lon:-76.480499, type:'small_airport'},
+  {icao:'SPPN', iata:'', name:"Palmas del Espino Airport", city:"Palmas del Espino", lat:-8.343722, lon:-76.48935, type:'small_airport'},
+  {icao:'SPPO', iata:'', name:"Pozuzo Airport", city:"Pozuzo", lat:-10.0701, lon:-75.550003, type:'small_airport'},
+  {icao:'SPPP', iata:'', name:"Huanacopampa Airport", city:"Huanacopampa", lat:-14.14334, lon:-72.33455, type:'small_airport'},
+  {icao:'SPPY', iata:'CHH', name:"Chachapoyas Airport", city:"Chachapoyas", lat:-6.201911, lon:-77.856195, type:'medium_airport'},
+  {icao:'SPPZ', iata:'', name:"Palcazú Airport", city:"Porvenir", lat:-9.895833, lon:-75.117775, type:'small_airport'},
+  {icao:'SPQJ', iata:'', name:"Jaquí Airport", city:"Jaquí", lat:-15.466667, lon:-74.433334, type:'small_airport'},
+  {icao:'SPQM', iata:'', name:"San Lorenzo Airport", city:"San Lorenzo", lat:-4.824369, lon:-76.56032, type:'small_airport'},
+  {icao:'SPQR', iata:'', name:"Quiruvilca Airport", city:"Qiruvilca", lat:-7.966667, lon:-78.199997, type:'small_airport'},
+  {icao:'SPQT', iata:'IQT', name:"Coronel FAP Francisco Secada Vignetta International Airport", city:"Iquitos", lat:-3.78474, lon:-73.3088, type:'large_airport'},
+  {icao:'SPQU', iata:'AQP', name:"Rodríguez Ballón International Airport", city:"Arequipa", lat:-16.340786, lon:-71.569485, type:'large_airport'},
+  {icao:'SPRF', iata:'', name:"San Rafael Airport", city:"San Rafael", lat:-14.28201, lon:-70.37989, type:'small_airport'},
+  {icao:'SPRG', iata:'', name:"San Regis Airport", city:"Chincha", lat:-13.5113, lon:-76.08398, type:'small_airport'},
+  {icao:'SPRL', iata:'', name:"Imperial Airport", city:"Imperial", lat:-12.316667, lon:-75.066666, type:'small_airport'},
+  {icao:'SPRM', iata:'', name:"Capitán FAP Leonardo Alvariño Herr Airport", city:"San Ramón", lat:-11.1286, lon:-75.350502, type:'small_airport'},
+  {icao:'SPRR', iata:'', name:"Revalora Airport", city:"San Vicente de Cañete", lat:-13.22283, lon:-76.26927, type:'small_airport'},
+  {icao:'SPRU', iata:'TRU', name:"Capitán FAP Carlos Martínez de Pinillos International Airport", city:"Trujillo", lat:-8.082382, lon:-79.108821, type:'large_airport'},
+  {icao:'SPSA', iata:'', name:"Casma Airport", city:"Casma", lat:-9.450235, lon:-78.294346, type:'small_airport'},
+  {icao:'SPSE', iata:'', name:"Sepahua Airport", city:"Sepahua", lat:-11.14227, lon:-73.034327, type:'small_airport'},
+  {icao:'SPSF', iata:'', name:"San Francisco Airport", city:"San Francisco de Yeso", lat:-6.61668, lon:-77.766701, type:'small_airport'},
+  {icao:'SPSI', iata:'', name:"Siguas Airport", city:"Siguas", lat:-16.367001, lon:-72.167, type:'small_airport'},
+  {icao:'SPSJ', iata:'', name:"San José de Sisa Airport", city:"El Dorado", lat:-6.61649, lon:-76.6884, type:'small_airport'},
+  {icao:'SPSL', iata:'', name:"Lamas Airport", city:"Lamas", lat:-6.416667, lon:-76.533333, type:'small_airport'},
+  {icao:'SPSN', iata:'', name:"Shapaja Airport", city:"Shapaja", lat:-6.57972, lon:-76.262802, type:'small_airport'},
+  {icao:'SPSO', iata:'PIO', name:"Captain Renán Elías Olivera International Airport", city:"Pisco", lat:-13.7449, lon:-76.220299, type:'large_airport'},
+  {icao:'SPSS', iata:'', name:"Masisea Airport", city:"Masisea", lat:-8.61142, lon:-74.309962, type:'small_airport'},
+  {icao:'SPST', iata:'TPP', name:"Cadete FAP Guillermo Del Castillo Paredes Airport", city:"Tarapoto", lat:-6.50874, lon:-76.373199, type:'medium_airport'},
+  {icao:'SPSY', iata:'SYC', name:"Shiringayoc Airport", city:"Shiringayoc", lat:-11.898, lon:-69.0625, type:'small_airport'},
+  {icao:'SPTA', iata:'', name:"Nauta Airport", city:"Nauta", lat:-4.54186, lon:-73.562951, type:'small_airport'},
+  {icao:'SPTE', iata:'', name:"San Francisco Airport", city:"San Francisco", lat:-12.533, lon:-73.800003, type:'small_airport'},
+  {icao:'SPTI', iata:'', name:"Puerto Inca Airport", city:"Puerto Inca", lat:-9.383, lon:-74.967003, type:'small_airport'},
+  {icao:'SPTN', iata:'TCQ', name:"Coronel FAP Carlos Ciriani Santa Rosa International Airport", city:"Tacna", lat:-18.053301, lon:-70.275803, type:'medium_airport'},
+  {icao:'SPTO', iata:'', name:"Tulpo Airport", city:"Santa Clara de Tulpo", lat:-8.127167, lon:-77.988, type:'small_airport'},
+  {icao:'SPTP', iata:'', name:"El Pato Air Base", city:"Talara", lat:-4.54981, lon:-81.224098, type:'small_airport'},
+  {icao:'SPTQ', iata:'', name:"Toquepala Airport", city:"Toquepala", lat:-17.2995, lon:-70.652802, type:'small_airport'},
+  {icao:'SPTR', iata:'', name:"Tournavista Airport", city:"Tournavista", lat:-8.922406, lon:-74.715234, type:'small_airport'},
+  {icao:'SPTU', iata:'PEM', name:"Padre Aldamiz International Airport", city:"Puerto Maldonado", lat:-12.6136, lon:-69.2286, type:'medium_airport'},
+  {icao:'SPUC', iata:'', name:"Huamachuco Airport", city:"Huamachuco", lat:-7.81808, lon:-78.02834, type:'small_airport'},
+  {icao:'SPUR', iata:'PIU', name:"PAF Captain Guillermo Concha Iberico International Airport", city:"Piura", lat:-5.20575, lon:-80.616402, type:'medium_airport'},
+  {icao:'SPVA', iata:'', name:"Hacienda El Valor Airport", city:"El Valor", lat:-5.672621, lon:-78.644257, type:'small_airport'},
+  {icao:'SPVI', iata:'', name:"Vicco Airport", city:"Vicco", lat:-10.847844, lon:-76.246956, type:'small_airport'},
+  {icao:'SPVL', iata:'', name:"Caraveli Airport", city:"Caraveli", lat:-15.77904, lon:-73.36176, type:'small_airport'},
+  {icao:'SPVN', iata:'', name:"Vilcashuamán Airport", city:"Vilcashuamán", lat:-13.67817, lon:-73.927, type:'small_airport'},
+  {icao:'SPVR', iata:'', name:"Vitor Airport", city:"La Joya", lat:-16.429199, lon:-71.837799, type:'small_airport'},
+  {icao:'SPWB', iata:'PTL', name:"Walter Braedt Segú Airport", city:"Máncora", lat:-4.08687, lon:-81.02577, type:'small_airport'},
+  {icao:'SPWT', iata:'VVN', name:"Las Malvinas/Echarate Airport", city:"Las Malvinas", lat:-11.854861, lon:-72.939332, type:'small_airport'},
+  {icao:'SPYA', iata:'', name:"Luya Airport", city:"Luya", lat:-6.6917, lon:-79.701698, type:'small_airport'},
+  {icao:'SPYC', iata:'', name:"Yarinacocha Airport", city:"Pucallpa", lat:-8.340436, lon:-74.597906, type:'small_airport'},
+  {icao:'SPYL', iata:'TYL', name:"Captain Victor Montes Arias International Airport", city:"Talara", lat:-4.57664, lon:-81.254097, type:'medium_airport'},
+  {icao:'SPYO', iata:'', name:"Pacasmayo Airport", city:"Pacasmayo", lat:-7.40694, lon:-79.568901, type:'small_airport'},
+  {icao:'SPYU', iata:'', name:"Yauca Airport", city:"Yauca", lat:-15.6189, lon:-74.536102, type:'small_airport'},
+  {icao:'SPZA', iata:'NZC', name:"Maria Reiche Neuman Airport", city:"Nazca", lat:-14.854, lon:-74.961502, type:'medium_airport'},
+  {icao:'SPZH', iata:'', name:"Pachiza Airport", city:"Pachiza", lat:-7.29928, lon:-76.774597, type:'small_airport'},
+  {icao:'SPZO', iata:'CUZ', name:"Alejandro Velasco Astete International Airport", city:"Cusco", lat:-13.5357, lon:-71.938797, type:'large_airport'},
+  {icao:'SPZT', iata:'', name:"Chazuta Airport", city:"Chazuta", lat:-6.574167, lon:-76.136665, type:'small_airport'},
+];
+function llToLocalNM(lat, lon, refLat, refLon){
+  const k = Math.cos(refLat * Math.PI/180);
+  return { x: (lon - refLon) * k * 60, y: -(lat - refLat) * 60 };
+}
+function setupAirports(){
+  st.radarCenter = { ...CENTER_AIRPORT, label: `${CENTER_AIRPORT.icao}/${CENTER_AIRPORT.iata}` };
+  st.airports = AIRPORTS_PE.map(ap=>{
+    const p = llToLocalNM(ap.lat, ap.lon, CENTER_AIRPORT.lat, CENTER_AIRPORT.lon);
+    return { ...ap, x:p.x, y:p.y };
+  });
+  if(!window.__uiAptoCfg || typeof window.__uiAptoCfg!=='object'){
+  let cfg=null;
+  try{ cfg = JSON.parse(localStorage.getItem('setca_apto_cfg_v2')||'null'); }catch(_){ cfg=null; }
+  if(!cfg || typeof cfg!=='object') cfg = {};
+  const legacy = (localStorage.getItem('setca_showAirports')||'1');
+  const enabled = (typeof cfg.enabled==='boolean') ? cfg.enabled : (legacy !== '0');
+  const mode = (cfg.mode==='all' || cfg.mode==='major' || cfg.mode==='custom') ? cfg.mode : 'all';
+  const custom = Array.isArray(cfg.custom) ? cfg.custom.filter(x=>typeof x==='string') : [];
+  window.__uiAptoCfg = { enabled, mode, custom, customSet: new Set(custom) };
+}
+window.__uiShowAirports = !!window.__uiAptoCfg.enabled && (window.__uiAptoCfg.mode!=='custom' || window.__uiAptoCfg.customSet.size>0);
+}
 const CONTACT_PERSIST_MS=5000; // ← 5 seg en analógico
 const INIT_PLANES=[
   {name:'R1',id:'R1',x:-30,y:0,hdg:0, spd:450, tgtSpd:450, alt:20000, tgtAlt:20000, turn:2, tgtHdg:0, ghosts:[], lastDet:0, fail:{comms:false,eng:'none',cab:'none',gear:false,bird:false}, kills:0, fuel:100, jamming:false},
@@ -822,6 +1088,7 @@ let st={
   pairs:[],
   radarFail:false
 };
+setupAirports();
 
 // === FORMATION CONSTANTS (sourced) ===
 // Line Abreast (Spread): 6000–9000 ft (~1.0–1.5 NM) typical mutual support spacing .
@@ -1150,15 +1417,87 @@ function drawPlane(p){
 }
 
 /* ===== Grid + Sweep (CRT) ===== */
+function drawAirports(){
+  const cfg = window.__uiAptoCfg;
+  if(!cfg || !window.__uiShowAirports) return;
+  if(!Array.isArray(st.airports) || st.airports.length===0) return;
+
+  ctx.save();
+  ctx.lineWidth = 1;
+
+  for(const ap of st.airports){
+    // Filtro local (APTO)
+    if(cfg.mode==='major'){
+      if(!(ap.primary || ap.type==='large_airport' || ap.type==='medium_airport')) continue;
+    }else if(cfg.mode==='custom'){
+      if(!cfg.customSet || !cfg.customSet.has(ap.icao)) continue;
+    }
+    const ax = ap.x || 0, ay = ap.y || 0;
+    const dist = Math.hypot(ax, ay);
+    if(dist > MAX_RANGE_NM * 1.02) continue;
+
+    const s = toScreen(ax, ay);
+    const primary = !!ap.primary;
+    const closed = (ap.type==='closed');
+
+    ctx.strokeStyle = primary ? 'rgba(255,224,102,.85)' : (closed ? 'rgba(180,180,180,.35)' : 'rgba(46,231,79,.55)');
+    ctx.fillStyle   = primary ? 'rgba(255,224,102,.14)' : (closed ? 'rgba(180,180,180,.08)' : 'rgba(46,231,79,.10)');
+
+    // Marcador tipo "fix" (rombo)
+    ctx.beginPath();
+    ctx.moveTo(s.x,   s.y-4);
+    ctx.lineTo(s.x+4, s.y);
+    ctx.lineTo(s.x,   s.y+4);
+    ctx.lineTo(s.x-4, s.y);
+    ctx.closePath();
+    ctx.fill();
+    ctx.stroke();
+
+    // Etiqueta del aeropuerto (independiente del botón de Etiquetas)
+    {
+      ctx.save();
+      ctx.font = '11px monospace';
+      ctx.textAlign = 'left';
+      ctx.fillStyle = primary ? '#ffe066' : (closed ? '#bdbdbd' : '#b6f3b6');
+      ctx.globalAlpha = primary ? 0.95 : 0.75;
+      ctx.fillText(`${ap.icao}${ap.iata?`/${ap.iata}`:''}`, s.x+7, s.y-6);
+
+      if(ap.city){
+        ctx.font = '10px monospace';
+        ctx.globalAlpha = primary ? 0.80 : 0.55;
+        ctx.fillText(ap.city, s.x+7, s.y+6);
+      }
+      ctx.restore();
+    }
+  }
+  ctx.restore();
+}
 function drawGrid(){
   const grd=ctx.createLinearGradient(0,0,0,H);grd.addColorStop(0,'#031106');grd.addColorStop(1,'#000');ctx.fillStyle=grd;ctx.fillRect(0,0,W,H);
-  ctx.strokeStyle='#0d2c13';ctx.lineWidth=1;
+ctx.strokeStyle='#0d2c13';ctx.lineWidth=1;
   for(let r=GRID_STEP_NM;r<=MAX_RANGE_NM;r+=GRID_STEP_NM){
     ctx.beginPath();ctx.arc(CX+offX,CY+offY,r*zoom*PX_PER_NM,0,2*Math.PI);ctx.stroke();
     if(r%50===0){ctx.fillStyle='#164a1f';ctx.font='10px monospace';ctx.textAlign='center';const txt=st.metric?`${(r*NM2KM).toFixed(0)} km`:`${r} NM`;ctx.fillText(txt,CX+offX,CY+offY-r*zoom*PX_PER_NM-4);}
   }
   ctx.strokeStyle='#0e3a17';
   for(let a=0;a<360;a+=30){const rad=(a-90)*Math.PI/180;const ex=CX+offX+Math.cos(rad)*MAX_RANGE_NM*zoom*PX_PER_NM,ey=CY+offY+Math.sin(rad)*MAX_RANGE_NM*zoom*PX_PER_NM;ctx.beginPath();ctx.moveTo(CX+offX,CY+offY);ctx.lineTo(ex,ey);ctx.stroke();}
+  // Centro radar (Aeropuerto de referencia)
+  if(st.radarCenter){
+    ctx.fillStyle = 'rgba(255,224,102,.9)';
+    ctx.beginPath(); ctx.arc(CX+offX, CY+offY, 3, 0, 2*Math.PI); ctx.fill();
+    if(st.labelMode!==2 && st.labelMode!==3){
+      ctx.font='11px monospace';
+      ctx.fillStyle='#ffe066';
+      ctx.textAlign='left';
+      ctx.fillText(st.radarCenter.label || 'CENTRO', CX+offX+7, CY+offY-6);
+      if(st.radarCenter.city){
+        ctx.font='10px monospace';
+        ctx.globalAlpha=0.65;
+        ctx.fillText(st.radarCenter.city, CX+offX+7, CY+offY+7);
+        ctx.globalAlpha=1;
+      }
+    }
+  }
 }
 function drawSweep(dt){
   if(st.radarFail) return;
@@ -1332,8 +1671,10 @@ function drawShapes(){
 
     // --- PUNTO ---
     if(d.type === 'point'){
+      // Puntito sutil blanco
+      ctx.fillStyle = d.dotColor || d.color || 'rgba(255,255,255,0.75)';
       ctx.beginPath();
-      ctx.arc(s.x, s.y, 4, 0, 2*Math.PI); // MÁS MILITAR Y COMPACTO
+      ctx.arc(s.x, s.y, 2.2, 0, 2*Math.PI);
       ctx.fill();
     }
 
@@ -1399,7 +1740,7 @@ function drawShapes(){
 
     // --- NOMBRE (delgado) ---
     // Se muestra para todos los gráficos excepto Punto (solo punto) y Etiqueta (ya tiene texto).
-    if(d.name && d.type!=='point' && d.type!=='label'){
+    if(d.name && d.type!=='label' && (d.type!=='point' || d.showName)){
       let nx=d.x, ny=d.y;
       if((d.type==='line' || d.type==='arwy') && d.ex!==undefined){ nx=(d.x+d.ex)/2; ny=(d.y+d.ey)/2; }
       else if(d.type==='polygon' && Array.isArray(d.pts) && d.pts.length>=3){
@@ -1997,25 +2338,84 @@ addEventListener('mouseup',()=>{
   });
 
   // Place button uses numeric inputs (y luego vuelve a la regla)
-  const placeBtn = $('#place');
-  if(placeBtn){
-    placeBtn.onclick = ()=>{
-      const x = parseFloat($('#coordX').value||'0'), y=parseFloat($('#coordY').value||'0');
-      const id='D-'+Math.random().toString(36).slice(2,6).toUpperCase();
-      let created = false;
+  // Crear punto por coordenadas geográficas (Lat/Lon en DMS o decimal)
+  function __parseCoordDMS(val, isLat){
+    if(val===null || val===undefined) return null;
+    let s0 = String(val).trim();
+    if(!s0) return null;
 
-      if(tool.tool==='label'){
-        const text=prompt('Texto de etiqueta:');
-        if(text){ st.drawings.push({id,type:'label',x,y,text}); created = true;
-          ensureDrawingName(st.drawings[st.drawings.length-1]);
-        }
-      } else if(tool.tool==='polygon'){
-        // Polígono se crea con clicks en el radar (doble click para terminar)
-      } else {
-        st.drawings.push({id,type:'point',x,y}); created = true;
-}
+    // Normaliza: mayúsculas, decimal con punto, y soporta OESTE/ESTE
+    let s = s0.toUpperCase().replace(/,/g,'.');
+    s = s.replace(/OESTE/g,'W').replace(/ESTE/g,'E');
 
-      if(created) st.selectedDrawing=id;
+    // Decimal puro (opcional hemisferio al final)
+    const dec = s.match(/^\s*([-+]?\d+(?:\.\d+)?)\s*([NSEWO])?\s*$/);
+    if(dec){
+      let n = parseFloat(dec[1]);
+      if(!isFinite(n)) return null;
+      let sign = (n<0) ? -1 : 1;
+      n = Math.abs(n);
+      let hemi = dec[2] ? dec[2].toUpperCase() : null;
+      if(hemi==='O') hemi='W';
+      if(hemi){
+        if(hemi==='S' || hemi==='W') sign = -1;
+        if(hemi==='N' || hemi==='E') sign = 1;
+      }
+      const out = sign * n;
+      if(isLat && (out < -90 || out > 90)) return null;
+      if(!isLat && (out < -180 || out > 180)) return null;
+      return out;
+    }
+
+    // DMS: detecta hemisferio al final (N,S,E,W,O)
+    const hm = s.match(/([NSEWO])\s*$/);
+    let hemi = hm ? hm[1] : null;
+    if(hemi==='O') hemi='W';
+
+    // Extrae números: deg min sec (sec puede tener decimales)
+    const nums = s
+      .replace(/[NSEWO]/g,'')
+      .replace(/[^0-9.+-]+/g,' ')
+      .trim()
+      .split(/\s+/)
+      .filter(Boolean);
+    if(!nums.length) return null;
+
+    let deg = parseFloat(nums[0]);
+    let min = nums.length>1 ? parseFloat(nums[1]) : 0;
+    let sec = nums.length>2 ? parseFloat(nums[2]) : 0;
+    if(!isFinite(deg) || !isFinite(min) || !isFinite(sec)) return null;
+
+    let sign = 1;
+    if(deg < 0){ sign = -1; deg = Math.abs(deg); }
+
+    if(hemi){
+      if(hemi === 'S' || hemi === 'W') sign = -1;
+      if(hemi === 'N' || hemi === 'E') sign = 1;
+    }
+
+    const out = sign * (deg + (min/60) + (sec/3600));
+    if(isLat && (out < -90 || out > 90)) return null;
+    if(!isLat && (out < -180 || out > 180)) return null;
+    return out;
+  }
+
+  const placeLLBtn = $('#placeLL');
+  if(placeLLBtn){
+    placeLLBtn.onclick = ()=>{
+      const lat = __parseCoordDMS($('#coordLat') && $('#coordLat').value, true);
+      const lon = __parseCoordDMS($('#coordLon') && $('#coordLon').value, false);
+      if(lat===null || lon===null){
+        alert('Coordenadas inválidas. Ejemplos:\n- 12°01\'20\"S\n- -12.0222\n- 77°06\'50\"W\n- -77.1139');
+        return;
+      }
+      const ref = (window.st && st.radarCenter) ? st.radarCenter : (window.CENTER_AIRPORT || {lat:0,lon:0});
+      const p = llToLocalNM(lat, lon, ref.lat, ref.lon);
+      const x = p.x, y = p.y;
+      const id='D-'+Math.random().toString(36).slice(2,10).toUpperCase();
+      // Punto por coordenadas: blanco sutil, renombrable (muestra nombre si lo asignas)
+      st.drawings.push({id,type:'point',x,y,dotColor:'rgba(255,255,255,0.75)',showName:true});
+      st.selectedDrawing=id;
       resetDrawTool();
     };
   }
@@ -2514,7 +2914,7 @@ function loop(ts){
   if(!st.paused){ st.elapsed = performance.now() - st.t0; telTick += dt; if(telTick>5){logTel(); telTick=0;} }
   ctx.clearRect(0,0,W,H);
   if (st.radarFail) { drawGrid(); ctx.fillStyle='rgba(255,50,50,0.12)'; ctx.fillRect(0,0,W,H); ctx.font='bold 36px monospace'; ctx.fillStyle='#ff4d4d'; ctx.textAlign='center'; ctx.fillText('FALLA DE RADAR', W/2, H/2); requestAnimationFrame(loop); return; }
-  drawGrid(); sweepDetect(dt); drawSweep(dt);
+  drawGrid(); drawAirports(); sweepDetect(dt); drawSweep(dt);
   if(!st.paused){ st.planes.forEach(p=>updatePlane(p,dt)); updateMissiles(dt); updatePairs(); }
   
 // Trajectory visualization
@@ -2561,7 +2961,6 @@ $('#pause').onclick = ()=>{
   if(chip) chip.textContent = st.paused ? 'Pausada' : 'En curso';
   if(simst) simst.textContent = st.paused ? 'PAUSA' : 'RUN';
 };
-
 $('#toggleLabels').onclick = ()=>{
   // 0 = normal (data block), 1 = solo nombre, 2 = sin etiquetas, 3 = radar analógico
   st.labelMode = (st.labelMode + 1) % 4;
@@ -2594,6 +2993,199 @@ $('#windSpd').onchange=e=>{ st.windKmh = st.metric?(+e.target.value||0):((+e.tar
 $('#windDir').onchange=e=>{ st.windDir = +e.target.value||0; flash(e.target); };
 $('#failRadar').onclick=e=>{ st.radarFail=!st.radarFail; e.currentTarget.classList.toggle('hi',st.radarFail); flash(e.currentTarget); };
 $('#toggleSweep').onclick=e=>{ st.sweep=!st.sweep; e.currentTarget.classList.toggle('hi',st.sweep); flash(e.currentTarget); };
+$('#toggleAirports').onclick=e=>{ 
+  openAptoModal();
+  flash(e.currentTarget);
+};
+
+/* ===== APTO selector (LOCAL) ===== */
+const APTO_LS_KEY = 'setca_apto_cfg_v2';
+let __aptoDraft = null;
+
+function __aptoSaveCfg(cfg){
+  try{
+    const out = {
+      enabled: !!cfg.enabled,
+      mode: cfg.mode,
+      custom: Array.from(cfg.customSet || cfg.custom || [])
+    };
+    localStorage.setItem(APTO_LS_KEY, JSON.stringify(out));
+    // legacy (por compatibilidad con versiones anteriores)
+    localStorage.setItem('setca_showAirports', out.enabled ? '1' : '0');
+  }catch(_){}
+}
+
+function __aptoSetButtonState(){
+  const cfg = window.__uiAptoCfg || {enabled:false, mode:'all', customSet:new Set()};
+  window.__uiShowAirports = !!cfg.enabled && (cfg.mode!=='custom' || (cfg.customSet && cfg.customSet.size>0));
+  const btn = document.getElementById('toggleAirports');
+  if(btn) btn.classList.toggle('hi', window.__uiShowAirports);
+}
+
+function __aptoModeUI(mode){
+  const bMaj = document.getElementById('aptoModeMajor');
+  const bAll = document.getElementById('aptoModeAll');
+  const bCus = document.getElementById('aptoModeCustom');
+  if(bMaj) bMaj.classList.toggle('hi', mode==='major');
+  if(bAll) bAll.classList.toggle('hi', mode==='all');
+  if(bCus) bCus.classList.toggle('hi', mode==='custom');
+
+  const wrap = document.getElementById('aptoCustomWrap');
+  if(wrap) wrap.classList.toggle('hidden', mode!=='custom');
+}
+
+function __aptoRenderList(){
+  if(!__aptoDraft || __aptoDraft.mode!=='custom') return;
+  const list = document.getElementById('aptoList');
+  const search = document.getElementById('aptoSearch');
+  if(!list || !search) return;
+
+  list.innerHTML = '';
+  const q = (search.value || '').toLowerCase().trim();
+
+  const arr = (st.airports || []).slice().sort((a,b)=>String(a.icao||'').localeCompare(String(b.icao||'')));
+
+  for(const ap of arr){
+    const icao = ap.icao || '';
+    if(!icao) continue;
+
+    const title = `${icao}${ap.iata?`/${ap.iata}`:''}`;
+    const line1 = `${title} — ${ap.name||''}`.trim();
+    const line2 = `${ap.city||''}${ap.type?` • ${String(ap.type).replace(/_/g,' ')}`:''}`.trim();
+
+    const hay = (line1 + ' ' + line2).toLowerCase();
+    if(q && !hay.includes(q)) continue;
+
+    const row = document.createElement('label');
+    row.className = 'aptoItem';
+
+    const cb = document.createElement('input');
+    cb.type = 'checkbox';
+    cb.dataset.icao = icao;
+    cb.checked = __aptoDraft.customSet.has(icao);
+
+    const txt = document.createElement('div');
+    const t = document.createElement('div'); t.className = 't'; t.textContent = line1;
+    const s = document.createElement('div'); s.className = 's'; s.textContent = line2;
+    txt.appendChild(t); txt.appendChild(s);
+
+    row.appendChild(cb);
+    row.appendChild(txt);
+    list.appendChild(row);
+  }
+}
+
+function openAptoModal(){
+  const ov = document.getElementById('aptoOverlay');
+  if(!ov) return;
+
+  const cfg = window.__uiAptoCfg || { enabled:true, mode:'all', custom:[], customSet:new Set() };
+  __aptoDraft = {
+    enabled: !!cfg.enabled,
+    mode: (cfg.mode==='major' || cfg.mode==='custom' || cfg.mode==='all') ? cfg.mode : 'all',
+    customSet: new Set(cfg.customSet || cfg.custom || [])
+  };
+
+  const en = document.getElementById('aptoEnabled');
+  if(en) en.checked = __aptoDraft.enabled;
+
+  __aptoModeUI(__aptoDraft.mode);
+
+  const search = document.getElementById('aptoSearch');
+  if(search) search.value = '';
+
+  __aptoRenderList();
+
+  ov.style.display = 'flex';
+  ov.setAttribute('aria-hidden','false');
+
+  if(__aptoDraft.mode==='custom' && search) search.focus();
+}
+
+function closeAptoModal(){
+  const ov = document.getElementById('aptoOverlay');
+  if(!ov) return;
+  ov.style.display = 'none';
+  ov.setAttribute('aria-hidden','true');
+  __aptoDraft = null;
+}
+
+function bindAptoUI(){
+  const ov = document.getElementById('aptoOverlay');
+  if(!ov) return;
+
+  const closeBtn = document.getElementById('aptoClose');
+  const cancelBtn = document.getElementById('aptoCancel');
+  const applyBtn = document.getElementById('aptoApply');
+
+  if(closeBtn) closeBtn.addEventListener('click', closeAptoModal);
+  if(cancelBtn) cancelBtn.addEventListener('click', closeAptoModal);
+
+  ov.addEventListener('click', (e)=>{ if(e.target === ov) closeAptoModal(); });
+
+  const enabled = document.getElementById('aptoEnabled');
+  if(enabled) enabled.addEventListener('change', (e)=>{ if(__aptoDraft) __aptoDraft.enabled = !!e.target.checked; });
+
+  const bMaj = document.getElementById('aptoModeMajor');
+  const bAll = document.getElementById('aptoModeAll');
+  const bCus = document.getElementById('aptoModeCustom');
+
+  if(bMaj) bMaj.addEventListener('click', ()=>{ if(!__aptoDraft) return; __aptoDraft.mode='major'; __aptoModeUI('major'); });
+  if(bAll) bAll.addEventListener('click', ()=>{ if(!__aptoDraft) return; __aptoDraft.mode='all'; __aptoModeUI('all'); });
+  if(bCus) bCus.addEventListener('click', ()=>{ if(!__aptoDraft) return; __aptoDraft.mode='custom'; __aptoModeUI('custom'); __aptoRenderList(); const s=document.getElementById('aptoSearch'); if(s) s.focus(); });
+
+  const search = document.getElementById('aptoSearch');
+  if(search) search.addEventListener('input', ()=>{ __aptoRenderList(); });
+
+  const list = document.getElementById('aptoList');
+  if(list) list.addEventListener('change', (e)=>{
+    const t = e.target;
+    if(!__aptoDraft || !t || t.tagName!=='INPUT' || t.type!=='checkbox') return;
+    const icao = t.dataset.icao;
+    if(!icao) return;
+    if(t.checked) __aptoDraft.customSet.add(icao);
+    else __aptoDraft.customSet.delete(icao);
+  });
+
+  const selAll = document.getElementById('aptoSelAll');
+  const selNone = document.getElementById('aptoSelNone');
+
+  if(selAll) selAll.addEventListener('click', ()=>{
+    if(!__aptoDraft) return;
+    const boxes = Array.from(document.querySelectorAll('#aptoList input[type="checkbox"][data-icao]'));
+    boxes.forEach(b=>{ b.checked = true; __aptoDraft.customSet.add(b.dataset.icao); });
+  });
+
+  if(selNone) selNone.addEventListener('click', ()=>{
+    if(!__aptoDraft) return;
+    const boxes = Array.from(document.querySelectorAll('#aptoList input[type="checkbox"][data-icao]'));
+    boxes.forEach(b=>{ b.checked = false; __aptoDraft.customSet.delete(b.dataset.icao); });
+  });
+
+  if(applyBtn) applyBtn.addEventListener('click', ()=>{
+    if(!__aptoDraft) return;
+
+    const cfg = {
+      enabled: !!__aptoDraft.enabled,
+      mode: (__aptoDraft.mode==='major' || __aptoDraft.mode==='custom' || __aptoDraft.mode==='all') ? __aptoDraft.mode : 'all',
+      custom: Array.from(__aptoDraft.customSet),
+      customSet: new Set(__aptoDraft.customSet)
+    };
+
+    window.__uiAptoCfg = cfg;
+    __aptoSaveCfg(cfg);
+    __aptoSetButtonState();
+    closeAptoModal();
+  });
+
+  // Estado inicial del botón (cuando carga la página)
+  __aptoSetButtonState();
+}
+
+window.addEventListener('DOMContentLoaded', bindAptoUI);
+
+
+
 $('#modeDigital').onclick=()=>{ st.mode='digital'; flash($('#modeDigital')); };
 $('#predPlus').onclick=()=>{ st.predMin=Math.min(60,st.predMin+1); $('#predVal').textContent=st.predMin; flash($('#predPlus')); };
 $('#predMinus').onclick=()=>{ st.predMin=Math.max(0,st.predMin-1); $('#predVal').textContent=st.predMin; flash($('#predMinus')); };
@@ -2621,7 +3213,12 @@ $('#doPair').onclick=()=>{
 $('#unPair').onclick=()=>{ st.pairs=[]; repaintPairList(); };
 /* Online (beta) code removed per user request */
 /* ===== Inicialización ===== */
-function initUI(){ repaintPlanesList(); repaintNav(); repaintStudent(); repaintPairs(); repaintAlt(); }
+function initUI(){
+  repaintPlanesList(); repaintNav(); repaintStudent(); repaintPairs(); repaintAlt();
+  const swbtn = $('#toggleSweep'); if(swbtn) swbtn.classList.toggle('hi', !!st.sweep);
+  const frbtn = $('#failRadar'); if(frbtn) frbtn.classList.toggle('hi', !!st.radarFail);
+  const apbtn = $('#toggleAirports'); if(apbtn) apbtn.classList.toggle('hi', !!window.__uiShowAirports);
+}
 initUI(); try{fitToPlanes && fitToPlanes();}catch(e){}
 requestAnimationFrame(()=>{ repaintPlanesList(); repaintNav(); repaintStudent(); repaintPairs(); repaintAlt(); });
 
@@ -2647,74 +3244,65 @@ $$('#pFormations button[data-form]').forEach(btn=>{
     flash(btn);
   };
 });</script>
+<script>
+  // === Sync online: debounce + flush (ENTER) ===
+  let __syncTimer = null;
+  let __syncPending = false;
 
-<script>
-// ==== FORMATIONS: bind buttons to standard generators ====
-(function(){
-  const map = {
-    'RANGE':'RANGE',
-    'VIC':'VIC',
-    'CHAMPAGNE':'CHAMPAGNE',
-    'AZIMUT2':'AZIMUT2',
-    'WALL4':'WALL4',
-    'LEADTRAIL2':'LEADTRAIL2',
-    'LINEABREAST2':'LINEABREAST2',
-    'BOX6':'BOX4', // fallback to 4-ship box per standard
-    'CONTAINER4':'BOX4' // container approximated as box
-  };
-  $$('#pFormations button[data-form]').forEach(btn=>{
-    btn.onclick = ()=>{ const key = map[btn.getAttribute('data-form')] || 'LINEABREAST2'; spawnFormation(key); flash(btn); };
-  });
-})();
-</script>
-<script>
-  let lastSync = 0;
-  function scheduleSync(){
-    const now = performance.now();
-    if(now - lastSync < 200) return; // 5 veces por segundo
-    lastSync = now;
-    window._SETCA_SYNC && window._SETCA_SYNC.push();
+  function scheduleSync(delay=90){
+    __syncPending = true;
+    if(__syncTimer) return;
+    __syncTimer = setTimeout(()=>{
+      __syncTimer = null;
+      if(!__syncPending) return;
+      __syncPending = false;
+      try{ window._SETCA_SYNC && window._SETCA_SYNC.push && window._SETCA_SYNC.push(); }catch(e){}
+    }, delay);
   }
 
-  // Conectar con los botones
+  function flushSync(){
+    try{
+      if(__syncTimer){ clearTimeout(__syncTimer); __syncTimer=null; }
+      __syncPending = false;
+      window._SETCA_SYNC && window._SETCA_SYNC.push && window._SETCA_SYNC.push();
+    }catch(e){}
+  }
+
+  // Exponer para compatibilidad
+  window.scheduleSync = scheduleSync;
+  window.flushSync = flushSync;
+
+  // Conectar con los botones principales
   ['#addFighter','#addCom','#delLast','#pause','#start'].forEach(id=>{
     const el = document.querySelector(id);
     if(el){
       const orig = el.onclick;
-      el.onclick = (e)=>{ orig(e); scheduleSync(); };
+      el.onclick = (e)=>{ const r = orig(e); scheduleSync(); return r; };
     }
   });
 
   // Cuando se suelta el mouse (mover aviones o dibujos)
-  addEventListener('mouseup', ()=>scheduleSync());
+  addEventListener('mouseup', ()=>scheduleSync(), {passive:true});
+
+  // ENTER en navegación => aplicar change y FLUSH inmediato
+  addEventListener('keydown', (e)=>{
+    if(e.key!=='Enter') return;
+    const t = e.target;
+    if(!t || t.tagName!=='INPUT') return;
+    const id = (t.id||'');
+    // Campos del panel de navegación
+    if(/^((nm|hdg|spd|alt|tr)-)/.test(id)){
+      try{
+        // forzar onchange (en algunos navegadores Enter no dispara change)
+        t.dispatchEvent(new Event('change', {bubbles:true}));
+      }catch(_){}
+      flushSync();
+    }
+  }, true);
 
   // Enviar un primer estado al cargar
-  setTimeout(()=>scheduleSync(),1500);
+  setTimeout(()=>scheduleSync(0),1200);
 </script>
-
-
-<script>
-  let _lastSync=0;
-  function scheduleSync(){
-    const now = performance.now();
-    if(now - _lastSync < 100) return;
-    _lastSync = now;
-    window._SETCA_SYNC && window._SETCA_SYNC.push();
-  }
-  // Hook to existing controls if present
-  ['#addFighter','#addCom','#delLast','#pause','#start','#uMetric','#uImperial'].forEach(id=>{
-    const el = document.querySelector(id);
-    if(el){
-      const orig = el.onclick;
-      el.onclick = (e)=>{ orig && orig(e); scheduleSync(); };
-    }
-  });
-  addEventListener('mouseup', ()=>scheduleSync());
-  setTimeout(()=>scheduleSync(),1500);
-</script>
-
-
-
 <!-- === SETCA Enhancements Patch (Alumno + Emparejamientos + Falla Radar + Pinch Zoom + Título) === -->
 <style>
   #radarFailOverlay{
@@ -3316,6 +3904,45 @@ $$('#pFormations button[data-form]').forEach(btn=>{
 })();
 
 </script>
+
+
+<div id="aptoOverlay" class="aptoOverlay" aria-hidden="true">
+  <div class="aptoCard">
+    <div class="aptoHead">
+      <div class="aptoTitle">APTO • Aeropuertos</div>
+      <button id="aptoClose" class="btn mini focusable" title="Cerrar">✕</button>
+    </div>
+    <div class="aptoBody">
+      <div class="aptoRow">
+        <label class="chk" style="display:flex;align-items:center;gap:8px;">
+          <input type="checkbox" id="aptoEnabled">
+          <span>Mostrar en mapa</span>
+        </label>
+        <span class="aptoLocal">LOCAL</span>
+      </div>
+
+      <div class="aptoSeg">
+        <button id="aptoModeMajor" class="btn mini focusable">Principales</button>
+        <button id="aptoModeAll" class="btn mini focusable">Todos</button>
+        <button id="aptoModeCustom" class="btn mini focusable">Uno por uno</button>
+      </div>
+
+      <div id="aptoCustomWrap" class="aptoCustom hidden">
+        <input id="aptoSearch" type="text" placeholder="Buscar ICAO / IATA / ciudad / nombre">
+        <div id="aptoList" class="aptoList"></div>
+        <div class="aptoActions">
+          <button id="aptoSelAll" class="btn mini focusable">Marcar visible</button>
+          <button id="aptoSelNone" class="btn mini focusable">Quitar visible</button>
+        </div>
+      </div>
+    </div>
+
+    <div class="aptoFoot">
+      <button id="aptoApply" class="btn mini focusable">Aplicar</button>
+      <button id="aptoCancel" class="btn mini focusable">Cerrar</button>
+    </div>
+  </div>
+</div>
 
 <div id="deleteModal" style="position:fixed;top:0;left:0;width:100%;height:100%;display:none;justify-content:center;align-items:center;background:rgba(0,0,0,0.6);z-index:9999;">
   <div style="background:#1b1b1b;padding:20px;border-radius:6px;color:#eaffea;min-width:260px;">
@@ -4887,3 +5514,7 @@ document.querySelectorAll('#pCmdBody .btn').forEach(btn=>{
 </body>
 </html>
 B Y     W   A   L   L   A   C   E 
+
+
+
+
