@@ -29,7 +29,7 @@ document.getElementById('cancelDelete').onclick = ()=>{
 <script type="module">
   import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.3/firebase-app.js";
   import { getAuth, signInAnonymously, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/10.12.3/firebase-auth.js";
-  import { getDatabase, ref, onValue, set, onDisconnect, serverTimestamp } from "https://www.gstatic.com/firebasejs/10.12.3/firebase-database.js";
+  import { getDatabase, ref, onValue, set, onDisconnect, serverTimestamp, update, onChildAdded, onChildChanged, onChildRemoved, runTransaction } from "https://www.gstatic.com/firebasejs/10.12.3/firebase-database.js";
 
   const firebaseConfig = {
   apiKey: "AIzaSyDzwPIoWMV14NyvfxykylPjpB4GpFVwW9M",
@@ -53,6 +53,230 @@ document.getElementById('cancelDelete').onclick = ()=>{
   const stateRef = ref(db, `rooms/${ROOM_ID}/state`);
   let currentUID = null;
 
+  // ===== RT channels (ultra-smooth multiusuario) =====
+  const rtPlanesRef = ref(db, `rooms/${ROOM_ID}/rt/planes`);
+  const locksPlanesRef = ref(db, `rooms/${ROOM_ID}/locks/planes`);
+  const presenceRootRef = ref(db, `rooms/${ROOM_ID}/presence`);
+
+  // Métricas (para medir mejoras)
+  const __rtStats = { inPackets:0, outPackets:0, inBytes:0, outBytes:0, lastInAt:0, lastOutAt:0, lastSnapAt:0 };
+  const __rtNow = ()=> (typeof performance!=='undefined' && performance.now ? performance.now() : Date.now());
+  const __safeText = (id, txt)=>{ try{ const el=document.getElementById(id); if(el) el.textContent = txt; }catch(_){ } };
+
+  // Conteo de usuarios conectados (presence)
+  onValue(presenceRootRef, snap=>{
+    const v = snap.val() || {};
+    const n = (v && typeof v === 'object') ? Object.keys(v).length : 0;
+    window.__setcaPresenceCount = n;
+    __safeText('users', String(n));
+  });
+
+  // Soft-locks para evitar que dos personas arrastren el mismo avión
+  let __locks = {};
+  onValue(locksPlanesRef, snap=>{
+    __locks = snap.val() || {};
+    window.__setcaPlaneLocks = __locks;
+  });
+
+  // ===== Inbound RT =====
+  const __rtBuffer = new Map(); // mientras st no exista
+  function __applyRtPacket(id, pkt){
+    if(!id || !pkt) return;
+    if(pkt.by && currentUID && pkt.by === currentUID) return;
+
+    // stats in
+    try{ __rtStats.inPackets++; __rtStats.lastInAt=Date.now(); __rtStats.inBytes += JSON.stringify(pkt).length; }catch(_){}
+
+    const st = window.st;
+    if(!st || !Array.isArray(st.planes)){ __rtBuffer.set(id, pkt); return; }
+
+    const p = (st.planes||[]).find(x=>x && x.id === id);
+    if(!p) return;
+
+    // aplicamos al estado "real" (para que el simulador siga moviéndose)
+    if(pkt.x!==undefined) p.x = pkt.x;
+    if(pkt.y!==undefined) p.y = pkt.y;
+    if(pkt.hdg!==undefined) p.hdg = pkt.hdg;
+    if(pkt.spd!==undefined) p.spd = pkt.spd;
+    if(pkt.alt!==undefined) p.alt = pkt.alt;
+
+    // targets para smoothing de render
+    if(pkt.x!==undefined) p.__rtTx = pkt.x;
+    if(pkt.y!==undefined) p.__rtTy = pkt.y;
+    if(pkt.hdg!==undefined) p.__rtTh = pkt.hdg;
+    p.__rtLastRemote = __rtNow();
+  }
+
+  function __drainRtBuffer(){
+    const st = window.st;
+    if(!st || !Array.isArray(st.planes) || __rtBuffer.size===0) return;
+    for(const [id,pkt] of __rtBuffer.entries()) __applyRtPacket(id,pkt);
+    __rtBuffer.clear();
+  }
+
+  onChildAdded(rtPlanesRef, snap=>{ __applyRtPacket(snap.key, snap.val()); });
+  onChildChanged(rtPlanesRef, snap=>{ __applyRtPacket(snap.key, snap.val()); });
+  onChildRemoved(rtPlanesRef, snap=>{
+    const st = window.st;
+    if(!st || !Array.isArray(st.planes)) return;
+    const p = st.planes.find(x=>x && x.id===snap.key);
+    if(p){ delete p.__rtTx; delete p.__rtTy; delete p.__rtTh; }
+  });
+
+  // ===== Outbound RT (batch + throttle) =====
+  let __rtDirty = Object.create(null);
+  let __rtFlushRaf = 0;
+  let __rtLastFlush = 0;
+  let __rtDragCount = 0;
+  const __RT_HZ_DRAG = 30; // 30 Hz mientras arrastras
+  const __RT_HZ_IDLE = 10; // 10 Hz cambios normales
+
+  const __q = (n, step)=>{ step=step||0.01; return Math.round(n/step)*step; };
+
+  function __markPlaneDirty(plane, mode){
+    if(!plane || !plane.id) return;
+    __rtDirty[plane.id] = { plane, mode: mode || 'idle' };
+    if(!__rtFlushRaf) __rtFlushRaf = requestAnimationFrame(__rtFlush);
+  }
+
+  function __rtFlush(){
+    __rtFlushRaf = 0;
+    if(!currentUID) return;
+
+    const now = __rtNow();
+    const hz = (__rtDragCount>0) ? __RT_HZ_DRAG : __RT_HZ_IDLE;
+    const minDt = 1000 / hz;
+
+    if(now - __rtLastFlush < minDt){
+      __rtFlushRaf = requestAnimationFrame(__rtFlush);
+      return;
+    }
+    __rtLastFlush = now;
+
+    const patch = {};
+    let n = 0;
+    for(const id in __rtDirty){
+      const item = __rtDirty[id];
+      if(!item || !item.plane){ delete __rtDirty[id]; continue; }
+      const p = item.plane;
+
+      patch[id] = {
+        x: __q(p.x, 0.01),
+        y: __q(p.y, 0.01),
+        hdg: (p.hdg!==undefined ? __q(p.hdg, 0.1) : undefined),
+        spd: (p.spd!==undefined ? __q(p.spd, 0.1) : undefined),
+        alt: (p.alt!==undefined ? p.alt : undefined),
+        t: Date.now(),
+        by: currentUID
+      };
+      try{ for(const k in patch[id]) if(patch[id][k]===undefined) delete patch[id][k]; }catch(_){}
+
+      delete __rtDirty[id];
+      n++;
+      if(n>=25) break;
+    }
+    if(!n) return;
+
+    let bytes=0; try{ bytes = JSON.stringify(patch).length; }catch(_){}
+    __rtStats.outPackets++; __rtStats.lastOutAt=Date.now(); __rtStats.outBytes += bytes;
+
+    update(rtPlanesRef, patch).catch(()=>{});
+  }
+
+  // ===== Locks (transaction) =====
+  const __LOCK_TTL_MS = 5000;
+
+  async function __tryLockPlane(id){
+    if(!id || !currentUID) return true;
+    const lref = ref(db, `rooms/${ROOM_ID}/locks/planes/${id}`);
+    const now = Date.now();
+    try{
+      const res = await runTransaction(lref, (cur)=>{
+        if(cur && cur.by && cur.exp && cur.exp > now && cur.by !== currentUID) return;
+        return { by: currentUID, exp: now + __LOCK_TTL_MS, t: serverTimestamp() };
+      }, { applyLocally:false });
+      return !!(res && res.committed);
+    }catch(_){
+      return true; // fail-open
+    }
+  }
+
+  function __refreshLockPlane(id){
+    if(!id || !currentUID) return;
+    const lref = ref(db, `rooms/${ROOM_ID}/locks/planes/${id}`);
+    update(lref, { by: currentUID, exp: Date.now()+__LOCK_TTL_MS, t: serverTimestamp() }).catch(()=>{});
+  }
+
+  function __releaseLockPlane(id){
+    if(!id || !currentUID) return;
+    const lref = ref(db, `rooms/${ROOM_ID}/locks/planes/${id}`);
+    set(lref, null).catch(()=>{});
+  }
+
+  function __isLockedByOther(id){
+    if(!id) return false;
+    const lk = (__locks && __locks[id]) ? __locks[id] : null;
+    return !!(lk && lk.by && currentUID && lk.by !== currentUID && lk.exp && lk.exp > Date.now());
+  }
+
+  // ===== Render smoothing =====
+  function __advanceSmoothing(dt){
+    __drainRtBuffer();
+    const st = window.st;
+    if(!st || !Array.isArray(st.planes)) return;
+
+    const tau = 0.075; // 75ms
+    const a = 1 - Math.exp(-Math.min(0.05, Math.max(0, dt)) / tau);
+    const now = __rtNow();
+
+    for(const p of st.planes){
+      if(!p || typeof p !== 'object') continue;
+
+      const hasRemote = p.__rtLastRemote && (now - p.__rtLastRemote) < 2000;
+
+      const tx = (hasRemote && p.__rtTx!==undefined) ? p.__rtTx : p.x;
+      const ty = (hasRemote && p.__rtTy!==undefined) ? p.__rtTy : p.y;
+      const th = (hasRemote && p.__rtTh!==undefined) ? p.__rtTh : p.hdg;
+
+      if(p.__rx===undefined || !isFinite(p.__rx)){
+        p.__rx = p.x; p.__ry = p.y; p.__rh = (p.hdg||0);
+      }
+
+      if(!hasRemote){
+        p.__rx = p.x; p.__ry = p.y; p.__rh = (p.hdg||0);
+      }else{
+        p.__rx += (tx - p.__rx) * a;
+        p.__ry += (ty - p.__ry) * a;
+
+        // heading wrap [-180,180]
+        let cur = (p.__rh||0), tgt = (th||0);
+        let d = ((tgt - cur + 540) % 360) - 180;
+        p.__rh = (cur + d * a + 360) % 360;
+      }
+    }
+  }
+
+  function __getRenderPos(p){
+    if(p && p.__rx!==undefined) return { x:p.__rx, y:p.__ry, hdg:(p.__rh!==undefined ? p.__rh : p.hdg) };
+    return { x:p.x, y:p.y, hdg:p.hdg };
+  }
+
+  // Exponer API a scripts clásicos
+  window.__SETCA_RT = {
+    markPlaneDirty: __markPlaneDirty,
+    tryLockPlane: __tryLockPlane,
+    refreshLockPlane: __refreshLockPlane,
+    releaseLockPlane: __releaseLockPlane,
+    isLockedByOther: __isLockedByOther,
+    advance: __advanceSmoothing,
+    getRenderPos: __getRenderPos,
+    stats: __rtStats,
+    _incDrag: ()=>{ __rtDragCount++; },
+    _decDrag: ()=>{ __rtDragCount = Math.max(0, __rtDragCount-1); }
+  };
+
+
+
   signInAnonymously(auth).catch(console.error);
   onAuthStateChanged(auth, (user) => {
     if (!user) return;
@@ -70,8 +294,10 @@ document.getElementById('cancelDelete').onclick = ()=>{
     const planesClean = Array.isArray(local.planes) ? local.planes.map(p=>{
       if(!p || typeof p !== 'object') return p;
       const q = {...p};
-      delete q.tagDx;
-      delete q.tagDy;
+      // NO sincronizar campos locales/temporales
+      delete q.tagDx; delete q.tagDy;
+      // runtime smoothing / locks / caches (prefijo "__")
+      try{ for(const k in q){ if(k && typeof k==='string' && k.startsWith('__')) delete q[k]; } }catch(_){}
       return q;
     }) : local.planes;
 
@@ -89,6 +315,8 @@ document.getElementById('cancelDelete').onclick = ()=>{
   onValue(stateRef, (snap) => {
     const v = snap.val();
     if (!v || v.lastWriteBy === currentUID) return;
+    try{ if(window.__SETCA_RT && window.__SETCA_RT.stats) window.__SETCA_RT.stats.lastSnapAt = Date.now(); }catch(_){ }
+
     try {
       if (Array.isArray(v.planes)) st.planes = v.planes;
       else if (v.planes && typeof v.planes === "object") st.planes = Object.values(v.planes);
@@ -99,12 +327,18 @@ document.getElementById('cancelDelete').onclick = ()=>{
       // Reaplicar offsets locales de Data Block (no se sincronizan)
       if (window.__applyLocalTagOffsets) window.__applyLocalTagOffsets();
 
-      repaintPlanesList && repaintPlanesList();
-      repaintNav && repaintNav();
-      repaintAlt && repaintAlt();
-      repaintPairs && repaintPairs();
-      repaintStudent && repaintStudent();
-    } catch(e){ console.warn("Apply remote state error:", e); }
+      // Batch UI repaints (evita micro-freezes en multiusuario)
+      if(!window.__SETCA_UI_RAF){
+        window.__SETCA_UI_RAF = requestAnimationFrame(()=>{
+          window.__SETCA_UI_RAF = 0;
+          repaintPlanesList && repaintPlanesList();
+          repaintNav && repaintNav();
+          repaintAlt && repaintAlt();
+          repaintPairs && repaintPairs();
+          repaintStudent && repaintStudent();
+        });
+      }
+} catch(e){ console.warn("Apply remote state error:", e); }
   });
 
   window._SETCA_SYNC = {
@@ -871,7 +1105,7 @@ canvas#radar {
   <main id="center" class="panel">
     <canvas id="radar"></canvas>
     <div id="hud" class="mini"></div>
-    <div id="status">FPS: <span id="fps">0</span> • Estado: <span id="simstate">PAUSA</span></div>
+    <div id="status">FPS: <span id="fps">0</span> • Estado: <span id="simstate">PAUSA</span> • Net: <span id="net">-</span> • Usuarios: <span id="users">0</span></div>
   </main>
 
   <aside id="right">
@@ -1502,6 +1736,30 @@ function spawnFormation(key){
 
 /* ===== Canvas ===== */
 const cvs=$('#radar'),ctx=cvs.getContext('2d'); let W=0,H=0,CX=0,CY=0,zoom=1,offX=0,offY=0;
+// === Persistencia de vista (zoom/pan + toggles) ===
+try{
+  const saved = JSON.parse(localStorage.getItem('setca_view')||'null');
+  if(saved && typeof saved==='object'){
+    if(typeof saved.zoom==='number' && isFinite(saved.zoom)) zoom = saved.zoom;
+    if(typeof saved.offX==='number' && isFinite(saved.offX)) offX = saved.offX;
+    if(typeof saved.offY==='number' && isFinite(saved.offY)) offY = saved.offY;
+    if(typeof saved.showAirports==='boolean') window.__uiShowAirports = saved.showAirports;
+  }
+}catch(_){}
+
+function saveView(){
+  try{
+    localStorage.setItem('setca_view', JSON.stringify({
+      zoom, offX, offY, showAirports: !!window.__uiShowAirports
+    }));
+  }catch(_){}
+}
+let __saveViewT=0;
+function scheduleSaveView(){
+  if(__saveViewT) return;
+  __saveViewT = setTimeout(()=>{ __saveViewT=0; saveView(); }, 250);
+}
+
 
 /* === Pan táctil (mover radar con un dedo) === */
 let __touchPan = null;
@@ -1627,7 +1885,8 @@ if (Math.min(diffCW, diffCCW) > 0.1) {
   p._gt=(p._gt||0)+dt*1000;if(p._gt>1800){p.ghosts.push({x:p.x,y:p.y});if(p.ghosts.length>40)p.ghosts.shift();p._gt=0;}
 }
 function drawPlane(p){
-  const s=toScreen(p.x,p.y);
+  const rp = (window.__SETCA_RT && window.__SETCA_RT.getRenderPos) ? window.__SETCA_RT.getRenderPos(p) : {x:p.x,y:p.y,hdg:p.hdg};
+  const s=toScreen(rp.x,rp.y);
   // Modo 3: radar analógico (solo puntos naranjas de contactos detectados por el radar)
   if(st.labelMode===3){
     const age=performance.now()-p.lastDet;
@@ -1641,7 +1900,7 @@ function drawPlane(p){
   const role=st.roles[p.id]||'Neutral';
   const color=role==='Civilian'?'#4de3ff':(role==='Friend'?'#35ff79':(role==='Bandit'?'#ff7070':'#7CFC00'));
   p.ghosts.forEach((g,i)=>{const sg=toScreen(g.x,g.y);const op=(i+1)/p.ghosts.length*.35;ctx.fillStyle=`rgba(179,0,255,${op})`;ctx.fillRect(sg.x-1,sg.y-1,2,2);});
-  ctx.save();ctx.translate(s.x,s.y);ctx.rotate(p.hdg*Math.PI/180);ctx.strokeStyle=color;ctx.lineWidth=2;ctx.strokeRect(-5,-5,10,10);ctx.restore();
+  ctx.save();ctx.translate(s.x,s.y);ctx.rotate(((rp && rp.hdg!==undefined)?rp.hdg:p.hdg)*Math.PI/180);ctx.strokeStyle=color;ctx.lineWidth=2;ctx.strokeRect(-5,-5,10,10);ctx.restore();
   const lr=(p.hdg-90)*Math.PI/180;ctx.beginPath();ctx.moveTo(s.x,s.y);ctx.lineTo(s.x+Math.cos(lr)*25,s.y+Math.sin(lr)*25);ctx.strokeStyle='#35ff79';ctx.lineWidth=1;ctx.stroke();
   if(st.predMin>0){const t=st.predMin*60,nmps=(p.spd/NM2KM)/3600;const d=nmps*t;const ex=p.x+Math.cos(lr)*d,ey=p.y+Math.sin(lr)*d;const se=toScreen(ex,ey);ctx.setLineDash([5,5]);ctx.strokeStyle='#2ee74f';ctx.beginPath();ctx.moveTo(s.x,s.y);ctx.lineTo(se.x,se.y);ctx.stroke();ctx.setLineDash([]);}
   ctx.fillStyle='#eaffea';ctx.font='12px monospace';ctx.textAlign='left';
@@ -2737,6 +2996,13 @@ function showWPal(clientX, clientY){
   cvs.addEventListener('dblclick', (e)=>{
     if(window.st && window.st.modoObservador) return;
     if(tool && tool.tool && tool.tool !== 'none') return;
+    // Shift + doble click = resetear vista rápidamente
+    if(e.shiftKey){
+      zoom=1; offX=0; offY=0;
+      try{ if(typeof scheduleSaveView==='function') scheduleSaveView(); }catch(_){}
+      try{ __bgKey=''; __bgBitmap=null; }catch(_){}
+      return;
+    }
     const r = cvs.getBoundingClientRect();
     const px = e.clientX - r.left, py = e.clientY - r.top;
     const hit = pickShapePrecisePx(px, py, SEL_TOL_PX);
@@ -2754,6 +3020,13 @@ function showWPal(clientX, clientY){
   cvs.addEventListener('contextmenu', (e)=>{
     if(window.st && window.st.modoObservador) return;
     if(tool && tool.tool && tool.tool !== 'none') return;
+    // Shift + doble click = resetear vista rápidamente
+    if(e.shiftKey){
+      zoom=1; offX=0; offY=0;
+      try{ if(typeof scheduleSaveView==='function') scheduleSaveView(); }catch(_){}
+      try{ __bgKey=''; __bgBitmap=null; }catch(_){}
+      return;
+    }
     const r = cvs.getBoundingClientRect();
     const px = e.clientX - r.left, py = e.clientY - r.top;
     const hit = pickShapePrecisePx(px, py, SEL_TOL_PX);
@@ -2770,6 +3043,13 @@ function showWPal(clientX, clientY){
     if(e.button!==0) return;
     if(!__dDown) return;
     if(tool && tool.tool && tool.tool !== 'none') return;
+    // Shift + doble click = resetear vista rápidamente
+    if(e.shiftKey){
+      zoom=1; offX=0; offY=0;
+      try{ if(typeof scheduleSaveView==='function') scheduleSaveView(); }catch(_){}
+      try{ __bgKey=''; __bgBitmap=null; }catch(_){}
+      return;
+    }
 
     const r = cvs.getBoundingClientRect();
     const px = e.clientX - r.left, py = e.clientY - r.top;
@@ -2796,7 +3076,25 @@ cvs.addEventListener('mousedown',e=>{
   const r=cvs.getBoundingClientRect();const wx=toWorld(e.clientX-r.left,e.clientY-r.top).x;const wy=toWorld(e.clientX-r.left,e.clientY-r.top).y;
   const hit=null; // ALT: solo mover aeronaves, no dibujos if(hit){st.selectedDrawing=hit;draggingDrawing=st.drawings.find(d=>d.id===hit);dragStart={x:e.clientX,y:e.clientY};return;}
   let best=null,bd=1e9;st.planes.forEach(p=>{const d=Math.hypot(wx-p.x,wy-p.y);if(d<15/zoom && d<bd){bd=d;best=p;}});
-  if(best){draggingPlane=best;dragStart={x:e.clientX,y:e.clientY};}
+  if(best){
+    // Evitar conflicto: si está bloqueado por otro usuario, no arrastrar
+    if(window.__SETCA_RT && window.__SETCA_RT.isLockedByOther && window.__SETCA_RT.isLockedByOther(best.id)) return;
+
+    draggingPlane=best; dragStart={x:e.clientX,y:e.clientY};
+
+    if(window.__SETCA_RT){
+      window.__SETCA_RT._incDrag && window.__SETCA_RT._incDrag();
+      // Intentar lock (best-effort)
+      window.__SETCA_RT.tryLockPlane && window.__SETCA_RT.tryLockPlane(best.id).then(ok=>{
+        if(!ok){
+          draggingPlane=null; dragStart=null;
+          window.__SETCA_RT._decDrag && window.__SETCA_RT._decDrag();
+        }
+      });
+      window.__SETCA_RT.refreshLockPlane && window.__SETCA_RT.refreshLockPlane(best.id);
+      window.__SETCA_RT.markPlaneDirty && window.__SETCA_RT.markPlaneDirty(best,'drag');
+    }
+  }
 });
 addEventListener('mousemove',e=>{
   if(window.st && window.st.modoObservador){ draggingPlane=null; draggingDrawing=null; dragStart=null; return; }
@@ -2809,14 +3107,42 @@ addEventListener('mousemove',e=>{
   }
   dragStart={x:e.clientX,y:e.clientY};
 }
-  if(draggingPlane){const r=cvs.getBoundingClientRect();const w=toWorld(e.clientX-r.left,e.clientY-r.top);const sw=toWorld(dragStart.x-r.left,dragStart.y-r.top);draggingPlane.x+=w.x-sw.x;draggingPlane.y+=w.y-sw.y;dragStart={x:e.clientX,y:e.clientY};}
+  if(draggingPlane){
+    const r=cvs.getBoundingClientRect();
+    const w=toWorld(e.clientX-r.left,e.clientY-r.top);
+    const sw=toWorld(dragStart.x-r.left,dragStart.y-r.top);
+    draggingPlane.x += w.x - sw.x;
+    draggingPlane.y += w.y - sw.y;
+    dragStart={x:e.clientX,y:e.clientY};
+
+    // RT: enviar durante el arrastre (throttle interno)
+    if(window.__SETCA_RT && window.__SETCA_RT.markPlaneDirty) window.__SETCA_RT.markPlaneDirty(draggingPlane,'drag');
+
+    // refrescar lock ~1Hz
+    if(window.__SETCA_RT && window.__SETCA_RT.refreshLockPlane){
+      const now=Date.now();
+      if(!window.__setcaLockTick) window.__setcaLockTick=0;
+      if(now - window.__setcaLockTick > 900){
+        window.__setcaLockTick = now;
+        window.__SETCA_RT.refreshLockPlane(draggingPlane.id);
+      }
+    }
+  }
 });
 addEventListener('mouseup',()=>{
   const movedPlane = draggingPlane;
   const movedDrawing = draggingDrawing;
   draggingPlane=null; draggingDrawing=null; dragStart=null;
+
+  if(movedPlane && window.__SETCA_RT){
+    window.__SETCA_RT.markPlaneDirty && window.__SETCA_RT.markPlaneDirty(movedPlane,'drag');
+    window.__SETCA_RT.releaseLockPlane && window.__SETCA_RT.releaseLockPlane(movedPlane.id);
+    window.__SETCA_RT._decDrag && window.__SETCA_RT._decDrag();
+  }
+
   if((movedPlane||movedDrawing)){
     if(typeof repaintNav==='function') repaintNav();
+    // snapshot final (persistencia para nuevos usuarios)
     if(window._SETCA_SYNC && typeof window._SETCA_SYNC.push==='function') window._SETCA_SYNC.push();
   }
 });
@@ -3529,14 +3855,70 @@ function repaintAlt(){
 setInterval(()=>{ try{ repaintAlt(); }catch(e){} }, 900);
 
 /* ===== Loop ===== */
-let lastTS=0,accFPS=0,frames=0;
+// Render cache (fondo): se captura solo cuando el view queda estable
+let __bgKey='', __bgBitmap=null, __bgWantKey='', __bgCapReadyKey='', __bgCapReady=false, __bgCapTimer=null, __bgCapGen=0;
+function __bgWantCapture(key){
+  __bgWantKey = key;
+  if(__bgCapTimer) clearTimeout(__bgCapTimer);
+  __bgCapTimer = setTimeout(()=>{ __bgCapReady=true; __bgCapReadyKey=__bgWantKey; }, 140);
+}
+
+// Fixed-ish timestep (más suave y estable)
+let lastTS=0,accFPS=0,frames=0,__simAcc=0;
+const __SIM_STEP = 1/60;
+
 function loop(ts){
-  const dt=Math.max(0,(ts-lastTS)/1000); lastTS=ts;
+  let dt=Math.max(0,(ts-lastTS)/1000); lastTS=ts;
+  dt=Math.min(0.05, dt); // clamp para evitar saltos/jitters
   if(!st.paused){ st.elapsed = performance.now() - st.t0; telTick += dt; if(telTick>5){logTel(); telTick=0;} }
   ctx.clearRect(0,0,W,H);
   if (st.radarFail) { drawGrid(); ctx.fillStyle='rgba(255,50,50,0.12)'; ctx.fillRect(0,0,W,H); ctx.font='bold 36px monospace'; ctx.fillStyle='#ff4d4d'; ctx.textAlign='center'; ctx.fillText('FALLA DE RADAR', W/2, H/2); requestAnimationFrame(loop); return; }
-  drawGrid(); drawPeruMap(); drawAirports(); sweepDetect(dt); drawSweep(dt);
-  if(!st.paused){ st.planes.forEach(p=>updatePlane(p,dt)); updateMissiles(dt); updatePairs(); }
+
+  // Fondo cacheado (grid + mapa + aeropuertos). Se recaptura solo cuando el view se estabiliza.
+  const __bgKeyNow = `${W}x${H}|z${zoom.toFixed(4)}|o${offX.toFixed(2)},${offY.toFixed(2)}|ap${window.__uiShowAirports?1:0}`;
+  // Guardar vista (debounced) cuando cambia
+  try{
+    if(!window.__setcaViewKey || window.__setcaViewKey !== __bgKeyNow){
+      window.__setcaViewKey = __bgKeyNow;
+      if(typeof scheduleSaveView==='function') scheduleSaveView();
+    }
+  }catch(_){}
+
+  if(__bgBitmap && __bgKeyNow === __bgKey){
+    ctx.drawImage(__bgBitmap,0,0);
+  }else{
+    drawGrid(); drawPeruMap(); drawAirports();
+    __bgWantCapture(__bgKeyNow);
+
+    if(__bgCapReady && __bgCapReadyKey === __bgKeyNow && typeof createImageBitmap === 'function'){
+      const gen = ++__bgCapGen;
+      __bgCapReady = false;
+      createImageBitmap(cvs).then(bm=>{
+        if(gen !== __bgCapGen) return;
+        __bgBitmap = bm;
+        __bgKey = __bgKeyNow;
+      }).catch(()=>{});
+    }
+  }
+
+  // Sweep (dinámico)
+  sweepDetect(dt); drawSweep(dt);
+
+  // Update (timestep más estable)
+  if(!st.paused){
+    __simAcc += dt;
+    let steps=0;
+    while(__simAcc >= __SIM_STEP && steps < 3){
+      st.planes.forEach(p=>updatePlane(p,__SIM_STEP));
+      updateMissiles(__SIM_STEP);
+      updatePairs();
+      __simAcc -= __SIM_STEP;
+      steps++;
+    }
+  }
+
+  // Smoothing de render para updates remotos (RT)
+  if(window.__SETCA_RT && window.__SETCA_RT.advance) window.__SETCA_RT.advance(dt);
   
 // Trajectory visualization
 if(st.showTraj){
@@ -3563,7 +3945,29 @@ if(st.showTraj){
     const midX=(rA.x+rB.x)/2,midY=(rA.y+rB.y)/2;ctx.fillStyle='#2ee74f';ctx.font='14px monospace';ctx.textAlign='center';ctx.fillText(lbl,midX,midY-10);
   }
   paintAlerts();
-  accFPS+=dt;frames++;if(accFPS>=0.5){fpsEl.textContent=String(Math.round(frames/accFPS));accFPS=0;frames=0;}
+  accFPS+=dt;frames++;
+  if(accFPS>=0.5){
+    fpsEl.textContent=String(Math.round(frames/accFPS));
+    accFPS=0;frames=0;
+
+    // Métricas de red/RT (si existe)
+    try{
+      const rt = (window.__SETCA_RT && window.__SETCA_RT.stats) ? window.__SETCA_RT.stats : null;
+      if(rt){
+        const now=Date.now();
+        if(!window.__setcaNetPrev) window.__setcaNetPrev={t:now,inP:rt.inPackets,outP:rt.outPackets,inB:rt.inBytes,outB:rt.outBytes};
+        const p=window.__setcaNetPrev;
+        const dtS=Math.max(0.001,(now-p.t)/1000);
+        const inHz=(rt.inPackets-p.inP)/dtS, outHz=(rt.outPackets-p.outP)/dtS;
+        const inKBs=(rt.inBytes-p.inB)/dtS/1024, outKBs=(rt.outBytes-p.outB)/dtS/1024;
+        const ageIn = rt.lastInAt ? ((now-rt.lastInAt)/1000) : null;
+        const snapAge = rt.lastSnapAt ? ((now-rt.lastSnapAt)/1000) : null;
+        const netTxt = `${inHz.toFixed(1)}↓ ${outHz.toFixed(1)}↑ • ${inKBs.toFixed(1)}KB/s↓ ${outKBs.toFixed(1)}KB/s↑ • rt:${ageIn!==null?ageIn.toFixed(1)+'s':'-'} snap:${snapAge!==null?snapAge.toFixed(1)+'s':'-'}`;
+        const el=document.getElementById('net'); if(el) el.textContent = netTxt;
+        p.t=now; p.inP=rt.inPackets; p.outP=rt.outPackets; p.inB=rt.inBytes; p.outB=rt.outBytes;
+      }
+    }catch(_){}
+  }
   requestAnimationFrame(loop);
 }
 requestAnimationFrame(loop);
