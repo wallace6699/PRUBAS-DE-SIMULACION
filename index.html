@@ -1,4 +1,4 @@
-ESTE SIMULADOR SE ENCUENTRA EN FASE DE PRUEBA - PUEDEN OCURRIR ERRORES DURANTE EL FUNCIONAMIENTO 2.5
+ESTE SIMULADOR SE ENCUENTRA EN FASE DE PRUEBA - PUEDEN OCURRIR ERRORES DURANTE EL FUNCIONAMIENTO 2.5.1
 <!DOCTYPE html>
 <html lang="es">
 <head>
@@ -816,6 +816,7 @@ canvas#radar {
     📄 Ver / Imprimir Informe Parcial
   </button>
 
+  <button id="observerBtn" class="btn focusable" title="Abrir visor de radar (solo lectura)">👀 Observador</button>
   <span id="stateChip" class="pill">Pausada</span>
   <span id="timer" class="timer"></span>
 </header>
@@ -978,6 +979,235 @@ const $=(s,r=document)=>r.querySelector(s), $$=(s,r=document)=>Array.from(r.quer
 function togglePanel(el){const t=el.getAttribute('data-target');const b=$(t);if(!b)return;const v=b.style.display!=='none';b.style.display=v?'none':'';el.textContent=v?'▸':'▾';}
 $$('.toggle').forEach(el=>el.addEventListener('click',()=>togglePanel(el)));
 function flash(el){el.classList.add('flash');setTimeout(()=>el.classList.remove('flash'),250);}
+
+/* ===== OBSERVADOR (solo radar) ===== */
+let __observerWins = [];
+
+// ===== OBSERVADOR (ventana independiente, no vinculada al principal) =====
+function __openObserverWindow(){
+  try{
+    // El observador debe poder elegir qué sala ver (radar de una sala específica).
+    // Abrimos el mismo link en una ventana aparte, en modo observador, pero SIN forzar una sala aleatoria.
+    // Si existe una sala guardada para observador, la usamos; si no, abrimos con selector de sala.
+    const saved = (()=>{ try{ return localStorage.getItem('setca_observer_room')||''; }catch(_){ return ''; } })();
+    const base = location.origin + location.pathname + location.search;
+    const join = base.includes('?') ? '&' : '?';
+    const hash = saved ? ('#'+saved) : ''; // si no hay sala guardada, el popup mostrará el selector
+    const url = `${base}${join}observer=1${hash}`;
+
+    const w = window.open(
+      url,
+      `OBS_${Date.now()}`,
+      `popup=yes,noopener,noreferrer,width=${screen.availWidth},height=${screen.availHeight},left=0,top=0`
+    );
+    if(!w){
+      alert('El navegador bloqueó la ventana emergente. Habilita popups para este sitio.');
+      return;
+    }
+    // Intento suave de maximizar (algunos navegadores lo restringen)
+    try{ w.moveTo(0,0); w.resizeTo(screen.availWidth, screen.availHeight); }catch(e){}
+  }catch(e){
+    console.warn('Observer window error:', e);
+  }
+}
+
+(function __bindObserverBtn(){
+  const b = document.getElementById('observerBtn');
+  if(!b) return;
+  b.addEventListener('click', __openObserverWindow);
+})();
+
+// ===== MODO OBSERVADOR: SOLO RADAR, PANTALLA COMPLETA EN LA VENTANA =====
+(function __applyObserverMode(){
+  const params = new URLSearchParams(location.search);
+  if(!params.has('observer')) return;
+
+  // Marca de modo
+  document.documentElement.classList.add('observer-mode');
+  document.body.classList.add('observer-mode');
+
+  // Ocultar todo menos el radar (centro)
+  const header = document.querySelector('header');
+  if(header) header.style.display = 'none';
+
+  const left = document.getElementById('left');
+  if(left) left.style.display = 'none';
+
+  const right = document.getElementById('right');
+  if(right) right.style.display = 'none';
+
+  // Ajustar layout para que "center" ocupe todo
+  const app = document.querySelector('.app');
+  if(app){
+    app.style.gridTemplateColumns = '1fr';
+    app.style.gridTemplateRows = '1fr';
+    app.style.gridTemplateAreas = '"center"';
+    app.style.padding = '0';
+    app.style.gap = '0';
+  }
+
+  const center = document.getElementById('center');
+  if(center){
+    center.style.borderRadius = '0';
+    center.style.height = '100vh';
+    center.style.width = '100vw';
+    center.style.margin = '0';
+  }
+
+  // Radar ocupa toda la ventana
+  const radar = document.getElementById('radar');
+  if(radar){
+    radar.style.display = 'block';
+    radar.style.width = '100%';
+    radar.style.height = '100%';
+  }
+
+  // Observador interactivo: permitir zoom/pan y regla sobre el radar
+  // (no afecta al principal porque esta ventana usa una sala/instancia independiente)
+  if(radar) radar.style.pointerEvents = 'auto';
+
+  // Selector de sala (para observar una sala específica sin vincularse al principal).
+  // Se muestra como una mini-capa flotante y puede ocultarse para dejar solo el radar a pantalla completa.
+  (function(){
+    const salasList = (window.salas && Array.isArray(window.salas) && window.salas.length) ? window.salas
+      : ["alfa","bravo","charlie","delta","eco","foxtrot","golf","hotel","india","juliet"];
+
+    const current = (location.hash || "").replace(/^#/,"").trim() || (()=>{
+      try{ return localStorage.getItem('setca_observer_room')||''; }catch(_){ return ''; }
+    })() || "sala-default";
+
+    // Si ya existe, no duplicar
+    if(document.getElementById('observerRoomPicker')) return;
+
+    const wrap = document.createElement('div');
+    wrap.id = 'observerRoomPicker';
+    wrap.style.position = 'fixed';
+    wrap.style.top = '10px';
+    wrap.style.left = '10px';
+    wrap.style.zIndex = '999999';
+    wrap.style.background = 'rgba(0,0,0,0.65)';
+    wrap.style.backdropFilter = 'blur(4px)';
+    wrap.style.color = '#fff';
+    wrap.style.padding = '10px 12px';
+    wrap.style.borderRadius = '12px';
+    wrap.style.fontFamily = 'system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif';
+    wrap.style.boxShadow = '0 10px 30px rgba(0,0,0,0.35)';
+    wrap.style.display = 'flex';
+    wrap.style.gap = '8px';
+    wrap.style.alignItems = 'center';
+
+    const label = document.createElement('div');
+    label.textContent = '👀 Observador · Sala:';
+    label.style.fontWeight = '700';
+    label.style.whiteSpace = 'nowrap';
+
+    const sel = document.createElement('select');
+    sel.id = 'observerRoomSelect';
+    sel.style.padding = '6px 8px';
+    sel.style.borderRadius = '10px';
+    sel.style.border = '1px solid rgba(255,255,255,0.25)';
+    sel.style.background = 'rgba(20,20,20,0.8)';
+    sel.style.color = '#fff';
+    sel.style.outline = 'none';
+
+    // Opción actual si es custom
+    const hasCurrent = salasList.includes(current) || current === 'sala-default';
+    const addOpt=(v,txt)=>{
+      const o=document.createElement('option');
+      o.value=v; o.textContent=txt||v;
+      if(v===current) o.selected=true;
+      sel.appendChild(o);
+    };
+    if(!hasCurrent && current){
+      addOpt(current, current + ' (actual)');
+      const sep=document.createElement('option'); sep.disabled=true; sep.textContent='────────';
+      sel.appendChild(sep);
+    }
+    salasList.forEach(s=>addOpt(s));
+    addOpt('sala-default','sala-default');
+
+    const btn = document.createElement('button');
+    btn.textContent = 'Ver';
+    btn.style.padding = '6px 10px';
+    btn.style.borderRadius = '10px';
+    btn.style.border = '1px solid rgba(255,255,255,0.25)';
+    btn.style.background = 'rgba(255,255,255,0.12)';
+    btn.style.color = '#fff';
+    btn.style.cursor = 'pointer';
+    btn.title = 'Cargar radar de la sala elegida';
+
+    const hide = document.createElement('button');
+    hide.textContent = '⤫';
+    hide.style.padding = '6px 10px';
+    hide.style.borderRadius = '10px';
+    hide.style.border = '1px solid rgba(255,255,255,0.25)';
+    hide.style.background = 'rgba(255,255,255,0.06)';
+    hide.style.color = '#fff';
+    hide.style.cursor = 'pointer';
+    hide.title = 'Ocultar (deja solo radar)';
+
+    const showHint = document.createElement('div');
+    showHint.id = 'observerRoomHint';
+    showHint.textContent = 'Presiona ESC para mostrar/ocultar este panel';
+    showHint.style.position = 'fixed';
+    showHint.style.left = '10px';
+    showHint.style.bottom = '10px';
+    showHint.style.zIndex = '999999';
+    showHint.style.fontFamily = 'system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif';
+    showHint.style.fontSize = '12px';
+    showHint.style.color = 'rgba(255,255,255,0.7)';
+    showHint.style.background = 'rgba(0,0,0,0.35)';
+    showHint.style.padding = '6px 10px';
+    showHint.style.borderRadius = '999px';
+    showHint.style.backdropFilter = 'blur(4px)';
+
+    const applyRoom = ()=>{
+      const room = (sel.value||'').trim();
+      if(!room) return;
+      try{ localStorage.setItem('setca_observer_room', room); }catch(_){}
+      // recargar con la sala elegida para engancharse al estado real de esa sala
+      const baseUrl = location.origin + location.pathname + location.search;
+      const join2 = baseUrl.includes('?') ? '&' : '?';
+      const url2 = baseUrl.includes('observer=1') ? (location.origin + location.pathname + location.search) : `${baseUrl}${join2}observer=1`;
+      location.href = url2 + '#' + room;
+    };
+
+    btn.addEventListener('click', applyRoom);
+    sel.addEventListener('change', applyRoom);
+
+    hide.addEventListener('click', ()=>{
+      wrap.style.display = 'none';
+      showHint.style.display = 'none';
+    });
+
+    // ESC muestra/oculta el panel
+    document.addEventListener('keydown', (e)=>{
+      if(e.key === 'Escape'){
+        const visible = wrap.style.display !== 'none';
+        wrap.style.display = visible ? 'none' : 'flex';
+        showHint.style.display = visible ? 'none' : 'block';
+      }
+    });
+
+    wrap.appendChild(label);
+    wrap.appendChild(sel);
+    wrap.appendChild(btn);
+    wrap.appendChild(hide);
+    document.body.appendChild(wrap);
+    document.body.appendChild(showHint);
+
+    // Si no hay hash, forzar a elegir (mantener visible)
+    if(!(location.hash||'').trim()){
+      // pequeña animación de atención
+      wrap.animate([{transform:'scale(1)'},{transform:'scale(1.03)'},{transform:'scale(1)'}],{duration:600});
+    }else{
+      // si ya hay sala, ocultar hint después de un momento
+      setTimeout(()=>{ try{ showHint.style.display='none'; }catch(_){ } }, 2500);
+    }
+  })();
+
+})();
+
 
 /* ===== Constantes / Estado ===== */
 const NM2KM=1.852,KTS2KMH=1.852,KMH2KTS=1/1.852,FT2M=0.3048;
