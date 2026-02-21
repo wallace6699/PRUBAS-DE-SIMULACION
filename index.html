@@ -1,4 +1,4 @@
-ESTE SIMULADOR SE ENCUENTRA EN FASE DE PRUEBA - PUEDEN OCURRIR ERRORES DURANTE EL FUNCIONAMIENTO 2.4
+ESTE SIMULADOR SE ENCUENTRA EN FASE DE PRUEBA - PUEDEN OCURRIR ERRORES DURANTE EL FUNCIONAMIENTO 2.5
 <!DOCTYPE html>
 <html lang="es">
 <head>
@@ -491,20 +491,6 @@ canvas#radar {
 }
 
 
-/* Compact Formaciones buttons (more compact but fills full width) */
-#pFormationsBody .btn-grid{
-  gap:6px !important;
-  grid-template-columns:repeat(auto-fit, minmax(92px, 1fr)) !important;
-  align-items:stretch !important;
-}
-#pFormationsBody .btn.mini{
-  padding:2px 6px !important;
-  font-size:11px !important;
-  line-height:1.1 !important;
-  min-height:22px !important;
-  border-radius:7px !important;
-  letter-spacing:0.02em !important;
-}
 
 /* Compact Herramientas de Dibujo buttons (compact but fills full width) */
 #pDrawBody .btn-grid{
@@ -569,7 +555,156 @@ canvas#radar {
 
 
 
-/* === UI order / layout polish (CMD, Formaciones, Dibujo) === */
+
+  /* === Paleta de colores para gráficos (click derecho > Cambiar color) === */
+  #drawingColorPalette{
+    position:fixed;
+    z-index:100000;
+    display:none;
+    background:rgba(5,10,6,0.96);
+    border:1px solid var(--warn);
+    border-radius:12px;
+    padding:8px 8px 10px;
+    box-shadow:0 12px 28px rgba(0,0,0,0.62);
+    font-family:monospace;
+    width:260px;
+  }
+  #drawingColorPalette .palHdr{
+    display:flex;
+    align-items:center;
+    justify-content:space-between;
+    gap:10px;
+    margin-bottom:6px;
+  }
+  #drawingColorPalette .palTitle{
+    font-size:12px;
+    letter-spacing:.10em;
+    text-transform:uppercase;
+    color:var(--mut);
+    opacity:.95;
+    user-select:none;
+  }
+  #drawingColorPalette .palX{
+    background:transparent;
+    border:1px solid rgba(255,224,102,0.35);
+    color:var(--warn);
+    border-radius:10px;
+    padding:4px 8px;
+    cursor:pointer;
+    line-height:1;
+  }
+  #drawingColorPalette .palX:hover{
+    background:rgba(255,224,102,0.10);
+  }
+  #drawingColorPalette .palGrid{
+    display:grid;
+    grid-template-columns:repeat(7, 1fr);
+    gap:6px;
+    margin:6px 0 8px;
+  }
+  #drawingColorPalette .swatch{
+    height:22px;
+    border-radius:8px;
+    border:1px solid rgba(255,255,255,0.28);
+    cursor:pointer;
+    padding:0;
+  }
+  #drawingColorPalette .swatch:hover{
+    outline:2px solid rgba(255,224,102,0.55);
+    outline-offset:1px;
+  }
+  #drawingColorPalette .palFooter{
+    display:flex;
+    gap:8px;
+  }
+  #drawingColorPalette .palBtn{
+    flex:1;
+    background:rgba(255,224,102,0.10);
+    border:1px solid rgba(255,224,102,0.35);
+    color:var(--txt);
+    padding:6px 10px;
+    border-radius:10px;
+    cursor:pointer;
+    font-size:12px;
+  }
+  #drawingColorPalette .palBtn:hover{
+    background:rgba(255,224,102,0.16);
+  }
+/* === Paleta de grosores para gráficos (click derecho > Grosor de línea) === */
+#drawingWidthPalette{
+  position:fixed;
+  z-index:100000;
+  display:none;
+  background:rgba(5,10,6,0.96);
+  border:1px solid var(--warn);
+  border-radius:12px;
+  padding:8px 8px 10px;
+  box-shadow:0 12px 28px rgba(0,0,0,0.62);
+  font-family:monospace;
+  width:240px;
+}
+#drawingWidthPalette .palHdr{
+  display:flex;
+  align-items:center;
+  justify-content:space-between;
+  gap:10px;
+  margin-bottom:6px;
+}
+#drawingWidthPalette .palTitle{
+  font-size:12px;
+  letter-spacing:.10em;
+  text-transform:uppercase;
+  color:var(--mut);
+  opacity:.95;
+  user-select:none;
+}
+#drawingWidthPalette .palX{
+  background:transparent;
+  border:1px solid rgba(255,224,102,0.35);
+  color:var(--warn);
+  border-radius:10px;
+  padding:4px 8px;
+  cursor:pointer;
+  line-height:1;
+}
+#drawingWidthPalette .palX:hover{
+  background:rgba(255,224,102,0.10);
+}
+#drawingWidthPalette .wGrid{
+  display:grid;
+  grid-template-columns:repeat(2, 1fr);
+  gap:8px;
+  margin:6px 0 8px;
+}
+#drawingWidthPalette .wSwatch{
+  background:rgba(255,224,102,0.06);
+  border:1px solid rgba(255,224,102,0.28);
+  color:var(--txt);
+  border-radius:10px;
+  padding:8px 10px;
+  cursor:pointer;
+  text-align:left;
+  display:flex;
+  align-items:center;
+  gap:8px;
+}
+#drawingWidthPalette .wSwatch:hover{
+  background:rgba(255,224,102,0.12);
+  border-color:rgba(255,224,102,0.40);
+}
+#drawingWidthPalette .wLine{
+  flex:1;
+  height:0;
+  border-bottom:calc(var(--lw) * 1px) solid var(--warn);
+  opacity:.95;
+}
+#drawingWidthPalette .wTxt{
+  font-size:12px;
+  min-width:48px;
+  text-align:right;
+  color:var(--mut);
+}
+/* === UI order / layout polish (CMD, Dibujo) === */
 .group{
   border:1px solid rgba(42,102,51,0.55);
   background:rgba(0,0,0,0.18);
@@ -771,26 +906,7 @@ canvas#radar {
         <div id="altList" class="col" style="max-height:22vh;overflow:auto"></div>
       </div>
     </section>
-
-    
-    <section class="panel" id="pFormations">
-      <div class="panel-header"><h3>Formaciones</h3><span class="toggle" data-target="#pFormationsBody">▾</span></div>
-      <div id="pFormationsBody" class="panel-body">
-        <div class="btn-grid">
-          <button class="btn mini focusable" data-form="RANGE">Range</button>
-          <button class="btn mini focusable" data-form="VIC">Vic</button>
-          <button class="btn mini focusable" data-form="CHAMPAGNE">Champagne</button>
-          <button class="btn mini focusable" data-form="AZIMUT2">Azimut de 2</button>
-          <button class="btn mini focusable" data-form="WALL4">Wall de 4</button>
-          <button class="btn mini focusable" data-form="LEADTRAIL2">Lead Trail de 2</button>
-          <button class="btn mini focusable" data-form="LINEABREAST2">Line Abreast de 2</button>
-          <button class="btn mini focusable" data-form="BOX6">Box de 6</button>
-          <button class="btn mini focusable" data-form="CONTAINER4">Container de 4</button>
-        </div>
-      </div>
-    </section>
-
-    <section class="panel" id="pDraw">
+<section class="panel" id="pDraw">
       <div class="panel-header"><h3>Herramientas de Dibujo</h3><span class="toggle" data-target="#pDrawBody">▾</span></div>
       <div id="pDrawBody" class="panel-body">
         <div class="btn-grid small">
@@ -1212,7 +1328,26 @@ function placeAt(cx, cy, hdgDeg, dxNM, dyNM){
 function basePlane(name,x,y,hdg){
   const spd = 350 + Math.random()*200;
   const alt = 12000 + Math.random()*16000;
-  return { name, id:'F-'+Math.random().toString(36).slice(2,6).toUpperCase(), x,y, hdg, spd, tgtSpd:spd, alt, tgtAlt:alt, tgtHdg:hdg, turn:2, ghosts:[], kills:0, fuel:100, jamming:false };
+  const now = (typeof performance !== 'undefined' && performance.now) ? performance.now() : 0;
+  return {
+    name,
+    id:'F-'+Math.random().toString(36).slice(2,6).toUpperCase(),
+    x,y,
+    hdg,
+    spd, tgtSpd:spd,
+    alt, tgtAlt:alt,
+    tgtHdg:hdg,
+    turn:2,
+    turnBias:null,
+    ghosts:[],
+    lastDet: now, // para que aparezca inmediatamente incluso en modo radar analógico
+    fail:{comms:false,eng:'none',cab:'none',gear:false,bird:false},
+    kills:0,
+    fuel:100,
+    jamming:false,
+    tagDx:12,
+    tagDy:-6
+  };
 }
 
 // === FORMATION GENERATORS (FORMACIONES INDEPENDIENTES SIN REQUERIMIENTO DE LIDER)  ===
@@ -1268,6 +1403,43 @@ const GenForm = {
       basePlane('BOX-4', t2.x,t2.y,hdg),
     ];
   },
+
+BOX6(center){
+  const fwdS = randNM(FORM.FWD_MIN_NM, FORM.FWD_MAX_NM);
+  const trailS = randNM(FORM.BOX_TRAIL_MIN_NM, FORM.BOX_TRAIL_MAX_NM);
+  const hdg = Math.random()*360;
+  // 3 y 3 (dos elementos)
+  const sep = fwdS * 0.9;
+  const offs = [-sep, 0, sep];
+
+  const front = offs.map((oy,i)=>{
+    const p = placeAt(center.x, center.y, hdg, 0, oy);
+    return basePlane('BOX-'+(i+1), p.x,p.y,hdg);
+  });
+
+  const back = offs.map((oy,i)=>{
+    const p = placeAt(center.x, center.y, hdg, -trailS, oy);
+    return basePlane('BOX-'+(i+4), p.x,p.y,hdg);
+  });
+
+  return front.concat(back);
+},
+CONTAINER4(center){
+  const sep = randNM(FORM.WEDGE_MIN_NM, FORM.WEDGE_MAX_NM) * 1.2;
+  const trailS = randNM(FORM.TRAIL_MIN_NM, FORM.TRAIL_MAX_NM);
+  const hdg = Math.random()*360;
+  // 2 adelante (line abreast) + 2 atrás (line abreast), más compacto que Box
+  const f1 = placeAt(center.x, center.y, hdg, 0, -sep/2);
+  const f2 = placeAt(center.x, center.y, hdg, 0, +sep/2);
+  const t1 = placeAt(center.x, center.y, hdg, -trailS, -sep/2);
+  const t2 = placeAt(center.x, center.y, hdg, -trailS, +sep/2);
+  return [
+    basePlane('CONT-1', f1.x,f1.y,hdg),
+    basePlane('CONT-2', f2.x,f2.y,hdg),
+    basePlane('CONT-3', t1.x,t1.y,hdg),
+    basePlane('CONT-4', t2.x,t2.y,hdg),
+  ];
+},
   AZIMUT2(center){ // two elements separated in bearing
     const s = randNM(FORM.AZI_MIN_NM, FORM.AZI_MAX_NM);
     const hdg = Math.random()*360;
@@ -1297,7 +1469,18 @@ const GenForm = {
   }
 };
 function spawnFormation(key){
-  const center = { x:(Math.random()*200-100), y:(Math.random()*200-100) };
+  // Generar la formación cerca del centro de vista actual (para que siempre se vea al crearla)
+  let center = {x:0, y:0};
+  try{
+    const sx = (zoom * PX_PER_NM);
+    if(sx && isFinite(sx)){
+      center = { x:(-offX)/sx, y:(-offY)/sx };
+      if(!isFinite(center.x) || !isFinite(center.y)) center = {x:0, y:0};
+    }
+  }catch(_){ center = {x:0, y:0}; }
+  // pequeño jitter para no apilar
+  center.x += (Math.random()*10-5);
+  center.y += (Math.random()*10-5);
   let planes = [];
   switch(key){
     case 'LINEABREAST2': planes = GenForm.LINEABREAST2(center); break;
@@ -1305,6 +1488,8 @@ function spawnFormation(key){
     case 'LEADTRAIL2': planes = GenForm.LEADTRAIL2(center); break;
     case 'VIC': planes = GenForm.VIC(center); break;
     case 'BOX4': planes = GenForm.BOX4(center); break;
+    case 'BOX6': planes = GenForm.BOX6(center); break;
+    case 'CONTAINER4': planes = GenForm.CONTAINER4(center); break;
     case 'AZIMUT2': planes = GenForm.AZIMUT2(center); break;
     case 'RANGE': planes = GenForm.RANGE2(center); break;
     case 'CHAMPAGNE': planes = GenForm.CHAMPAGNE(center); break;
@@ -1829,8 +2014,10 @@ function drawShapes(){
     ctx.strokeStyle = d.color || '#ffea00';
     ctx.fillStyle   = d.color || '#ffea00';
 
-    // === NUEVO: líneas más delgadas estilo radar militar ===
-    ctx.lineWidth = (d.id === st.selectedDrawing ? 1.0 : 0.6);
+    // === Grosor configurable por gráfico (clic derecho > Grosor de línea) ===
+    const __baseLW = (typeof d.lw === 'number' && isFinite(d.lw)) ? d.lw : (d.type === 'arwy' ? 0.4 : 0.6);
+    const __lw = (d.id === st.selectedDrawing) ? Math.min(8, Math.max(0.2, (__baseLW*1.6))) : Math.min(8, Math.max(0.2, __baseLW));
+    ctx.lineWidth = __lw;
 
     const s = toScreen(d.x, d.y);
 
@@ -1873,7 +2060,7 @@ function drawShapes(){
     if(d.type === 'arwy' && d.ex!==undefined){
       const e = toScreen(d.ex, d.ey);
       ctx.setLineDash([2,6]);
-      ctx.lineWidth = (d.id === st.selectedDrawing ? 0.8 : 0.4);
+      ctx.lineWidth = __lw;
       ctx.beginPath();
       ctx.moveTo(s.x, s.y);
       ctx.lineTo(e.x, e.y);
@@ -2211,8 +2398,8 @@ let draggingPlane=null,draggingDrawing=null,dragStart=null;
 
 // ===== D + CLICK: arrastrar gráficos (dibujos) =====
 let __dDown = false;
-addEventListener('keydown', (e)=>{ if(e.key==='d' || e.key==='D') __dDown = true; });
-addEventListener('keyup',   (e)=>{ if(e.key==='d' || e.key==='D') __dDown = false; });
+addEventListener('keydown', (e)=>{ if(window.st && window.st.modoObservador) return; if(e.key==='d' || e.key==='D') __dDown = true; });
+addEventListener('keyup',   (e)=>{ if(window.st && window.st.modoObservador) return; if(e.key==='d' || e.key==='D') __dDown = false; });
 
 // Captura primero para no interferir con otras interacciones
 // 1) Doble click para SELECCIONAR (más preciso)
@@ -2222,6 +2409,19 @@ addEventListener('keyup',   (e)=>{ if(e.key==='d' || e.key==='D') __dDown = fals
   const SEL_TOL_PX = 6; // selección más precisa (menos "radio" amplio)
   let __ctx = null;
   let __ctxTargetId = null;
+  let __pal = null;
+  let __wpal = null;
+  let __ctxOpenAt = {x:0, y:0};
+
+  function __normHex(c){
+    if(typeof c !== 'string') return '#ffea00';
+    c = c.trim();
+    const m3 = /^#([0-9a-fA-F]{3})$/.exec(c);
+    if(m3) return '#' + m3[1].split('').map(ch=>ch+ch).join('').toLowerCase();
+    const m6 = /^#([0-9a-fA-F]{6})$/.exec(c);
+    if(m6) return '#' + m6[1].toLowerCase();
+    return '#ffea00';
+  }
 
   function ensureCtxMenu(){
     if(__ctx) return __ctx;
@@ -2231,8 +2431,11 @@ addEventListener('keyup',   (e)=>{ if(e.key==='d' || e.key==='D') __dDown = fals
       __ctx.id = 'drawingCtxMenu';
       __ctx.innerHTML = `
         <button class="ctxItem" data-act="rename">Cambiar nombre</button>
+        <button class="ctxItem" data-act="color">Cambiar color</button>
+        <button class="ctxItem" data-act="width">Grosor de línea</button>
         <button class="ctxItem" data-act="delete">Eliminar gráfico</button>
-      `;
+        <input id="drawingColorPicker" type="color"
+               style="position:absolute;left:-9999px;top:-9999px;opacity:0;width:1px;height:1px;pointer-events:none"/>`;
       document.body.appendChild(__ctx);
     }
     __ctx.style.display = 'none';
@@ -2242,6 +2445,21 @@ addEventListener('keyup',   (e)=>{ if(e.key==='d' || e.key==='D') __dDown = fals
       const act = b.getAttribute('data-act');
       const id = __ctxTargetId;
       const d = id ? __findDrawingById(id) : null;
+
+      if(act==='color' && d){
+  // Mostrar paleta de colores (rápida) en vez del selector simple
+  hideCtx(true); // ocultar menú sin perder el target
+  showPal(__ctxOpenAt.x + 10, __ctxOpenAt.y + 10);
+  return;
+}
+
+
+      if(act==='width' && d){
+        // Mostrar paleta de grosores
+        hideCtx(true); // ocultar menú sin perder el target
+        showWPal(__ctxOpenAt.x + 10, __ctxOpenAt.y + 10);
+        return;
+      }
 
       if(act==='delete' && id){
         if(st && Array.isArray(st.drawings)){
@@ -2269,18 +2487,224 @@ addEventListener('keyup',   (e)=>{ if(e.key==='d' || e.key==='D') __dDown = fals
         if(window._SETCA_SYNC && typeof window._SETCA_SYNC.push==='function') window._SETCA_SYNC.push();
       }
     });
+
+    // Color picker wiring (usa el id del gráfico seleccionado en el menú)
+    const __picker = __ctx.querySelector('#drawingColorPicker');
+    if(__picker && !__picker.__setcaWired){
+      __picker.__setcaWired = true;
+      __picker.addEventListener('input', ()=>{
+        const id = __ctxTargetId;
+        const d = id ? __findDrawingById(id) : null;
+        if(d){
+          d.color = __picker.value;
+          // Para puntos, si no tenían dotColor explícito, igualamos al color elegido
+          if(d.type==='point' && !d.dotColor) d.dotColor = __picker.value;
+        }
+        if(typeof repaintNav==='function') repaintNav();
+        if(typeof repaintAlt==='function') repaintAlt();
+        if(typeof repaintPairs==='function') repaintPairs();
+      });
+      __picker.addEventListener('change', ()=>{
+        if(window._SETCA_SYNC && typeof window._SETCA_SYNC.push==='function') window._SETCA_SYNC.push();
+        hidePal();
+        hideCtx();
+      });
+    }
     return __ctx;
   }
 
-  function hideCtx(){
+  
+function ensurePalette(){
+  if(__pal) return __pal;
+  __pal = document.getElementById('drawingColorPalette');
+  if(!__pal){
+    __pal = document.createElement('div');
+    __pal.id = 'drawingColorPalette';
+    const colors = [
+      '#ffea00','#ffd166','#ff9f1c','#ff4d4d','#ff006e','#b5179e','#7b2cbf',
+      '#4361ee','#3a86ff','#00b4d8','#06d6a0','#2ee74f','#a7f432','#ffffff',
+      '#c0c0c0','#7f8c8d','#000000','#8d5524','#a97142','#2d6a4f','#1b4332'
+    ];
+    __pal.innerHTML = `
+      <div class="palHdr">
+        <div class="palTitle">Color del gráfico</div>
+        <button class="palX" data-act="close" title="Cerrar">✕</button>
+      </div>
+      <div class="palGrid">
+        ${colors.map(c=>`<button class="swatch" data-color="${c}" title="${c}" style="background:${c}"></button>`).join('')}
+      </div>
+      <div class="palFooter">
+        <button class="palBtn" data-act="custom">Personalizado…</button>
+      </div>
+    `;
+    document.body.appendChild(__pal);
+  }
+  __pal.style.display = 'none';
+
+  if(!__pal.__setcaWired){
+    __pal.__setcaWired = true;
+    __pal.addEventListener('click',(ev)=>{
+      const btn = ev.target.closest('button');
+      if(!btn) return;
+
+      const act = btn.getAttribute('data-act');
+      const color = btn.getAttribute('data-color');
+
+      if(act==='close'){ hidePal(); return; }
+
+      if(act==='custom'){
+        const picker = ensureCtxMenu().querySelector('#drawingColorPicker');
+        const d = __ctxTargetId ? __findDrawingById(__ctxTargetId) : null;
+        if(picker){
+          picker.value = __normHex((d && d.color) || '#ffea00');
+          picker.click();
+        }
+        return;
+      }
+
+      if(color){
+        const d = __ctxTargetId ? __findDrawingById(__ctxTargetId) : null;
+        if(d){
+          d.color = color;
+          if(d.type==='point' && !d.dotColor) d.dotColor = color;
+        }
+        if(typeof repaintNav==='function') repaintNav();
+        if(typeof repaintAlt==='function') repaintAlt();
+        if(typeof repaintPairs==='function') repaintPairs();
+        if(window._SETCA_SYNC && typeof window._SETCA_SYNC.push==='function') window._SETCA_SYNC.push();
+        hidePal();
+        hideCtx();
+      }
+    });
+  }
+  return __pal;
+}
+
+function hidePal(){
+  const p = ensurePalette();
+  p.style.display = 'none';
+}
+
+function showPal(clientX, clientY){
+  const p = ensurePalette();
+  const pad = 8;
+  p.style.display = 'block';
+  p.style.left = '0px';
+  p.style.top  = '0px';
+  const rect = p.getBoundingClientRect();
+  const x = Math.min(window.innerWidth - rect.width - pad, Math.max(pad, clientX));
+  const y = Math.min(window.innerHeight - rect.height - pad, Math.max(pad, clientY));
+  p.style.left = x + 'px';
+  p.style.top  = y + 'px';
+}
+
+function ensureWidthPalette(){
+  if(__wpal) return __wpal;
+  __wpal = document.getElementById('drawingWidthPalette');
+  if(!__wpal){
+    __wpal = document.createElement('div');
+    __wpal.id = 'drawingWidthPalette';
+    const widths = [0.4,0.6,0.8,1.0,1.5,2.0,3.0,4.0];
+    __wpal.innerHTML = `
+      <div class="palHdr">
+        <div class="palTitle">Grosor de línea</div>
+        <button class="palX" data-act="close" title="Cerrar">✕</button>
+      </div>
+      <div class="wGrid">
+        ${widths.map(w=>`<button class="wSwatch" data-width="${w}" title="${w}px">
+            <span class="wLine" style="--lw:${w}"></span>
+            <span class="wTxt">${w}px</span>
+          </button>`).join('')}
+      </div>
+      <div class="palFooter">
+        <button class="palBtn" data-act="custom">Personalizado…</button>
+      </div>
+    `;
+    document.body.appendChild(__wpal);
+  }
+  __wpal.style.display = 'none';
+
+  function clampWidth(v){
+    v = parseFloat(v);
+    if(!isFinite(v)) return null;
+    return Math.max(0.2, Math.min(6, v));
+  }
+
+  if(!__wpal.__setcaWired){
+    __wpal.__setcaWired = true;
+    __wpal.addEventListener('click',(ev)=>{
+      const btn = ev.target.closest('button');
+      if(!btn) return;
+
+      const act = btn.getAttribute('data-act');
+      const w = btn.getAttribute('data-width');
+
+      if(act==='close'){ hideWPal(); return; }
+
+      const d = __ctxTargetId ? __findDrawingById(__ctxTargetId) : null;
+
+      if(act==='custom'){
+        const cur = d && typeof d.lw==='number' ? d.lw : (d && d.type==='arwy' ? 0.4 : 0.6);
+        const ans = prompt('Grosor de línea (px):', String(cur));
+        const cw = clampWidth(ans);
+        if(d && cw!==null){
+          d.lw = cw;
+          if(typeof repaintNav==='function') repaintNav();
+          if(typeof repaintAlt==='function') repaintAlt();
+          if(typeof repaintPairs==='function') repaintPairs();
+          if(window._SETCA_SYNC && typeof window._SETCA_SYNC.push==='function') window._SETCA_SYNC.push();
+        }
+        hideWPal();
+        hideCtx();
+        return;
+      }
+
+      if(w && d){
+        const cw = clampWidth(w);
+        if(cw!==null) d.lw = cw;
+        if(typeof repaintNav==='function') repaintNav();
+        if(typeof repaintAlt==='function') repaintAlt();
+        if(typeof repaintPairs==='function') repaintPairs();
+        if(window._SETCA_SYNC && typeof window._SETCA_SYNC.push==='function') window._SETCA_SYNC.push();
+        hideWPal();
+        hideCtx();
+      }
+    });
+  }
+  return __wpal;
+}
+
+function hideWPal(){
+  const p = ensureWidthPalette();
+  p.style.display = 'none';
+}
+
+function showWPal(clientX, clientY){
+  const p = ensureWidthPalette();
+  const pad = 8;
+  p.style.display = 'block';
+  p.style.left = '0px';
+  p.style.top  = '0px';
+  const rect = p.getBoundingClientRect();
+  const x = Math.min(window.innerWidth - rect.width - pad, Math.max(pad, clientX));
+  const y = Math.min(window.innerHeight - rect.height - pad, Math.max(pad, clientY));
+  p.style.left = x + 'px';
+  p.style.top  = y + 'px';
+}
+
+
+  function hideCtx(keepTarget=false){
     const m = ensureCtxMenu();
     m.style.display = 'none';
-    __ctxTargetId = null;
+    if(!keepTarget) __ctxTargetId = null;
   }
 
   function showCtx(clientX, clientY, id){
     const m = ensureCtxMenu();
     __ctxTargetId = id;
+    __ctxOpenAt = {x: clientX, y: clientY};
+    try{ hidePal(); }catch(_){ }
+    try{ hideWPal(); }catch(_){ }
 
     // clamp dentro de ventana
     const pad = 8;
@@ -2294,15 +2718,24 @@ addEventListener('keyup',   (e)=>{ if(e.key==='d' || e.key==='D') __dDown = fals
     m.style.top  = y + 'px';
   }
 
-  // Ocultar menú al click en cualquier parte
+  // Ocultar menú/paleta al click en cualquier parte
   document.addEventListener('mousedown', (e)=>{
     const m = ensureCtxMenu();
-    if(m.style.display==='none') return;
-    if(!m.contains(e.target)) hideCtx();
+    const p = ensurePalette();
+    const w = ensureWidthPalette();
+    const mVis = (m.style.display !== 'none');
+    const pVis = (p.style.display !== 'none');
+    const wVis = (w.style.display !== 'none');
+    if(!mVis && !pVis && !wVis) return;
+    if((mVis && m.contains(e.target)) || (pVis && p.contains(e.target)) || (wVis && w.contains(e.target))) return;
+    hidePal();
+    hideWPal();
+    hideCtx();
   }, true);
 
   // Selección precisa por doble click
   cvs.addEventListener('dblclick', (e)=>{
+    if(window.st && window.st.modoObservador) return;
     if(tool && tool.tool && tool.tool !== 'none') return;
     const r = cvs.getBoundingClientRect();
     const px = e.clientX - r.left, py = e.clientY - r.top;
@@ -2312,16 +2745,19 @@ addEventListener('keyup',   (e)=>{ if(e.key==='d' || e.key==='D') __dDown = fals
     }else{
       st.selectedDrawing = null;
     }
+    hidePal();
+    hideWPal();
     hideCtx();
   }, true);
 
   // Menú contextual (click derecho) sobre el gráfico
   cvs.addEventListener('contextmenu', (e)=>{
+    if(window.st && window.st.modoObservador) return;
     if(tool && tool.tool && tool.tool !== 'none') return;
     const r = cvs.getBoundingClientRect();
     const px = e.clientX - r.left, py = e.clientY - r.top;
     const hit = pickShapePrecisePx(px, py, SEL_TOL_PX);
-    if(!hit){ hideCtx(); return; }
+    if(!hit){ hidePal(); hideWPal(); hideCtx(); return; }
     e.preventDefault();
     if(e.stopImmediatePropagation) e.stopImmediatePropagation(); else e.stopPropagation();
     st.selectedDrawing = hit;
@@ -2330,6 +2766,7 @@ addEventListener('keyup',   (e)=>{ if(e.key==='d' || e.key==='D') __dDown = fals
 
   // D + click/arrastrar para mover gráfico (sin necesidad de preseleccionar)
   cvs.addEventListener('mousedown', (e)=>{
+    if(window.st && window.st.modoObservador) return;
     if(e.button!==0) return;
     if(!__dDown) return;
     if(tool && tool.tool && tool.tool !== 'none') return;
@@ -2354,6 +2791,7 @@ addEventListener('keyup',   (e)=>{ if(e.key==='d' || e.key==='D') __dDown = fals
 })();
 
 cvs.addEventListener('mousedown',e=>{
+  if(window.st && window.st.modoObservador) return;
   if(e.button!==0 || !e.altKey) return;
   const r=cvs.getBoundingClientRect();const wx=toWorld(e.clientX-r.left,e.clientY-r.top).x;const wy=toWorld(e.clientX-r.left,e.clientY-r.top).y;
   const hit=null; // ALT: solo mover aeronaves, no dibujos if(hit){st.selectedDrawing=hit;draggingDrawing=st.drawings.find(d=>d.id===hit);dragStart={x:e.clientX,y:e.clientY};return;}
@@ -2361,6 +2799,7 @@ cvs.addEventListener('mousedown',e=>{
   if(best){draggingPlane=best;dragStart={x:e.clientX,y:e.clientY};}
 });
 addEventListener('mousemove',e=>{
+  if(window.st && window.st.modoObservador){ draggingPlane=null; draggingDrawing=null; dragStart=null; return; }
   if(draggingDrawing){
   const dx=(e.clientX-dragStart.x)/(zoom*PX_PER_NM), dy=(e.clientY-dragStart.y)/(zoom*PX_PER_NM);
   draggingDrawing.x+=dx; draggingDrawing.y+=dy;
@@ -2421,6 +2860,7 @@ addEventListener('mouseup',()=>{
 
   // Polygon: click to add vertices, double-click to finish
   cvs.addEventListener('mousedown', e=>{
+    if(window.st && window.st.modoObservador) return;
     if(e.button!==0 || e.altKey) return;
     if(tool.tool==='none') return;
 
@@ -2467,7 +2907,7 @@ addEventListener('mouseup',()=>{
     const pts = tool.poly.slice(0);
     const c = polyCentroid(pts);
     const id='D-'+Math.random().toString(36).slice(2,6).toUpperCase();
-    st.drawings.push({id,type:'polygon',x:c.x,y:c.y,pts});
+    st.drawings.push({id,type:'polygon',x:c.x,y:c.y,pts,lw:0.6});
     ensureDrawingName(st.drawings[st.drawings.length-1]);
     st.selectedDrawing = id;
 
@@ -2488,22 +2928,22 @@ addEventListener('mouseup',()=>{
     if(tool.tool==='point'){
       st.drawings.push({id,type:'point',x:a.x,y:a.y}); created = true;
 } else if(tool.tool==='line'){
-      st.drawings.push({id,type:'line',x:a.x,y:a.y,ex:b.x,ey:b.y}); created = true;
+      st.drawings.push({id,type:'line',x:a.x,y:a.y,ex:b.x,ey:b.y,lw:0.6}); created = true;
       ensureDrawingName(st.drawings[st.drawings.length-1]);
     } else if(tool.tool==='arwy'){
-      st.drawings.push({id,type:'arwy',x:a.x,y:a.y,ex:b.x,ey:b.y}); created = true;
+      st.drawings.push({id,type:'arwy',x:a.x,y:a.y,ex:b.x,ey:b.y,lw:0.4}); created = true;
       ensureDrawingName(st.drawings[st.drawings.length-1]);
     } else if(tool.tool==='circle'){
       const r=Math.hypot(b.x-a.x,b.y-a.y);
-      st.drawings.push({id,type:'circle',x:a.x,y:a.y,r}); created = true;
+      st.drawings.push({id,type:'circle',x:a.x,y:a.y,r,lw:0.6}); created = true;
       ensureDrawingName(st.drawings[st.drawings.length-1]);
     } else if(tool.tool==='square'){
       const side=Math.max(Math.abs(b.x-a.x),Math.abs(b.y-a.y));
       const cx=a.x+(b.x-a.x)/2, cy=a.y+(b.y-a.y)/2;
-      st.drawings.push({id,type:'square',x:cx,y:cy,a:side}); created = true;
+      st.drawings.push({id,type:'square',x:cx,y:cy,a:side,lw:0.6}); created = true;
       ensureDrawingName(st.drawings[st.drawings.length-1]);
     } else if(tool.tool==='bullseye'){
-      st.drawings.push({id,type:'bullseye',x:a.x,y:a.y}); created = true;
+      st.drawings.push({id,type:'bullseye',x:a.x,y:a.y,lw:0.6}); created = true;
       ensureDrawingName(st.drawings[st.drawings.length-1]);
     } else if(tool.tool==='label'){
       const text=prompt('Texto de etiqueta:');
@@ -3402,29 +3842,7 @@ function initUI(){
 }
 initUI(); try{fitToPlanes && fitToPlanes();}catch(e){}
 requestAnimationFrame(()=>{ repaintPlanesList(); repaintNav(); repaintStudent(); repaintPairs(); repaintAlt(); });
-
-
-
-// ==== FORMATION SYSTEM ====
-$$('#pFormations button[data-form]').forEach(btn=>{
-  btn.onclick=()=>{
-    const key = btn.getAttribute('data-form');
-    const map = {
-      'RANGE':'RANGE',
-      'VIC':'VIC',
-      'CHAMPAGNE':'CHAMPAGNE',
-      'AZIMUT2':'AZIMUT2',
-      'WALL4':'WALL4',
-      'LEADTRAIL2':'LEADTRAIL2',
-      'LINEABREAST2':'LINEABREAST2',
-      'BOX6':'BOX4',
-      'CONTAINER4':'BOX4'
-    };
-    spawnFormation(map[key]||'LINEABREAST2');
-    repaintPlanesList(); repaintNav(); repaintAlt();
-    flash(btn);
-  };
-});</script>
+</script>
 <script>
   // === Sync online: debounce + flush (ENTER) ===
   let __syncTimer = null;
@@ -3494,6 +3912,32 @@ $$('#pFormations button[data-form]').forEach(btn=>{
   }
   header .setca-subtitle{ font-size:12px; color:#b6f3b6; margin-top:2px; }
 
+  /* === Modo OBSERVADOR: solo radar en pantalla completa === */
+  body.observer-mode{
+    overflow:hidden !important;
+  }
+  body.observer-mode .app{
+    height:100vh !important;
+    min-height:100vh !important;
+    grid-template-columns: 1fr !important;
+    grid-template-areas:
+      "top"
+      "center" !important;
+  }
+  body.observer-mode #left,
+  body.observer-mode #right{
+    display:none !important;
+  }
+  body.observer-mode header button{
+    display:none !important;
+  }
+  body.observer-mode header #salasBtn,
+  body.observer-mode header #offBtn,
+  body.observer-mode header #observerBtn{
+    display:inline-block !important;
+  }
+
+
   /* === Menú contextual de gráficos === */
   #drawingCtxMenu{
     position:fixed;
@@ -3542,39 +3986,61 @@ $$('#pFormations button[data-form]').forEach(btn=>{
   // Alumno button
   try{
     const hdr = document.querySelector('header') || document.body;
+
+    // --- Alumno ---
     let alumnoBtn = document.getElementById('alumnoBtn');
     if(!alumnoBtn){
       alumnoBtn = document.createElement('button');
       alumnoBtn.id = 'alumnoBtn';
       alumnoBtn.textContent = '🎯 Alumno';
       hdr.appendChild(alumnoBtn);
-      // Botón de Salas
-      let salasBtn = document.getElementById('salasBtn');
-      if(!salasBtn){
-        salasBtn = document.createElement('button');
-        salasBtn.id = 'salasBtn';
-        salasBtn.textContent = '📡 Salas';
-        hdr.appendChild(salasBtn);
-      }
+    }
+
+    // --- Observador (solo radar) ---
+    let observerBtn = document.getElementById('observerBtn');
+    if(!observerBtn){
+      observerBtn = document.createElement('button');
+      observerBtn.id = 'observerBtn';
+      observerBtn.textContent = '👁 OBSERVADOR';
+      observerBtn.title = 'Vista Observador (solo radar)';
+      observerBtn.style.marginLeft = '6px';
+      // Insertar al costado de Alumno
+      try{ alumnoBtn.insertAdjacentElement('afterend', observerBtn); }
+      catch(_){ hdr.appendChild(observerBtn); }
+    }
+
+    // --- Salas ---
+    let salasBtn = document.getElementById('salasBtn');
+    if(!salasBtn){
+      salasBtn = document.createElement('button');
+      salasBtn.id = 'salasBtn';
+      salasBtn.textContent = '📡 Salas';
+      hdr.appendChild(salasBtn);
+    }
+    if(!salasBtn.__setcaWired){
+      salasBtn.__setcaWired = true;
       salasBtn.addEventListener('click', ()=>{
         if(window.setcaRooms && typeof window.setcaRooms.open==='function'){
           window.setcaRooms.open();
         }
       });
+    }
 
-      // Boton OFF: muestra resumen de sesion y cierra
-      let offBtn = document.getElementById('offBtn');
-      if(!offBtn){
-        offBtn = document.createElement('button');
-        offBtn.id = 'offBtn';
-        offBtn.textContent = '⏻ OFF';
-        offBtn.title = 'Salir de SETCA';
-        offBtn.style.marginLeft = '6px';
-        offBtn.style.borderColor = '#b33';
-        offBtn.style.color = '#fff';
-        offBtn.style.background = '#3a1111';
-        hdr.appendChild(offBtn);
-      }
+    // --- OFF ---
+    let offBtn = document.getElementById('offBtn');
+    if(!offBtn){
+      offBtn = document.createElement('button');
+      offBtn.id = 'offBtn';
+      offBtn.textContent = '⏻ OFF';
+      offBtn.title = 'Salir de SETCA';
+      offBtn.style.marginLeft = '6px';
+      offBtn.style.borderColor = '#b33';
+      offBtn.style.color = '#fff';
+      offBtn.style.background = '#3a1111';
+      hdr.appendChild(offBtn);
+    }
+    if(!offBtn.__setcaWired){
+      offBtn.__setcaWired = true;
       offBtn.addEventListener('click', ()=>{
         if(typeof window.setcaOff === 'function'){
           window.setcaOff();
@@ -3592,16 +4058,42 @@ $$('#pFormations button[data-form]').forEach(btn=>{
         }
       });
     }
-    const toHide = ['#pCmd','#pPlanes','#pNav','#pFormations','#pDraw'];
-    alumnoBtn.addEventListener('click', ()=>{
-      st.modoAlumno = !st.modoAlumno;
-      toHide.forEach(sel=>{ const el = document.querySelector(sel); if(el){ el.style.display = st.modoAlumno ? 'none' : ''; } });
-      alumnoBtn.classList.toggle('hi', !!st.modoAlumno);
-      (window.repaintPlanesList||function(){})();
-      (window.repaintNav||function(){})();
-      (window.repaintPairs||function(){})();
-      (window.repaintAlt||function(){})();
-    });
+
+    // Toggle Alumno (oculta paneles laterales)
+    const toHide = ['#pCmd','#pPlanes','#pNav','#pDraw'];
+    if(!alumnoBtn.__setcaWired){
+      alumnoBtn.__setcaWired = true;
+      alumnoBtn.addEventListener('click', ()=>{
+        // Si está en modo observador, primero salir
+        if(st.modoObservador){
+          st.modoObservador = false;
+          document.body.classList.remove('observer-mode');
+          observerBtn.classList.remove('hi');
+          try{ window.dispatchEvent(new Event('resize')); }catch(_){}
+        }
+        st.modoAlumno = !st.modoAlumno;
+        toHide.forEach(sel=>{ const el = document.querySelector(sel); if(el){ el.style.display = st.modoAlumno ? 'none' : ''; } });
+        alumnoBtn.classList.toggle('hi', !!st.modoAlumno);
+        (window.repaintPlanesList||function(){})();
+        (window.repaintNav||function(){})();
+        (window.repaintPairs||function(){})();
+        (window.repaintAlt||function(){})();
+      });
+    }
+
+    // Toggle Observador (solo radar a pantalla completa)
+    if(!observerBtn.__setcaWired){
+      observerBtn.__setcaWired = true;
+      observerBtn.addEventListener('click', ()=>{
+        st.modoObservador = !st.modoObservador;
+        document.body.classList.toggle('observer-mode', !!st.modoObservador);
+        observerBtn.classList.toggle('hi', !!st.modoObservador);
+
+        // Al entrar/salir, aseguramos que el canvas se redimensione al nuevo tamaño
+        setTimeout(()=>{ try{ window.dispatchEvent(new Event('resize')); }catch(_){ } }, 60);
+      });
+    }
+
   }catch(e){ console.warn('Alumno button patch:', e); }
 
   // Names -> pairs
@@ -4449,7 +4941,7 @@ function ensureDrawingName(d){
         repaintNav && repaintNav();
         repaintAlt && repaintAlt();
         repaintPairs && repaintPairs();
-        alert('Formaciones cargadas correctamente.');
+        alert('Escenario cargado correctamente.');
       }catch(err){
         alert('Error al cargar el archivo: '+err.message);
       }
@@ -4934,6 +5426,7 @@ document.querySelectorAll('#pCmdBody .btn').forEach(btn=>{
   }
 
   cvs.addEventListener('mousedown', e=>{
+    if(window.st && window.st.modoObservador) return;
     if(e.button !== 0 || !e.ctrlKey) return;
 
     if(window.__applyLocalTagOffsets) window.__applyLocalTagOffsets();
@@ -5003,6 +5496,7 @@ document.querySelectorAll('#pCmdBody .btn').forEach(btn=>{
   }
 
   cvs.addEventListener('mousedown', e=>{
+    if(window.st && window.st.modoObservador) return;
     if(e.button!==0 || !(e.key==='z' || e.key==='Z' || e.getModifierState && e.getModifierState('Z'))) return;
     const r=cvs.getBoundingClientRect();
     const mx=e.clientX-r.left, my=e.clientY-r.top;
@@ -5074,6 +5568,7 @@ document.querySelectorAll('#pCmdBody .btn').forEach(btn=>{
   }
 
   function onPointerDown(e){
+    if(window.st && window.st.modoObservador) return;
     if(e.button !== 0) return;
     if(!window.__zKeyDown) return;
 
@@ -5097,6 +5592,7 @@ document.querySelectorAll('#pCmdBody .btn').forEach(btn=>{
   }
 
   function onPointerMove(e){
+    if(window.st && window.st.modoObservador){ dragging=null; lastClient=null; return; }
     if(!dragging) return;
     if(!(e.buttons & 1)) return; // only while left pressed
 
@@ -5112,6 +5608,7 @@ document.querySelectorAll('#pCmdBody .btn').forEach(btn=>{
   }
 
   function onPointerUp(e){
+    if(window.st && window.st.modoObservador){ dragging=null; lastClient=null; return; }
     if(!dragging) return;
     dragging = null;
     lastClient = null;
@@ -5176,6 +5673,7 @@ document.querySelectorAll('#pCmdBody .btn').forEach(btn=>{
   }
 
   cvs.addEventListener('mousedown',e=>{
+    if(window.st && window.st.modoObservador) return;
     if(e.button!==0 || !zDown) return;
 
     const r=cvs.getBoundingClientRect();
