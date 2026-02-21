@@ -1,4 +1,4 @@
-ESTE SIMULADOR SE ENCUENTRA EN FASE DE PRUEBA - PUEDEN OCURRIR ERRORES DURANTE EL FUNCIONAMIENTO 2.5.1
+ESTE SIMULADOR SE ENCUENTRA EN FASE DE PRUEBA - PUEDEN OCURRIR ERRORES DURANTE EL FUNCIONAMIENTO 2.51.2
 <!DOCTYPE html>
 <html lang="es">
 <head>
@@ -53,62 +53,188 @@ document.getElementById('cancelDelete').onclick = ()=>{
   const stateRef = ref(db, `rooms/${ROOM_ID}/state`);
   let currentUID = null;
 
+  // --- Auth + presencia (igual que antes) ---
   signInAnonymously(auth).catch(console.error);
-  onAuthStateChanged(auth, (user) => {
-    if (!user) return;
-    currentUID = user.uid;
-    const presRef = ref(db, `rooms/${ROOM_ID}/presence/${currentUID}`);
-    set(presRef, true);
-    onDisconnect(presRef).remove();
-  });
 
-  async function pushStateToCloud(local) {
-    if (!local) return;
+  // --- Mejoras de fluidez (sin cambiar funcionalidades) ---
+  // 1) Coalescer de escrituras: agrupa múltiples push() en una sola escritura (reduce "tirones" y carga).
+  // 2) Coalescer de repaints: aplica remotos y repinta como máximo 1 vez por frame.
+  // 3) Evita sobrescribir inputs mientras se edita en el panel de navegación (aplica remoto al terminar).
 
-    // ⚠️ LOCAL ONLY (no sync): Data Block offsets (tagDx/tagDy), unidades, predicción
-    // Enviamos a la nube el estado compartido, pero sin esas preferencias locales.
-    const planesClean = Array.isArray(local.planes) ? local.planes.map(p=>{
-      if(!p || typeof p !== 'object') return p;
-      const q = {...p};
-      delete q.tagDx;
-      delete q.tagDy;
-      return q;
-    }) : local.planes;
+  let __pushInFlight = false;
+  let __pushQueued = false;
 
-    const payload = {
-      planes: planesClean,
-      roles: local.roles,
-      drawings: local.drawings,
-      lastWriteBy: currentUID,
-      missiles: local.missiles,
-      lastUpdate: serverTimestamp()
-    };
-    await set(stateRef, payload);
+  let __pendingRemote = null;
+  let __remoteRaf = 0;
+  let __repaintRaf = 0;
+  let __pendingRemoteTicker = 0;
+  let __lastRemoteUpdate = null;
+
+  function __isEditingNavField(){
+    const t = document.activeElement;
+    if(!t || t.tagName !== 'INPUT') return false;
+    const id = (t.id || '');
+    return /^((nm|hdg|spd|alt|tr)-)/.test(id);
   }
 
-  onValue(stateRef, (snap) => {
-    const v = snap.val();
-    if (!v || v.lastWriteBy === currentUID) return;
-    try {
-      if (Array.isArray(v.planes)) st.planes = v.planes;
-      else if (v.planes && typeof v.planes === "object") st.planes = Object.values(v.planes);
-      if (v.roles) st.roles = v.roles; 
-      if (v.drawings) st.drawings = v.drawings;
-      if (v.missiles) st.missiles = v.missiles;
+  function __queueRepaint(){
+    if(__repaintRaf) return;
+    __repaintRaf = requestAnimationFrame(()=>{
+      __repaintRaf = 0;
+      try{
+        repaintPlanesList && repaintPlanesList();
+        repaintNav && repaintNav();
+        repaintAlt && repaintAlt();
+        repaintPairs && repaintPairs();
+        repaintStudent && repaintStudent();
+      }catch(_){}
+    });
+  }
+
+  function __applyRemoteState(v){
+    if(!v) return;
+    const st0 = window.st;
+    if(!st0){
+      __pendingRemote = v;
+      __ensurePendingRemote();
+      return;
+    }
+    try{
+      if (Array.isArray(v.planes)) st0.planes = v.planes;
+      else if (v.planes && typeof v.planes === "object") st0.planes = Object.values(v.planes);
+      if (v.roles) st0.roles = v.roles;
+      if (v.drawings) st0.drawings = v.drawings;
+      if (v.missiles) st0.missiles = v.missiles;
 
       // Reaplicar offsets locales de Data Block (no se sincronizan)
       if (window.__applyLocalTagOffsets) window.__applyLocalTagOffsets();
 
-      repaintPlanesList && repaintPlanesList();
-      repaintNav && repaintNav();
-      repaintAlt && repaintAlt();
-      repaintPairs && repaintPairs();
-      repaintStudent && repaintStudent();
+      __queueRepaint();
     } catch(e){ console.warn("Apply remote state error:", e); }
+  }
+
+  function __ensurePendingRemote(){
+    if(__pendingRemoteTicker) return;
+    __pendingRemoteTicker = setInterval(()=>{
+      if(!__pendingRemote){
+        clearInterval(__pendingRemoteTicker);
+        __pendingRemoteTicker = 0;
+        return;
+      }
+      if(window.st && !__isEditingNavField()){
+        const p = __pendingRemote;
+        __pendingRemote = null;
+        clearInterval(__pendingRemoteTicker);
+        __pendingRemoteTicker = 0;
+        __applyRemoteState(p);
+      }
+    }, 80);
+  }
+
+  function __scheduleRemoteApply(v){
+    __pendingRemote = v;
+    __ensurePendingRemote();
+    if(__isEditingNavField()) return;
+    if(__remoteRaf) return;
+    __remoteRaf = requestAnimationFrame(()=>{
+      __remoteRaf = 0;
+      if(__isEditingNavField()) return; // seguir postergando mientras se edita
+      const p = __pendingRemote;
+      __pendingRemote = null;
+      __applyRemoteState(p);
+    });
+  }
+
+  // Al terminar edición (Enter o salir del input), aplicar el último remoto pendiente
+  addEventListener('keydown', (e)=>{
+    if(e.key==='Enter' && __pendingRemote) __scheduleRemoteApply(__pendingRemote);
+  }, true);
+  addEventListener('focusout', ()=>{
+    if(__pendingRemote) __scheduleRemoteApply(__pendingRemote);
+  }, true);
+
+  async function pushStateToCloud(local) {
+    if (!local) return;
+
+    // Si aún no hay UID (auth), marcar para enviar cuando esté listo (evita "perder" el primer cambio)
+    if(!currentUID){
+      __pushQueued = true;
+      return;
+    }
+
+    // Si hay una escritura en curso, coalescer
+    if(__pushInFlight){
+      __pushQueued = true;
+      return;
+    }
+
+    __pushInFlight = true;
+    try{
+      // ⚠️ LOCAL ONLY (no sync): Data Block offsets (tagDx/tagDy), unidades, predicción
+      // Enviamos a la nube el estado compartido, pero sin esas preferencias locales.
+      const planesClean = Array.isArray(local.planes) ? local.planes.map(p=>{
+        if(!p || typeof p !== 'object') return p;
+        // Evitar clonar si no tiene offsets locales
+        if(p.tagDx === undefined && p.tagDy === undefined) return p;
+        const { tagDx, tagDy, ...q } = p;
+        return q;
+      }) : local.planes;
+
+      const payload = {
+        planes: planesClean,
+        roles: local.roles,
+        drawings: local.drawings,
+        lastWriteBy: currentUID,
+        missiles: local.missiles,
+        lastUpdate: serverTimestamp()
+      };
+
+      await set(stateRef, payload);
+    }catch(e){
+      console.warn("pushStateToCloud error:", e);
+    }finally{
+      __pushInFlight = false;
+
+      // Si durante la escritura hubo más cambios, enviar una vez más (agrupado)
+      if(__pushQueued){
+        __pushQueued = false;
+        setTimeout(()=>{
+          try{ pushStateToCloud(window.st || local); }catch(_){}
+        }, 80);
+      }
+    }
+  }
+
+  onAuthStateChanged(auth, (user) => {
+    if (!user) return;
+    currentUID = user.uid;
+
+    const presRef = ref(db, `rooms/${ROOM_ID}/presence/${currentUID}`);
+    set(presRef, true);
+    onDisconnect(presRef).remove();
+
+    // Si hubo cambios antes de que auth esté listo, empujarlos ahora
+    if(__pushQueued){
+      __pushQueued = false;
+      try{ pushStateToCloud(window.st); }catch(_){}
+    }
+  });
+
+  onValue(stateRef, (snap) => {
+    const v = snap.val();
+    if (!v || v.lastWriteBy === currentUID) return;
+
+    // Deduplicar por timestamp para evitar repaints repetidos
+    const lu = v.lastUpdate;
+    const luNum = (typeof lu === 'number') ? lu : (typeof lu === 'string' ? Number(lu) : null);
+    if(luNum && __lastRemoteUpdate === luNum) return;
+    if(luNum) __lastRemoteUpdate = luNum;
+
+    __scheduleRemoteApply(v);
   });
 
   window._SETCA_SYNC = {
-    push: () => pushStateToCloud(st)
+    push: () => pushStateToCloud(window.st)
   };
 </script>
 
