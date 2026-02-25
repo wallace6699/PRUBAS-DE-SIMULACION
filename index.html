@@ -1,4 +1,4 @@
-ESTE SIMULADOR SE ENCUENTRA EN FASE DE PRUEBA - PUEDEN OCURRIR ERRORES DURANTE EL FUNCIONAMIENTO 2.5
+ESTE SIMULADOR SE ENCUENTRA EN FASE DE PRUEBA - PUEDEN OCURRIR ERRORES DURANTE EL FUNCIONAMIENTO 2.5.1
 <!DOCTYPE html>
 <html lang="es">
 <head>
@@ -65,13 +65,14 @@ document.getElementById('cancelDelete').onclick = ()=>{
   async function pushStateToCloud(local) {
     if (!local) return;
 
-    // ⚠️ LOCAL ONLY (no sync): Data Block offsets (tagDx/tagDy), unidades, predicción
+    // ⚠️ LOCAL ONLY (no sync): Data Block offsets (tagDx/tagDy/dataBlock), unidades, predicción
     // Enviamos a la nube el estado compartido, pero sin esas preferencias locales.
     const planesClean = Array.isArray(local.planes) ? local.planes.map(p=>{
       if(!p || typeof p !== 'object') return p;
       const q = {...p};
       delete q.tagDx;
       delete q.tagDy;
+      delete q.dataBlock; // drag Z+click solo local por equipo/usuario
       return q;
     }) : local.planes;
 
@@ -90,8 +91,17 @@ document.getElementById('cancelDelete').onclick = ()=>{
     const v = snap.val();
     if (!v || v.lastWriteBy === currentUID) return;
     try {
-      if (Array.isArray(v.planes)) st.planes = v.planes;
-      else if (v.planes && typeof v.planes === "object") st.planes = Object.values(v.planes);
+      const stripRemoteLocalPlane = (p)=>{
+        if(!p || typeof p !== "object") return p;
+        const q = {...p};
+        // Ignorar SIEMPRE offsets/estado de Data Block que puedan venir de otra máquina
+        delete q.tagDx;
+        delete q.tagDy;
+        delete q.dataBlock;
+        return q;
+      };
+      if (Array.isArray(v.planes)) st.planes = v.planes.map(stripRemoteLocalPlane);
+      else if (v.planes && typeof v.planes === "object") st.planes = Object.values(v.planes).map(stripRemoteLocalPlane);
       if (v.roles) st.roles = v.roles; 
       if (v.drawings) st.drawings = v.drawings;
       if (v.missiles) st.missiles = v.missiles;
@@ -6190,6 +6200,102 @@ document.querySelectorAll('#pCmdBody .btn').forEach(btn=>{
   }
   setTimeout(bind, 600);
   setTimeout(bind, 1800);
+})();
+</script>
+
+
+<script>
+/* === PATCH FINAL: Blindaje LOCAL de Data Block (Z+click drag no sincroniza) === */
+(function(){
+  if(window.__LOCAL_DATABLOCK_SYNC_SHIELD__) return;
+  window.__LOCAL_DATABLOCK_SYNC_SHIELD__ = true;
+
+  let localTagDragActive = false;
+  let localTagDragUntil = 0;
+  const now = ()=>Date.now();
+
+  function markLocalDrag(ms=450){
+    localTagDragActive = true;
+    localTagDragUntil = now() + ms;
+  }
+  function endLocalDrag(ms=900){
+    localTagDragActive = false;
+    localTagDragUntil = now() + ms;
+  }
+  function inLocalDragWindow(){
+    return localTagDragActive || now() < localTagDragUntil;
+  }
+
+  // Captura Z + click/drag a nivel global (sin romper otras interacciones)
+  let zDown = false;
+  addEventListener('keydown', e=>{ if(e.key==='z' || e.key==='Z') zDown = true; }, true);
+  addEventListener('keyup',   e=>{ if(e.key==='z' || e.key==='Z') zDown = false; }, true);
+  addEventListener('blur', ()=>{ zDown = false; endLocalDrag(300); }, true);
+
+  const cvs = document.getElementById('radar');
+  if(cvs){
+    window.addEventListener('mousedown', (e)=>{
+      if(e.button!==0 || !zDown) return;
+      const r = cvs.getBoundingClientRect();
+      if(e.clientX < r.left || e.clientX > r.right || e.clientY < r.top || e.clientY > r.bottom) return;
+      markLocalDrag(700);
+    }, true);
+
+    window.addEventListener('mousemove', ()=>{
+      if(inLocalDragWindow()) markLocalDrag(700);
+    }, true);
+
+    window.addEventListener('mouseup', ()=>{
+      if(inLocalDragWindow()){
+        // Guardar offsets locales actuales del Data Block si existen
+        try{
+          if(window.st && Array.isArray(window.st.planes) && typeof window.__setLocalTagOffset === 'function'){
+            for(const p of st.planes){
+              if(!p || !p.id) continue;
+              if(typeof p.tagDx === 'number' || typeof p.tagDy === 'number'){
+                window.__setLocalTagOffset(p.id, (p.tagDx ?? 12), (p.tagDy ?? -6));
+              }
+              // Estado efímero/local usado por algunos parches de drag
+              if(p.dataBlock) delete p.dataBlock;
+            }
+          }
+        }catch(_){}
+        endLocalDrag(1200);
+      }
+    }, true);
+  }
+
+  // Blindar scheduleSync durante el arrastre local del Data Block
+  if(typeof window.scheduleSync === 'function' && !window.__scheduleSyncLocalDragWrapped){
+    const _origScheduleSync = window.scheduleSync;
+    window.scheduleSync = function(){
+      if(inLocalDragWindow()) return;
+      return _origScheduleSync.apply(this, arguments);
+    };
+    window.__scheduleSyncLocalDragWrapped = true;
+  }
+
+  // Blindar push directo (defensivo)
+  if(window._SETCA_SYNC && typeof window._SETCA_SYNC.push === 'function' && !window.__setcaPushLocalDragWrapped){
+    const _origPush = window._SETCA_SYNC.push;
+    window._SETCA_SYNC.push = function(){
+      if(inLocalDragWindow()) return;
+      return _origPush.apply(this, arguments);
+    };
+    window.__setcaPushLocalDragWrapped = true;
+  }
+
+  // Reaplicar offsets locales cuando otros scripts reemplacen scheduleSync más tarde
+  setTimeout(()=>{
+    if(typeof window.scheduleSync === 'function' && !window.__scheduleSyncLocalDragWrapped){
+      const _origScheduleSync = window.scheduleSync;
+      window.scheduleSync = function(){
+        if(inLocalDragWindow()) return;
+        return _origScheduleSync.apply(this, arguments);
+      };
+      window.__scheduleSyncLocalDragWrapped = true;
+    }
+  }, 2000);
 })();
 </script>
 
