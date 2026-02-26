@@ -7160,6 +7160,15 @@ document.querySelectorAll('#pCmdBody .btn').forEach(btn=>{
     let wp = arr[idx];
     if(!wp){ p.routeEnabled = false; return; }
 
+    // Estado por-waypoint para confirmar paso real (sin cambio anticipado)
+    let rs = p.__routeFollowState;
+    if(!rs || typeof rs !== 'object') rs = (p.__routeFollowState = {});
+    if(rs.idx !== idx){
+      rs.idx = idx;
+      rs.prevDist = NaN;
+      rs.near = false;
+    }
+
     const manualHold = Number.isFinite(p.routeManualUntil) && (nowMs() < p.routeManualUntil);
 
     // Solo guiamos si no hay maniobra manual reciente
@@ -7174,14 +7183,34 @@ document.querySelectorAll('#pCmdBody .btn').forEach(btn=>{
     const distNM = Math.hypot(dx, dy);
 
     const spdKmh = Number.isFinite(p.spd) ? p.spd : (Number.isFinite(p.tgtSpd) ? p.tgtSpd : 500);
-    const nmps = (spdKmh / NM2KM_VAL) / 3600;
-    const reachNM = clamp(Math.max(1.2, nmps * 25), 1.2, 4.5);
+    const nmps = Math.max(0, (spdKmh / NM2KM_VAL) / 3600);
 
-    if(distNM <= reachNM){
+    // Entra a zona cercana y recién avanza cuando ya pasó (distancia vuelve a crecer)
+    const nearCaptureNM = clamp(Math.max(0.12, nmps * 4.0), 0.12, 0.70);
+    // Respaldo por si cae prácticamente encima del punto
+    const hitToleranceNM = clamp(Math.max(0.01, nmps * 0.35), 0.01, 0.08);
+    const awayEps = Math.max(0.0015, nmps * 0.10);
+
+    if(distNM <= nearCaptureNM) rs.near = true;
+
+    const prevDist = Number.isFinite(rs.prevDist) ? rs.prevDist : NaN;
+    const passedAfterNear = !!rs.near && Number.isFinite(prevDist) && (distNM > prevDist + awayEps);
+    const reachedNow = (distNM <= hitToleranceNM) || passedAfterNear;
+
+    rs.prevDist = distNM;
+
+    if(reachedNow){
       if(idx < arr.length - 1){
         p.routeIdx = idx + 1;
         p.routeCompleted = false;
         p.routeLastReached = idx;
+
+        if(p.__routeFollowState){
+          p.__routeFollowState.idx = -1;
+          p.__routeFollowState.prevDist = NaN;
+          p.__routeFollowState.near = false;
+        }
+
         // al avanzar de waypoint, retomamos guiado normal salvo que el usuario siga tocando controles
         if(Number.isFinite(p.routeManualUntil) && p.routeManualUntil < nowMs() + 500){
           p.routeManualUntil = 0;
