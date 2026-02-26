@@ -2398,6 +2398,56 @@ function pickShapePrecisePx(px, py, tolPx=7){
   return null;
 }
 
+function __hitDrawingPerimeterPx(d, px, py, tolPx){
+  if(!d) return false;
+  const s = toScreen(d.x, d.y);
+
+  if(d.type==='circle' && d.r!==undefined){
+    const rpx = d.r * zoom * PX_PER_NM;
+    const dist = Math.hypot(px-s.x, py-s.y);
+    return Math.abs(dist - rpx) <= tolPx;
+  }
+
+  if(d.type==='square' && d.a!==undefined){
+    const half = (d.a * zoom * PX_PER_NM)/2;
+    const L = s.x - half, R = s.x + half, T = s.y - half, B = s.y + half;
+    if(px < L - tolPx || px > R + tolPx || py < T - tolPx || py > B + tolPx) return false;
+    const d1 = __distPointToSegPx(px,py,L,T,R,T);
+    const d2 = __distPointToSegPx(px,py,R,T,R,B);
+    const d3 = __distPointToSegPx(px,py,R,B,L,B);
+    const d4 = __distPointToSegPx(px,py,L,B,L,T);
+    return Math.min(d1,d2,d3,d4) <= tolPx;
+  }
+
+  if(d.type==='polygon' && Array.isArray(d.pts) && d.pts.length>=2){
+    let best = 1e9;
+    const closed = d.pts.length >= 3;
+    const n = d.pts.length;
+    for(let i=0;i<n-1;i++){
+      const A = toScreen(d.pts[i].x,d.pts[i].y), B = toScreen(d.pts[i+1].x,d.pts[i+1].y);
+      const dd = __distPointToSegPx(px,py,A.x,A.y,B.x,B.y);
+      if(dd < best) best = dd;
+    }
+    if(closed){
+      const A = toScreen(d.pts[n-1].x,d.pts[n-1].y), B = toScreen(d.pts[0].x,d.pts[0].y);
+      const dd = __distPointToSegPx(px,py,A.x,A.y,B.x,B.y);
+      if(dd < best) best = dd;
+    }
+    return best <= tolPx;
+  }
+
+  // Para otros gráficos mantenemos comportamiento original.
+  return __hitDrawingPx(d, px, py, tolPx);
+}
+
+function pickShapePerimeterPrecisePx(px, py, tolPx=7){
+  for(let i = (st.drawings||[]).length - 1; i >= 0; i--){
+    const d = st.drawings[i];
+    if(d && __hitDrawingPerimeterPx(d, px, py, tolPx)) return d.id;
+  }
+  return null;
+}
+
 function __findDrawingById(id){
   return (st.drawings||[]).find(d=>d.id===id) || null;
 }
@@ -2766,7 +2816,10 @@ function showWPal(clientX, clientY){
     if(tool && tool.tool && tool.tool !== 'none') return;
     const r = cvs.getBoundingClientRect();
     const px = e.clientX - r.left, py = e.clientY - r.top;
-    const hit = pickShapePrecisePx(px, py, SEL_TOL_PX);
+    // Precisión: para círculo/cuadrado/polígono solo cuenta el perímetro.
+    const hit = (typeof pickShapePerimeterPrecisePx==='function')
+      ? pickShapePerimeterPrecisePx(px, py, SEL_TOL_PX)
+      : pickShapePrecisePx(px, py, SEL_TOL_PX);
     if(!hit){ hidePal(); hideWPal(); hideCtx(); return; }
     e.preventDefault();
     if(e.stopImmediatePropagation) e.stopImmediatePropagation(); else e.stopPropagation();
@@ -6296,6 +6349,1123 @@ document.querySelectorAll('#pCmdBody .btn').forEach(btn=>{
       window.__scheduleSyncLocalDragWrapped = true;
     }
   }, 2000);
+})();
+</script>
+
+
+<script>
+/* === PATCH: V+CLICK Flight Planner (waypoints/orbit points) === */
+(function(){
+  if(window.__SETCA_VCLICK_WAYPOINTS_PATCH__) return;
+  window.__SETCA_VCLICK_WAYPOINTS_PATCH__ = true;
+
+  const cvs = document.getElementById('radar');
+  if(!cvs) return;
+
+  const NM2KM_FALLBACK = 1.852;
+  const FT2M_FALLBACK = 0.3048;
+  const KTS2KMH_FALLBACK = 1.852;
+  const NM2KM_VAL = (typeof NM2KM !== 'undefined') ? NM2KM : NM2KM_FALLBACK;
+  const FT2M_VAL = (typeof FT2M !== 'undefined') ? FT2M : FT2M_FALLBACK;
+  const KTS2KMH_VAL = (typeof KTS2KMH !== 'undefined') ? KTS2KMH : KTS2KMH_FALLBACK;
+
+  const planner = {
+    editing: false,
+    planeId: null,
+    points: [],
+    startedAt: 0,
+    lastHintAt: 0,
+    vDown: false,
+    awaitFinalizeClick: false,     // al soltar V, el próximo click izquierdo finaliza
+    dragSuppressUntil: 0,
+    suppressCtxMenuUntil: 0,
+    pop: null,
+    popHit: null,
+  };
+
+  function nowMs(){ return Date.now(); }
+  function isObserver(){ return !!(window.st && st.modoObservador); }
+  function getPlaneById(id){ return (window.st && Array.isArray(st.planes)) ? st.planes.find(p=>p && p.id===id) : null; }
+  function getCtx(){ try{return cvs.getContext('2d');}catch(_){return null;} }
+  function consume(e){
+    if(!e) return;
+    if(e.preventDefault) e.preventDefault();
+    if(e.stopImmediatePropagation) e.stopImmediatePropagation();
+    else if(e.stopPropagation) e.stopPropagation();
+  }
+  function parseNumLoose(v){
+    if(v===null || v===undefined) return null;
+    const s = String(v).trim().replace(',', '.');
+    if(!s) return null;
+    const n = parseFloat(s);
+    return Number.isFinite(n) ? n : null;
+  }
+  function clamp(n, a, b){ return Math.max(a, Math.min(b, n)); }
+  function planePickThresholdNM(){
+    let z = 1;
+    try{ if(typeof zoom !== 'undefined') z = Math.max(0.02, zoom || 1); }catch(_){ z = 1; }
+    return 15 / z;
+  }
+  function findPlaneAtClient(clientX, clientY){
+    if(!window.st || !Array.isArray(st.planes)) return null;
+    const r = cvs.getBoundingClientRect();
+    if(clientX < r.left || clientX > r.right || clientY < r.top || clientY > r.bottom) return null;
+    if(typeof toWorld !== 'function') return null;
+    const w = toWorld(clientX - r.left, clientY - r.top);
+    const th = planePickThresholdNM();
+    let best = null, bd = 1e9;
+    for(const p of st.planes){
+      if(!p) continue;
+      const d = Math.hypot((w.x||0) - (p.x||0), (w.y||0) - (p.y||0));
+      if(d < th && d < bd){ bd = d; best = p; }
+    }
+    return best;
+  }
+  function bearingDeg(from, to){
+    return (Math.atan2((to.x||0)-(from.x||0), -((to.y||0)-(from.y||0))) * 180 / Math.PI + 360) % 360;
+  }
+  function cloneWp(wp){
+    return {
+      id: wp && wp.id ? wp.id : ('WP-' + Math.random().toString(36).slice(2,8).toUpperCase()),
+      x: Number(wp && wp.x) || 0,
+      y: Number(wp && wp.y) || 0,
+      alt: (wp && Number.isFinite(wp.alt)) ? Number(wp.alt) : null,   // ft internal
+      spd: (wp && Number.isFinite(wp.spd)) ? Number(wp.spd) : null,   // km/h internal
+    };
+  }
+  function syncSharedState(){
+    try{
+      if(window._SETCA_SYNC && typeof window._SETCA_SYNC.push === 'function') window._SETCA_SYNC.push();
+      else if(typeof scheduleSync === 'function') scheduleSync();
+    }catch(_){ }
+  }
+  function repaintLocalPanels(){
+    try{ if(typeof repaintPlanesList==='function') repaintPlanesList(); }catch(_){ }
+    try{ if(typeof repaintNav==='function') repaintNav(); }catch(_){ }
+    try{ if(typeof repaintAlt==='function') repaintAlt(); }catch(_){ }
+    try{ if(typeof repaintStudent==='function') repaintStudent(); }catch(_){ }
+    try{ if(typeof repaintPairs==='function') repaintPairs(); }catch(_){ }
+  }
+  function startDraftForPlane(p){
+    if(!p || !p.id) return false;
+    planner.editing = true;
+    planner.planeId = p.id;
+    planner.points = [];
+    planner.startedAt = nowMs();
+    planner.awaitFinalizeClick = false;
+    planner.dragSuppressUntil = nowMs() + 300;
+    hideWaypointEditor();
+    try{ if(Array.isArray(st.sel)){ st.sel = [p.id]; } }catch(_){ }
+    try{ if(window.logEvent) logEvent(`PLAN DE VUELO: ${p.name||p.id} seleccionado (V+click). Mantén V y marca waypoints.`); }catch(_){ }
+    return true;
+  }
+  function addDraftPointFromClient(clientX, clientY){
+    if(!planner.editing || !planner.planeId) return false;
+    const p = getPlaneById(planner.planeId);
+    if(!p) { cancelDraft(); return false; }
+    if(typeof toWorld !== 'function') return false;
+    const r = cvs.getBoundingClientRect();
+    const w = toWorld(clientX - r.left, clientY - r.top); // coordenadas sin clamp (permite navegación fuera del mapa del Perú)
+    const wp = cloneWp({ x: w.x, y: w.y, alt: null, spd: null });
+    planner.points.push(wp);
+    planner.dragSuppressUntil = nowMs() + 160;
+    return true;
+  }
+  function finalizeDraft(){
+    if(!planner.editing || !planner.planeId) return false;
+    const p = getPlaneById(planner.planeId);
+    if(!p){ cancelDraft(); return false; }
+
+    const draftedRoute = (planner.points || []).map(cloneWp);
+    const hasPoints = !!(draftedRoute && draftedRoute.length);
+
+    // Si no se colocó ningún punto, NO alteramos el curso/ruta actual del avión.
+    if(hasPoints){
+      p.routePlan = draftedRoute;
+      p.routeIdx = 0;
+      p.routeEnabled = true;
+      p.routeLoop = false;
+      p.routeCompleted = false;
+      p.routeLastChange = nowMs();
+
+      const wp0 = p.routePlan[0];
+      if(wp0){
+        if(Number.isFinite(wp0.alt)) p.tgtAlt = wp0.alt;
+        if(Number.isFinite(wp0.spd)) p.tgtSpd = wp0.spd;
+        p.tgtHdg = bearingDeg(p, wp0);
+      }
+      try{ if(window.logEvent) logEvent(`PLAN DE VUELO: ${p.name||p.id} ruta cargada (${p.routePlan.length} puntos).`); }catch(_){ }
+    }else{
+      try{ if(window.logEvent) logEvent(`PLAN DE VUELO: ${p.name||p.id} sin puntos (sin cambios en su curso).`); }catch(_){ }
+    }
+
+    planner.editing = false;
+    planner.planeId = null;
+    planner.points = [];
+    planner.awaitFinalizeClick = false;
+    planner.dragSuppressUntil = nowMs() + 220;
+    hideWaypointEditor();
+    repaintLocalPanels();
+    if(hasPoints) syncSharedState();
+    return true;
+  }
+  function cancelDraft(){
+    planner.editing = false;
+    planner.planeId = null;
+    planner.points = [];
+    planner.awaitFinalizeClick = false;
+    planner.dragSuppressUntil = nowMs() + 150;
+    hideWaypointEditor();
+  }
+  function clearRouteFromPlane(p){
+    if(!p) return;
+    p.routePlan = [];
+    p.routeIdx = 0;
+    p.routeEnabled = false;
+    p.routeCompleted = false;
+    p.routeLastChange = nowMs();
+    syncSharedState();
+  }
+  function currentUnitLabels(){
+    const metric = !!(window.st && st.metric);
+    return { metric, altLabel: metric ? 'm' : 'ft', spdLabel: metric ? 'km/h' : 'kts' };
+  }
+  function toDisplayAlt(ft){ return !!(window.st && st.metric) ? (ft * FT2M_VAL) : ft; }
+  function fromDisplayAlt(v){ return !!(window.st && st.metric) ? (v / FT2M_VAL) : v; }
+  function toDisplaySpd(kmh){ return !!(window.st && st.metric) ? kmh : (kmh / KTS2KMH_VAL); }
+  function fromDisplaySpd(v){ return !!(window.st && st.metric) ? v : (v * KTS2KMH_VAL); }
+
+  function ensureWaypointEditor(){
+    if(planner.pop && planner.pop.isConnected) return planner.pop;
+    if(!document.getElementById('setcaWaypointEditorStyle')){
+      const stl = document.createElement('style');
+      stl.id = 'setcaWaypointEditorStyle';
+      stl.textContent = `
+        #setcaWaypointEditor{
+          position:fixed; z-index:10020; min-width:268px;
+          background:linear-gradient(180deg, rgba(10,14,20,.98), rgba(8,11,17,.96)); color:#ecf7ff;
+          border:1px solid rgba(120,200,255,0.40); border-radius:14px;
+          box-shadow:0 16px 40px rgba(0,0,0,.42), 0 0 0 1px rgba(255,255,255,.04) inset, 0 0 22px rgba(80,170,255,.12);
+          padding:10px; font:12px/1.28 system-ui,Segoe UI,Roboto,Arial,sans-serif;
+          backdrop-filter: blur(5px) saturate(1.05);
+        }
+        #setcaWaypointEditor .wpHdr{
+          display:flex; align-items:center; justify-content:space-between;
+          gap:8px; margin-bottom:10px; color:#dff2ff; font-weight:700; padding:2px 2px 8px; border-bottom:1px solid rgba(120,200,255,.18);
+        }
+        #setcaWaypointEditor .wpSub{ opacity:.80; font-weight:500; font-size:11px; letter-spacing:.02em; }
+        #setcaWaypointEditor .wpClose{
+          border:0; background:rgba(255,255,255,.06); color:#d7efff;
+          width:24px; height:24px; border-radius:8px; cursor:pointer; box-shadow:0 0 0 1px rgba(255,255,255,.02) inset;
+        }
+        #setcaWaypointEditor .wpClose:hover{ background:rgba(255,255,255,.16); }
+        #setcaWaypointEditor .wpRow{ display:grid; grid-template-columns:1fr 116px; gap:10px; align-items:center; margin:8px 0; }
+        #setcaWaypointEditor label{ opacity:.96; font-weight:600; letter-spacing:.02em; }
+        #setcaWaypointEditor input{
+          width:100%; box-sizing:border-box; padding:7px 9px;
+          border-radius:9px; border:1px solid rgba(140,220,255,.28);
+          background:rgba(255,255,255,.045); color:#f5fbff; outline:none; box-shadow:0 1px 0 rgba(255,255,255,.02) inset;
+        }
+        #setcaWaypointEditor input:focus{
+          border-color:rgba(140,220,255,.55);
+          box-shadow:0 0 0 2px rgba(140,220,255,.15), 0 0 12px rgba(90,170,255,.08);
+        }
+        #setcaWaypointEditor .wpHint{ margin-top:6px; font-size:11px; opacity:.76; padding:6px 8px; border-radius:8px; background:rgba(120,200,255,.05); border:1px solid rgba(120,200,255,.10); }
+        #setcaWaypointEditor .wpBtns{
+          display:flex; gap:8px; margin-top:12px; justify-content:space-between; align-items:center; flex-wrap:wrap;
+        }
+        #setcaWaypointEditor .wpBtn{
+          border:1px solid rgba(140,220,255,.22);
+          background:rgba(255,255,255,.05); color:#ecf8ff;
+          border-radius:9px; padding:7px 11px; cursor:pointer; transition:background .12s,border-color .12s,transform .08s;
+        }
+        #setcaWaypointEditor .wpBtn:hover{ background:rgba(255,255,255,.11); border-color:rgba(160,230,255,.30); }
+        #setcaWaypointEditor .wpBtn:active{ transform:translateY(1px); }
+        #setcaWaypointEditor .wpBtn.primary{
+          background:linear-gradient(180deg, rgba(95,190,255,.20), rgba(70,150,255,.10)); border-color:rgba(120,200,255,.40);
+        }
+        #setcaWaypointEditor .wpBtn.danger{
+          background:linear-gradient(180deg, rgba(255,90,90,.14), rgba(255,80,80,.06)); border-color:rgba(255,120,120,.30);
+          color:#ffdede;
+        }
+      `;
+      document.head.appendChild(stl);
+    }
+
+    const el = document.createElement('div');
+    el.id = 'setcaWaypointEditor';
+    el.style.display = 'none';
+    el.innerHTML = `
+      <div class="wpHdr">
+        <div>
+          <div id="wpEdTitle">Orbit point</div>
+          <div class="wpSub" id="wpEdSub"></div>
+        </div>
+        <button class="wpClose" id="wpEdClose" title="Cerrar">✕</button>
+      </div>
+      <div class="wpRow">
+        <label id="wpAltLbl">Altura</label>
+        <input id="wpAltInp" type="number" step="1" placeholder="Ej: 12000">
+      </div>
+      <div class="wpRow">
+        <label id="wpSpdLbl">Velocidad</label>
+        <input id="wpSpdInp" type="number" step="1" placeholder="Ej: 280">
+      </div>
+      <div class="wpHint">Orbit point: puedes definir <b>altura</b> y <b>velocidad</b>. Si presionas <b>Borrar</b>, elimina este punto y avanza al siguiente (si existe).</div>
+      <div class="wpBtns">
+        <button type="button" class="wpBtn danger" id="wpDelBtn">🗑 Borrar</button>
+        <span style="flex:1 1 auto"></span>
+        <button type="button" class="wpBtn" id="wpCancelBtn">Cerrar</button>
+        <button type="button" class="wpBtn primary" id="wpSaveBtn">Guardar</button>
+      </div>
+    `;
+    document.body.appendChild(el);
+    planner.pop = el;
+
+    const stopInside = (ev)=>{ ev.stopPropagation(); };
+    ['mousedown','mouseup','click','dblclick','contextmenu'].forEach(t=>el.addEventListener(t, stopInside, true));
+
+    el.querySelector('#wpEdClose').addEventListener('click', ()=>hideWaypointEditor());
+    el.querySelector('#wpCancelBtn').addEventListener('click', ()=>hideWaypointEditor());
+    el.querySelector('#wpSaveBtn').addEventListener('click', ()=>saveWaypointEditor());
+    // HOTFIX+: disparar borrado real del punto con pointerdown/click (una sola vez), evitando interferencias
+    const __wpDel = el.querySelector('#wpDelBtn');
+    const __triggerWpDelete = (ev)=>{
+      consume(ev);
+      const t = nowMs();
+      if(Number.isFinite(planner._wpDeleteFireTs) && (t - planner._wpDeleteFireTs) < 120) return false;
+      planner._wpDeleteFireTs = t;
+      planner._wpDeleting = true;
+      try{ deleteWaypointFromEditor(); } finally {
+        setTimeout(()=>{ planner._wpDeleting = false; }, 0);
+      }
+      return false;
+    };
+    __wpDel.addEventListener('pointerdown', __triggerWpDelete, true);
+    __wpDel.addEventListener('mousedown', __triggerWpDelete, true);
+    __wpDel.addEventListener('click', __triggerWpDelete, true);
+    el.addEventListener('keydown', (ev)=>{
+      if(ev.key === 'Escape'){ consume(ev); hideWaypointEditor(); }
+      if(ev.key === 'Enter'){ consume(ev); saveWaypointEditor(); }
+    }, true);
+
+    return el;
+  }
+  function hideWaypointEditor(){
+    const el = planner.pop || document.getElementById('setcaWaypointEditor');
+    if(!el) return;
+    el.style.display = 'none';
+    planner.popHit = null;
+  }
+  function placeEditorAt(clientX, clientY){
+    const el = ensureWaypointEditor();
+    const pad = 10;
+    const vw = window.innerWidth || 1280;
+    const vh = window.innerHeight || 720;
+    el.style.display = 'block';
+    el.style.left = '-9999px';
+    el.style.top = '-9999px';
+    const rect = el.getBoundingClientRect();
+    let x = clientX + 12;
+    let y = clientY + 8;
+    if(x + rect.width + pad > vw) x = Math.max(pad, clientX - rect.width - 12);
+    if(y + rect.height + pad > vh) y = Math.max(pad, vh - rect.height - pad);
+    el.style.left = x + 'px';
+    el.style.top = y + 'px';
+  }
+  function openWaypointEditor(hit, clientX, clientY){
+    if(!hit || !hit.point) return false;
+    const p = hit.plane || getPlaneById(hit.planeId);
+    if(!p) return false;
+
+    const el = ensureWaypointEditor();
+    const u = currentUnitLabels();
+    const wp = hit.point;
+    planner.popHit = hit;
+    try{
+      el.dataset.wpDraft = hit.draft ? '1' : '0';
+      el.dataset.wpPlaneId = String(hit.planeId || ((p&&p.id)||''));
+      el.dataset.wpIndex = String(Number.isFinite(hit.index) ? hit.index : -1);
+    }catch(_){}
+
+    const title = `Orbit point ${Number.isFinite(hit.index) ? (hit.index+1) : ''}`.trim();
+    el.querySelector('#wpEdTitle').textContent = title;
+    el.querySelector('#wpEdSub').textContent = `${p.name||p.id}${hit.draft ? ' · borrador local' : ' · ruta activa'}`;
+    el.querySelector('#wpAltLbl').textContent = `Altura (${u.altLabel})`;
+    el.querySelector('#wpSpdLbl').textContent = `Velocidad (${u.spdLabel})`;
+    el.querySelector('#wpAltInp').value = Number.isFinite(wp.alt) ? String(Math.round(toDisplayAlt(wp.alt))) : '';
+    el.querySelector('#wpSpdInp').value = Number.isFinite(wp.spd) ? String(Math.round(toDisplaySpd(wp.spd))) : '';
+    placeEditorAt(clientX, clientY);
+    try{ el.querySelector('#wpAltInp').focus(); el.querySelector('#wpAltInp').select(); }catch(_){}
+    return true;
+  }
+  function deleteWaypoint(hit){
+    if(!hit) return false;
+    const targetId = (hit.point && hit.point.id) ? String(hit.point.id) : '';
+    const targetRef = hit.point || null;
+    const hintedIndex = Number.isFinite(hit.index) ? (hit.index|0) : -1;
+
+    function resolveIndex(arr){
+      if(!Array.isArray(arr) || !arr.length) return -1;
+      // 1) índice sugerido, validando identidad
+      if(hintedIndex >= 0 && hintedIndex < arr.length){
+        const c = arr[hintedIndex];
+        if(c && ((targetId && c.id === targetId) || (targetRef && c === targetRef))) return hintedIndex;
+      }
+      // 2) búsqueda por id estable (preferida)
+      if(targetId){
+        const byId = arr.findIndex(w => w && String(w.id||'') === targetId);
+        if(byId >= 0) return byId;
+      }
+      // 3) búsqueda por referencia exacta
+      if(targetRef){
+        const byRef = arr.indexOf(targetRef);
+        if(byRef >= 0) return byRef;
+      }
+      // 4) fallback por coordenadas+parámetros (tolerante)
+      if(targetRef){
+        const tx = Number(targetRef.x), ty = Number(targetRef.y);
+        const ta = Number.isFinite(targetRef.alt) ? Number(targetRef.alt) : null;
+        const ts = Number.isFinite(targetRef.spd) ? Number(targetRef.spd) : null;
+        const eps = 1e-6;
+        const byShape = arr.findIndex(w => w && Math.abs((Number(w.x)||0)-tx) <= eps && Math.abs((Number(w.y)||0)-ty) <= eps &&
+          ((Number.isFinite(w.alt)?Number(w.alt):null)===ta) && ((Number.isFinite(w.spd)?Number(w.spd):null)===ts));
+        if(byShape >= 0) return byShape;
+      }
+      // 5) último recurso: usa el índice si aún es válido
+      if(hintedIndex >= 0 && hintedIndex < arr.length) return hintedIndex;
+      return -1;
+    }
+
+    if(hit.draft){
+      if(!planner.editing || hit.planeId !== planner.planeId) return false;
+      if(!Array.isArray(planner.points)) return false;
+      const idx = resolveIndex(planner.points);
+      if(idx < 0) return false;
+
+      planner.points.splice(idx, 1); // BORRADO REAL del waypoint del borrador
+      planner.points = planner.points.filter(Boolean).map(cloneWp);
+      planner.dragSuppressUntil = nowMs() + 140;
+      return true;
+    }
+
+    const p = hit.plane || getPlaneById(hit.planeId);
+    if(!p || !Array.isArray(p.routePlan)) return false;
+    const idx = resolveIndex(p.routePlan);
+    if(idx < 0) return false;
+
+    p.routePlan.splice(idx, 1); // BORRADO REAL del waypoint en la ruta activa
+    p.routePlan = p.routePlan.filter(Boolean).map(cloneWp);
+
+    if(!p.routePlan.length){
+      p.routeIdx = 0;
+      p.routeEnabled = false;
+      p.routeCompleted = false;
+    }else{
+      let cur = Number.isFinite(p.routeIdx) ? (p.routeIdx|0) : 0;
+      if(idx < cur) cur -= 1;           // se corren índices hacia atrás
+      if(cur >= p.routePlan.length) cur = p.routePlan.length - 1; // si borré el último, quedo en el anterior
+      if(cur < 0) cur = 0;
+      p.routeIdx = cur;
+
+      const nextWp = p.routePlan[p.routeIdx];
+      if(p.routeEnabled && nextWp){
+        if(Number.isFinite(nextWp.alt)) p.tgtAlt = nextWp.alt;
+        if(Number.isFinite(nextWp.spd)) p.tgtSpd = nextWp.spd;
+        p.tgtHdg = bearingDeg(p, nextWp);
+      }
+    }
+
+    p.routeLastChange = nowMs();
+    syncSharedState();
+    repaintLocalPanels();
+    planner.dragSuppressUntil = nowMs() + 180;
+    return true;
+  }
+  function saveWaypointEditor(){
+    if(planner._wpDeleting) return;
+    const el = ensureWaypointEditor();
+    const hit = planner.popHit;
+    if(!hit || !hit.point) return hideWaypointEditor();
+    const p = hit.plane || getPlaneById(hit.planeId);
+    if(!p) return hideWaypointEditor();
+
+    const wp = hit.point;
+    const aRaw = el.querySelector('#wpAltInp').value;
+    const sRaw = el.querySelector('#wpSpdInp').value;
+
+    const aTrim = String(aRaw||'').trim();
+    const sTrim = String(sRaw||'').trim();
+
+    if(aTrim === '') wp.alt = null;
+    else {
+      const aNum = parseNumLoose(aTrim);
+      if(aNum === null){ alert('Altura inválida.'); return; }
+      wp.alt = Math.max(0, fromDisplayAlt(aNum));
+    }
+
+    if(sTrim === '') wp.spd = null;
+    else {
+      const sNum = parseNumLoose(sTrim);
+      if(sNum === null){ alert('Velocidad inválida.'); return; }
+      wp.spd = Math.max(0, fromDisplaySpd(sNum));
+    }
+
+    if(!hit.draft){
+      if(p.routePlan && p.routePlan[hit.index]){
+        p.routePlan[hit.index] = cloneWp(wp);
+        p.routeLastChange = nowMs();
+        syncSharedState();
+      }
+    }
+    planner.dragSuppressUntil = nowMs() + 160;
+    hideWaypointEditor();
+  }
+  function deleteWaypointFromEditor(){
+    const el = ensureWaypointEditor();
+
+    // HARD DELETE: usar datos del popup para eliminar el waypoint completo (no solo parámetros)
+    try{
+      const wasDraft0 = (el.dataset.wpDraft === '1');
+      const planeId0 = String(el.dataset.wpPlaneId || '');
+      const idx0 = Number.isFinite(Number(el.dataset.wpIndex)) ? (Number(el.dataset.wpIndex)|0) : -1;
+      const hit0 = planner.popHit || null;
+      const pointId0 = String((hit0 && hit0.point && hit0.point.id) || '');
+      const pointRef0 = (hit0 && hit0.point) ? hit0.point : null;
+
+      const sameWpHard = (a,b)=>{
+        if(!a || !b) return false;
+        if(a===b) return true;
+        const aid=(a.id!=null)?String(a.id):'', bid=(b.id!=null)?String(b.id):'';
+        if(aid && bid && aid===bid) return true;
+        const eps=1e-6;
+        return Math.abs((Number(a.x)||0)-(Number(b.x)||0))<=eps && Math.abs((Number(a.y)||0)-(Number(b.y)||0))<=eps;
+      };
+
+      const findIdxHard = (arr)=>{
+        if(!Array.isArray(arr) || !arr.length) return -1;
+        if(idx0>=0 && idx0<arr.length){
+          const c=arr[idx0];
+          if((pointId0 && c && String(c.id||'')===pointId0) || (pointRef0 && sameWpHard(c,pointRef0))) return idx0;
+        }
+        if(pointId0){
+          const i=arr.findIndex(w=>w && String(w.id||'')===pointId0);
+          if(i>=0) return i;
+        }
+        if(pointRef0){
+          const i=arr.findIndex(w=>sameWpHard(w, pointRef0));
+          if(i>=0) return i;
+        }
+        if(idx0>=0 && idx0<arr.length) return idx0;
+        return -1;
+      };
+
+      let cx=0, cy=0;
+      try{
+        const rc=el.getBoundingClientRect();
+        cx = rc.left + Math.min(42, Math.max(18, rc.width * 0.22));
+        cy = rc.top + Math.min(30, Math.max(14, rc.height * 0.18));
+      }catch(_){}
+
+      if(wasDraft0){
+        if(planner.editing && Array.isArray(planner.points) && String(planner.planeId||'')===planeId0){
+          const i = findIdxHard(planner.points);
+          if(i>=0){
+            planner.points.splice(i,1); // <-- BORRADO REAL DEL PUNTO
+            planner.points = planner.points.filter(Boolean).map(cloneWp);
+            planner.dragSuppressUntil = nowMs() + 180;
+            try{ if(typeof drawShapes==='function') drawShapes(); }catch(_){}
+            if(planner.points.length){
+              const ni = Math.max(0, Math.min(i, planner.points.length-1));
+              const p = getPlaneById(planner.planeId);
+              return openWaypointEditor({draft:true, plane:p, planeId:String(planner.planeId||''), point:planner.points[ni], index:ni}, cx||120, cy||120);
+            }
+            hideWaypointEditor();
+            return;
+          }
+        }
+      }else{
+        const p0 = getPlaneById(planeId0) || (hit0 && (hit0.plane || getPlaneById(hit0.planeId)));
+        if(p0 && Array.isArray(p0.routePlan)){
+          const i = findIdxHard(p0.routePlan);
+          if(i>=0){
+            p0.routePlan.splice(i,1); // <-- BORRADO REAL DEL PUNTO
+            p0.routePlan = p0.routePlan.filter(Boolean).map(cloneWp);
+
+            if(!p0.routePlan.length){
+              p0.routeIdx = 0;
+              p0.routeEnabled = false;
+              p0.routeCompleted = false;
+            }else{
+              let cur = Number.isFinite(p0.routeIdx) ? (p0.routeIdx|0) : 0;
+              if(i < cur) cur -= 1;
+              if(cur >= p0.routePlan.length) cur = p0.routePlan.length - 1;
+              if(cur < 0) cur = 0;
+              p0.routeIdx = cur;
+              const nextWp = p0.routePlan[p0.routeIdx];
+              if(p0.routeEnabled && nextWp){
+                if(Number.isFinite(nextWp.alt)) p0.tgtAlt = nextWp.alt;
+                if(Number.isFinite(nextWp.spd)) p0.tgtSpd = nextWp.spd;
+                p0.tgtHdg = bearingDeg(p0, nextWp);
+              }
+            }
+            p0.routeLastChange = nowMs();
+            try{ syncSharedState(); }catch(_){}
+            try{ repaintLocalPanels(); }catch(_){}
+            planner.dragSuppressUntil = nowMs() + 220;
+            try{ if(typeof drawShapes==='function') drawShapes(); }catch(_){}
+
+            if(p0.routePlan.length){
+              const ni = Math.max(0, Math.min(i, p0.routePlan.length-1));
+              const s = (typeof toScreen==='function') ? toScreen(p0.routePlan[ni].x||0, p0.routePlan[ni].y||0) : null;
+              return openWaypointEditor({draft:false, plane:p0, planeId:String(p0.id||planeId0||''), point:p0.routePlan[ni], index:ni, screen:s}, cx||120, cy||120);
+            }
+            hideWaypointEditor();
+            return;
+          }
+        }
+      }
+    }catch(_hardDeleteErr){}
+
+
+    // Resolver hit actual desde memoria o dataset del popup
+    let hit = planner.popHit || null;
+    let planeId = '';
+    let wasDraft = false;
+    let hintedIndex = -1;
+
+    try{
+      wasDraft = (el.dataset.wpDraft === '1');
+      planeId = String(el.dataset.wpPlaneId || (hit && hit.planeId) || '');
+      hintedIndex = Number.isFinite(Number(el.dataset.wpIndex)) ? (Number(el.dataset.wpIndex)|0) : (hit && Number.isFinite(hit.index) ? (hit.index|0) : -1);
+    }catch(_){}
+
+    const targetRef = (hit && hit.point) ? hit.point : null;
+    const targetId  = (targetRef && targetRef.id != null) ? String(targetRef.id) : '';
+
+    function samePoint(a, b){
+      if(!a || !b) return false;
+      if(a === b) return true;
+      const aid = (a.id!=null) ? String(a.id) : '';
+      const bid = (b.id!=null) ? String(b.id) : '';
+      if(aid && bid && aid === bid) return true;
+      const ax = Number(a.x), ay = Number(a.y), bx = Number(b.x), by = Number(b.y);
+      const eps = 1e-6;
+      if(Number.isFinite(ax) && Number.isFinite(ay) && Number.isFinite(bx) && Number.isFinite(by)){
+        if(Math.abs(ax-bx) <= eps && Math.abs(ay-by) <= eps){
+          const aa = Number.isFinite(a.alt) ? Number(a.alt) : null;
+          const ba = Number.isFinite(b.alt) ? Number(b.alt) : null;
+          const as = Number.isFinite(a.spd) ? Number(a.spd) : null;
+          const bs = Number.isFinite(b.spd) ? Number(b.spd) : null;
+          if(aa === ba && as === bs) return true;
+        }
+      }
+      return false;
+    }
+
+    function removeRealWaypoint(arr){
+      if(!Array.isArray(arr) || !arr.length) return -1;
+
+      // 1) índice sugerido con validación
+      if(hintedIndex >= 0 && hintedIndex < arr.length){
+        const c = arr[hintedIndex];
+        if((targetId && c && String(c.id||'') === targetId) || (targetRef && samePoint(c, targetRef))){
+          arr.splice(hintedIndex, 1);
+          return hintedIndex;
+        }
+      }
+
+      // 2) por id
+      if(targetId){
+        const i = arr.findIndex(w => w && String(w.id||'') === targetId);
+        if(i >= 0){ arr.splice(i, 1); return i; }
+      }
+
+      // 3) por referencia/coordenadas
+      if(targetRef){
+        const i = arr.findIndex(w => samePoint(w, targetRef));
+        if(i >= 0){ arr.splice(i, 1); return i; }
+      }
+
+      // 4) último recurso: índice si sigue válido
+      if(hintedIndex >= 0 && hintedIndex < arr.length){
+        arr.splice(hintedIndex, 1);
+        return hintedIndex;
+      }
+      return -1;
+    }
+
+    // Guardar posición del popup para reabrir en el siguiente punto
+    let cx = 0, cy = 0;
+    try{
+      const rc = el.getBoundingClientRect();
+      cx = rc.left + Math.min(42, Math.max(18, rc.width * 0.22));
+      cy = rc.top + Math.min(30, Math.max(14, rc.height * 0.18));
+    }catch(_){}
+
+    let removedIdx = -1;
+    let nextHit = null;
+
+    if(wasDraft){
+      if(!(planner.editing && Array.isArray(planner.points) && String(planner.planeId||'') === planeId)){
+        hideWaypointEditor();
+        return;
+      }
+
+      removedIdx = removeRealWaypoint(planner.points);
+      if(removedIdx < 0){ hideWaypointEditor(); return; }
+
+      // normalizar lista para dibujo/edición
+      planner.points = planner.points.filter(Boolean).map(cloneWp);
+      planner.dragSuppressUntil = nowMs() + 180;
+
+      if(planner.points.length){
+        const ni = Math.max(0, Math.min(removedIdx, planner.points.length - 1));
+        const p = getPlaneById(planner.planeId);
+        nextHit = { draft:true, plane:p, planeId:String(planner.planeId||''), point:planner.points[ni], index:ni };
+      }
+    }else{
+      const p = (hit && (hit.plane || getPlaneById(hit.planeId))) || getPlaneById(planeId);
+      if(!p || !Array.isArray(p.routePlan)){ hideWaypointEditor(); return; }
+
+      removedIdx = removeRealWaypoint(p.routePlan);
+      if(removedIdx < 0){ hideWaypointEditor(); return; }
+
+      // normalizar/forzar nueva referencia de arreglo para overlays y sync
+      p.routePlan = p.routePlan.filter(Boolean).map(cloneWp);
+
+      if(!p.routePlan.length){
+        p.routeIdx = 0;
+        p.routeEnabled = false;
+        p.routeCompleted = false;
+      }else{
+        let cur = Number.isFinite(p.routeIdx) ? (p.routeIdx|0) : 0;
+        if(removedIdx < cur) cur -= 1;
+        if(cur >= p.routePlan.length) cur = p.routePlan.length - 1;
+        if(cur < 0) cur = 0;
+        p.routeIdx = cur;
+
+        const nextWpGuidance = p.routePlan[p.routeIdx];
+        if(p.routeEnabled && nextWpGuidance){
+          if(Number.isFinite(nextWpGuidance.alt)) p.tgtAlt = nextWpGuidance.alt;
+          if(Number.isFinite(nextWpGuidance.spd)) p.tgtSpd = nextWpGuidance.spd;
+          p.tgtHdg = bearingDeg(p, nextWpGuidance);
+        }
+      }
+
+      p.routeLastChange = nowMs();
+      try{ syncSharedState(); }catch(_){}
+      try{ repaintLocalPanels(); }catch(_){}
+      planner.dragSuppressUntil = nowMs() + 220;
+
+      if(p.routePlan.length){
+        const ni = Math.max(0, Math.min(removedIdx, p.routePlan.length - 1));
+        const s = (typeof toScreen === 'function') ? toScreen(p.routePlan[ni].x||0, p.routePlan[ni].y||0) : null;
+        nextHit = { draft:false, plane:p, planeId:String(p.id||planeId||''), point:p.routePlan[ni], index:ni, screen:s };
+      }
+    }
+
+    // Intentar refresco visual inmediato (si existe loop de dibujo no molesta)
+    try{
+      if(typeof drawShapes === 'function') drawShapes();
+    }catch(_){}
+
+    if(nextHit){
+      return openWaypointEditor(nextHit, cx || 120, cy || 120);
+    }
+    hideWaypointEditor();
+  }
+  function promptWaypointEdit(hit, e){
+    if(!hit || !hit.point) return false;
+    const cx = e && Number.isFinite(e.clientX) ? e.clientX : ((hit.screen && hit.screen.x) || 40) + (cvs.getBoundingClientRect().left||0);
+    const cy = e && Number.isFinite(e.clientY) ? e.clientY : ((hit.screen && hit.screen.y) || 40) + (cvs.getBoundingClientRect().top||0);
+    return openWaypointEditor(hit, cx, cy);
+  }
+
+  function waypointScreenRadiusPx(){ return 8; }
+  function findWaypointHit(clientX, clientY){
+    if(typeof toScreen !== 'function') return null;
+    const r = cvs.getBoundingClientRect();
+    if(clientX < r.left || clientX > r.right || clientY < r.top || clientY > r.bottom) return null;
+    const px = clientX - r.left, py = clientY - r.top;
+    const rad = waypointScreenRadiusPx();
+    let best = null, bd = 1e9;
+
+    if(planner.editing && planner.planeId && Array.isArray(planner.points)){
+      const p = getPlaneById(planner.planeId);
+      for(let i=0;i<planner.points.length;i++){
+        const wp = planner.points[i];
+        const s = toScreen(wp.x, wp.y);
+        const d = Math.hypot(px - s.x, py - s.y);
+        if(d <= rad && d < bd){
+          bd = d;
+          best = { draft:true, plane:p, planeId:planner.planeId, point:wp, index:i, screen:s };
+        }
+      }
+    }
+
+    if(window.st && Array.isArray(st.planes)){
+      for(const p of st.planes){
+        const arr = Array.isArray(p.routePlan) ? p.routePlan : [];
+        for(let i=0;i<arr.length;i++){
+          const wp = arr[i]; if(!wp) continue;
+          const s = toScreen(wp.x, wp.y);
+          const d = Math.hypot(px - s.x, py - s.y);
+          if(d <= rad && d < bd){
+            bd = d;
+            best = { draft:false, plane:p, planeId:p.id, point:wp, index:i, screen:s };
+          }
+        }
+      }
+    }
+    return best;
+  }
+
+  // --- Autopilot por waypoints (wrapper) ---
+  if(typeof window.updatePlane === 'function' && !window.__SETCA_ROUTE_UPDATE_WRAPPED__){
+    const _origUpdatePlane = window.updatePlane;
+    window.updatePlane = function(p, dt){
+      try{ applyRouteGuidance(p, dt); }catch(err){ }
+      return _origUpdatePlane.apply(this, arguments);
+    };
+    window.__SETCA_ROUTE_UPDATE_WRAPPED__ = true;
+  }
+
+  function markManualRouteOverride(p, ms){
+    if(!p) return;
+    p.routeManualUntil = nowMs() + Math.max(800, ms||12000);
+  }
+  function tryMarkManualRouteOverrideFromTarget(ev){
+    const t = ev && ev.target;
+    if(!t || !t.id) return;
+    const m = String(t.id).match(/^(hdg|spd|alt)-(.+)$/);
+    if(!m) return;
+    const p = getPlaneById(m[2]);
+    if(p && Array.isArray(p.routePlan) && p.routePlan.length){
+      markManualRouteOverride(p, 14000); // permite maniobra manual temporal sin pelear
+    }
+  }
+  document.addEventListener('input', tryMarkManualRouteOverrideFromTarget, true);
+  document.addEventListener('change', tryMarkManualRouteOverrideFromTarget, true);
+
+  function applyRouteGuidance(p, dt){
+    if(!p || typeof p !== 'object') return;
+    const arr = Array.isArray(p.routePlan) ? p.routePlan : null;
+    if(!arr || !arr.length || !p.routeEnabled) return;
+
+    let idx = (Number.isFinite(p.routeIdx) ? Math.floor(p.routeIdx) : 0);
+    idx = clamp(idx, 0, Math.max(0, arr.length-1));
+    p.routeIdx = idx;
+
+    let wp = arr[idx];
+    if(!wp){ p.routeEnabled = false; return; }
+
+    const manualHold = Number.isFinite(p.routeManualUntil) && (nowMs() < p.routeManualUntil);
+
+    // Solo guiamos si no hay maniobra manual reciente
+    if(!manualHold){
+      if(Number.isFinite(wp.alt)) p.tgtAlt = wp.alt;
+      if(Number.isFinite(wp.spd)) p.tgtSpd = wp.spd;
+      p.tgtHdg = bearingDeg(p, wp);
+    }
+
+    const dx = (wp.x||0) - (p.x||0);
+    const dy = (wp.y||0) - (p.y||0);
+    const distNM = Math.hypot(dx, dy);
+
+    const spdKmh = Number.isFinite(p.spd) ? p.spd : (Number.isFinite(p.tgtSpd) ? p.tgtSpd : 500);
+    const nmps = (spdKmh / NM2KM_VAL) / 3600;
+    const reachNM = clamp(Math.max(1.2, nmps * 25), 1.2, 4.5);
+
+    if(distNM <= reachNM){
+      if(idx < arr.length - 1){
+        p.routeIdx = idx + 1;
+        p.routeCompleted = false;
+        p.routeLastReached = idx;
+        // al avanzar de waypoint, retomamos guiado normal salvo que el usuario siga tocando controles
+        if(Number.isFinite(p.routeManualUntil) && p.routeManualUntil < nowMs() + 500){
+          p.routeManualUntil = 0;
+        }
+      }else{
+        p.routeEnabled = false;
+        p.routeCompleted = true;
+        p.routeFinishedAt = nowMs();
+      }
+    }
+  }
+
+  // --- Dibujo de rutas/waypoints (wrapper) ---
+  if(typeof window.drawShapes === 'function' && !window.__SETCA_ROUTE_DRAW_WRAPPED__){
+    const _origDrawShapes = window.drawShapes;
+    window.drawShapes = function(){
+      const out = _origDrawShapes.apply(this, arguments);
+      try{ drawRoutesOverlay(); }catch(err){ }
+      return out;
+    };
+    window.__SETCA_ROUTE_DRAW_WRAPPED__ = true;
+  }
+
+  function drawRoutePath(ctx, plane, pts, routeIdx, enabled, isDraft){
+    if(!ctx || !plane || !Array.isArray(pts) || !pts.length || typeof toScreen !== 'function') return;
+
+    const baseColor = isDraft ? '255,224,102' : '173,216,230';
+    const activeColor = isDraft ? '255,235,140' : '210,240,255';
+
+    const start = toScreen(plane.x||0, plane.y||0);
+    ctx.save();
+    ctx.lineJoin = 'round';
+    ctx.lineCap = 'round';
+    ctx.strokeStyle = `rgba(${baseColor},0.52)`;
+    ctx.lineWidth = 0.5; // solicitado
+    ctx.beginPath();
+    ctx.moveTo(start.x, start.y);
+    for(const wp of pts){
+      const s = toScreen(wp.x||0, wp.y||0);
+      ctx.lineTo(s.x, s.y);
+    }
+    ctx.stroke();
+
+    for(let i=0;i<pts.length;i++){
+      const wp = pts[i];
+      const s = toScreen(wp.x||0, wp.y||0);
+      const isCurrent = enabled && (i === (routeIdx|0));
+      const r = isCurrent ? 3.2 : 2.5;
+
+      ctx.beginPath();
+      ctx.arc(s.x, s.y, r, 0, Math.PI*2);
+      ctx.fillStyle = `rgba(${isCurrent ? activeColor : baseColor},${isCurrent ? 0.58 : 0.42})`;
+      ctx.fill();
+      ctx.strokeStyle = `rgba(${isCurrent ? activeColor : baseColor},${isCurrent ? 0.85 : 0.62})`;
+      ctx.lineWidth = isCurrent ? 0.95 : 0.6;
+      ctx.stroke();
+
+      ctx.fillStyle = `rgba(${baseColor},0.55)`;
+      ctx.font = '9px monospace';
+      ctx.textAlign = 'left';
+      ctx.fillText(String(i+1), s.x+4, s.y-4);
+
+      if(Number.isFinite(wp.alt) || Number.isFinite(wp.spd)){
+        ctx.beginPath();
+        ctx.moveTo(s.x+4, s.y+3);
+        ctx.lineTo(s.x+9, s.y+3);
+        ctx.strokeStyle = `rgba(${baseColor},0.54)`;
+        ctx.lineWidth = 0.4;
+        ctx.stroke();
+      }
+    }
+
+    ctx.restore();
+  }
+
+  function drawRoutesOverlay(){
+    const ctx = getCtx();
+    if(!ctx || !window.st || !Array.isArray(st.planes)) return;
+
+    for(const p of st.planes){
+      if(!p) continue;
+      const pts = Array.isArray(p.routePlan) ? p.routePlan : null;
+      if(!pts || !pts.length) continue;
+      drawRoutePath(ctx, p, pts, Number.isFinite(p.routeIdx)?p.routeIdx:0, !!p.routeEnabled, false);
+    }
+
+    if(planner.editing && planner.planeId){
+      const p = getPlaneById(planner.planeId);
+      if(p){
+        drawRoutePath(ctx, p, planner.points||[], 0, false, true);
+
+        ctx.save();
+        ctx.font = '11px monospace';
+        ctx.textAlign = 'left';
+        ctx.fillStyle = 'rgba(255,224,102,0.86)';
+        const msg = planner.vDown
+          ? `V-PLAN ${p.name||p.id}: mantén V y haz click para agregar puntos (incluso fuera del mapa (mar incluido)) | click derecho edita | suelta V y luego click para finalizar`
+          : `V-PLAN ${p.name||p.id}: V suelta → próximo click finaliza | click derecho edita | Enter finaliza | Esc cancela`;
+        ctx.fillText(msg, 12, 16);
+        ctx.restore();
+      }
+    }
+  }
+
+  // --- Eventos teclado ---
+  addEventListener('keydown', (e)=>{
+    if(e.key==='v' || e.key==='V'){
+      planner.vDown = true;
+      if(planner.editing) planner.awaitFinalizeClick = false;
+    }
+
+    if(!planner.editing) return;
+
+    if(e.key==='Escape'){
+      consume(e);
+      cancelDraft();
+      return;
+    }
+    if(e.key==='Enter'){
+      consume(e);
+      finalizeDraft();
+      return;
+    }
+    if((e.key==='Backspace' || e.key==='Delete') && !e.repeat){
+      if(Array.isArray(planner.points) && planner.points.length){
+        consume(e);
+        planner.points.pop();
+        return;
+      }
+    }
+  }, true);
+
+  addEventListener('keyup', (e)=>{
+    if(e.key==='v' || e.key==='V'){
+      planner.vDown = false;
+      if(planner.editing){
+        planner.awaitFinalizeClick = true; // próximo click culmina navegación
+      }
+    }
+  }, true);
+
+  addEventListener('blur', ()=>{ planner.vDown = false; }, true);
+
+  // Cerrar panel si se hace click afuera (sin interrumpir si justo se está editando con RMB)
+  addEventListener('mousedown', (e)=>{
+    const el = planner.pop;
+    if(!el || el.style.display === 'none') return;
+    if(el.contains(e.target)) return;
+    // No cerrar al hacer click derecho sobre waypoint porque se reabrirá/actualizará
+    if(e.button===2) return;
+    hideWaypointEditor();
+  }, true);
+
+  // --- Mouse: iniciar/agregar/finalizar ---
+  cvs.addEventListener('mousedown', (e)=>{
+    if(isObserver()) return;
+
+    if(e.button===2){
+      const hitWp = findWaypointHit(e.clientX, e.clientY);
+      if(hitWp){
+        planner.dragSuppressUntil = nowMs() + 500;
+        planner.suppressCtxMenuUntil = nowMs() + 700;
+        consume(e);
+        promptWaypointEdit(hitWp, e);
+        return;
+      }
+      return;
+    }
+
+    if(e.button!==0) return;
+
+    const planeHit = findPlaneAtClient(e.clientX, e.clientY);
+
+    // Si hay borrador activo:
+    if(planner.editing){
+      // Al soltar V, el siguiente click culmina la navegación
+      if(!planner.vDown && planner.awaitFinalizeClick){
+        consume(e);
+        finalizeDraft();
+        return;
+      }
+
+      // Mientras V esté presionada, cada click agrega waypoint.
+      // Importante: si el click cae encima/cerca del MISMO avión seleccionado,
+      // TAMBIÉN se agrega un waypoint (permite marcar atrás/adelante/encima sin bloqueo).
+      if(planner.vDown){
+        consume(e);
+
+        // Si clickean OTRA aeronave con V, cambiamos la programación a esa aeronave (flujo natural)
+        if(planeHit && planner.planeId && planeHit.id !== planner.planeId){
+          startDraftForPlane(planeHit);
+          return;
+        }
+
+        // Caso borde: aún no hay avión seleccionado y se clickea uno
+        if(!planner.planeId && planeHit){
+          startDraftForPlane(planeHit);
+          return;
+        }
+
+        // Si clickea el mismo avión (o muy cerca), NO bloquear:
+        // se permite agregar waypoint exactamente donde el usuario quiera.
+        addDraftPointFromClient(e.clientX, e.clientY);
+        return;
+      }
+
+      // Si hay draft y V no está presionada pero todavía no se soltó/registró, no forzamos nada
+      return;
+    }
+
+    // Sin borrador: V + click sobre avión => inicia programación
+    if(planner.vDown && planeHit){
+      consume(e);
+      startDraftForPlane(planeHit);
+      return;
+    }
+
+  }, true);
+
+  // Clicks fuera del canvas (pero cerca del radar): permite colocar navegación fuera del mapa visible
+  // sin perder el flujo V-hold. No interfiere con paneles laterales ni con el editor.
+  addEventListener('mousedown', (e)=>{
+    if(isObserver()) return;
+    if(!planner.editing) return;
+    if(e.target === cvs) return;
+    if(planner.pop && planner.pop.contains && planner.pop.contains(e.target)) return;
+    try{
+      if(e.target && e.target.closest && e.target.closest('#left,#right,header,#setcaWaypointEditor')) return;
+      if(e.target && e.target.closest && e.target.closest('button,input,select,textarea')) return;
+    }catch(_){}
+
+    if(e.button!==0) return;
+
+    const rr = cvs.getBoundingClientRect();
+    const pad = 100000; // permite waypoints en mar / fuera del mapa (sin limitar por cercanía al canvas)
+    if(e.clientX < rr.left - pad || e.clientX > rr.right + pad || e.clientY < rr.top - pad || e.clientY > rr.bottom + pad) return;
+
+    if(!planner.vDown && planner.awaitFinalizeClick){
+      consume(e);
+      finalizeDraft();
+      return;
+    }
+    if(planner.vDown){
+      consume(e);
+      addDraftPointFromClient(e.clientX, e.clientY);
+      return;
+    }
+  }, true);
+
+  // Doble click en canvas finaliza borrador activo (atajo)
+  cvs.addEventListener('dblclick', (e)=>{
+    if(!planner.editing) return;
+    consume(e);
+    finalizeDraft();
+  }, true);
+
+  // Contextmenu captura: editar waypoint aunque exista menú de dibujos
+  cvs.addEventListener('contextmenu', (e)=>{
+    if(isObserver()) return;
+    if(nowMs() < (planner.suppressCtxMenuUntil||0)){ consume(e); return; }
+    const hitWp = findWaypointHit(e.clientX, e.clientY);
+    if(!hitWp) return;
+    consume(e);
+    promptWaypointEdit(hitWp, e);
+  }, true);
+
+  // Protección liviana para no pelear con pan/drag justo luego de editar waypoint
+  addEventListener('mousedown', (e)=>{
+    if(nowMs() < planner.dragSuppressUntil) {
+      // blindaje mínimo intencional (sin bloquear toda la UI)
+    }
+  }, true);
+
+  window.__SETCA_ROUTEPLANNER = {
+    get state(){ return {editing:planner.editing, planeId:planner.planeId, points:(planner.points||[]).map(cloneWp), vDown:planner.vDown, awaitFinalizeClick:planner.awaitFinalizeClick}; },
+    cancel: cancelDraft,
+    finalize: finalizeDraft,
+    clearPlaneRoute(id){ const p = getPlaneById(id); if(p) clearRouteFromPlane(p); },
+    editWaypointAtClient(x,y){
+      const hit = findWaypointHit(x,y);
+      if(hit) return openWaypointEditor(hit, x, y);
+      return false;
+    }
+  };
 })();
 </script>
 
