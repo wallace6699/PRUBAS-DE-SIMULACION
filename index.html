@@ -1,4 +1,4 @@
-ESTE SIMULADOR SE ENCUENTRA EN FASE DE PRUEBA - PUEDEN OCURRIR ERRORES DURANTE EL FUNCIONAMIENTO 2.5.1
+ESTE SIMULADOR SE ENCUENTRA EN FASE DE PRUEBA - PUEDEN OCURRIR ERRORES DURANTE EL FUNCIONAMIENTO 2.5.2
 <!DOCTYPE html>
 <html lang="es">
 <head>
@@ -419,6 +419,15 @@ canvas#radar {
   width:auto !important;
   min-width:90px;
 }
+#navCards .navHeader .xpdrInput{
+  flex:0 0 56px;
+  width:56px !important;
+  min-width:56px;
+  max-width:56px;
+  text-align:center;
+  letter-spacing:.08em;
+  font-family:monospace;
+}
 #navCards .navTitle{
   font-size:11px;
   font-weight:800;
@@ -456,6 +465,167 @@ canvas#radar {
   width:var(--navCtlW) !important;
   min-width:var(--navCtlW);
   flex:0 0 var(--navCtlW);
+}
+
+
+/* ===== VUELOS: panel editable ultra-minimal (lista compacta) ===== */
+#vuelosList{
+  display:flex;
+  flex-direction:column;
+  gap:1px;
+}
+#vuelosList .vuelosTable{
+  width:100%;
+  border-collapse:collapse;
+  border-spacing:0;
+  table-layout:fixed;
+  font-size:10px;
+  background:transparent !important;
+}
+#vuelosList .vuelosTable,
+#vuelosList .vuelosTable thead,
+#vuelosList .vuelosTable tbody,
+#vuelosList .vuelosTable tr,
+#vuelosList .vuelosTable th,
+#vuelosList .vuelosTable td{
+  background:transparent !important;
+}
+#vuelosList .vuelosTable thead th{
+  text-align:center;
+  padding:0 2px 2px;
+  font-size:9px;
+  letter-spacing:.08em;
+  text-transform:uppercase;
+  color:#fff !important;
+  opacity:1;
+  font-weight:700;
+  border:none !important;
+}
+#vuelosList .vuelosTable tbody tr{
+  border:none !important;
+  transition:none;
+}
+#vuelosList .vuelosTable tbody tr:hover{
+  background:transparent !important;
+}
+#vuelosList .vuelosTable td{
+  padding:1px 2px;
+  vertical-align:middle;
+  border:none !important;
+}
+#vuelosList .vuelosTable tbody tr td:first-child{
+  border-left:none !important;
+  padding-left:0;
+}
+#vuelosList .vuelosTable tbody tr[data-role="Friend"] td:first-child,
+#vuelosList .vuelosTable tbody tr[data-role="Bandit"] td:first-child,
+#vuelosList .vuelosTable tbody tr[data-role="Neutral"] td:first-child,
+#vuelosList .vuelosTable tbody tr[data-role="Civilian"] td:first-child{
+  border-left:none !important;
+}
+
+#vuelosList .vuelosTable input,
+#vuelosList .vuelosTable select{
+  width:100%;
+  min-width:0;
+  height:16px;
+  padding:0 1px;
+  margin:0;
+  border:none !important;
+  border-radius:0 !important;
+  box-sizing:border-box;
+  box-shadow:none !important;
+  outline:none !important;
+  font-size:10px;
+  line-height:1.1;
+  background:transparent !important;
+}
+#vuelosList .vuelosTable input:focus,
+#vuelosList .vuelosTable select:focus,
+#vuelosList .vuelosTable input:hover,
+#vuelosList .vuelosTable select:hover{
+  background:transparent !important;
+  border:none !important;
+  box-shadow:none !important;
+  outline:none !important;
+}
+#vuelosList .vuelosTable .vuelosNameInput{
+  font-weight:700;
+  letter-spacing:.01em;
+}
+#vuelosList .vuelosTable .vuelosNameInput,
+#vuelosList .vuelosTable .vuelosRoleSelect,
+#vuelosList .vuelosTable .vuelosXpdrInput{
+  border:none !important;
+  border-bottom:none !important;
+}
+#vuelosList .vuelosTable .vuelosNameInput:hover,
+#vuelosList .vuelosTable .vuelosRoleSelect:hover,
+#vuelosList .vuelosTable .vuelosXpdrInput:hover,
+#vuelosList .vuelosTable .focusGlow{
+  border:none !important;
+  border-bottom:none !important;
+  background:transparent !important;
+  box-shadow:none !important;
+  outline:none !important;
+}
+
+#vuelosList .vuelosTable .vuelosRoleSelect{
+  font-weight:700;
+  transition:color .12s ease, opacity .12s ease;
+  appearance:none;
+  -webkit-appearance:none;
+  background-image:none !important;
+  text-align:center;
+  text-align-last:center;
+}
+#vuelosList .vuelosTable .vuelosRoleSelect.roleFriend{
+  color:#7dffad;
+}
+#vuelosList .vuelosTable .vuelosRoleSelect.roleBandit{
+  color:#ff9494;
+}
+#vuelosList .vuelosTable .vuelosRoleSelect.roleNeutral{
+  color:#baff72;
+}
+#vuelosList .vuelosTable .vuelosRoleSelect.roleCivilian{
+  color:#7feeff;
+}
+#vuelosList .vuelosTable .vuelosXpdrInput{
+  width:54px;
+  max-width:100%;
+  text-align:center;
+  letter-spacing:.08em;
+  font-family:ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+}
+#vuelosList .vuelosTable .xpdrWrap{
+  display:flex;
+  align-items:center;
+  justify-content:center;
+  gap:2px;
+}
+#vuelosList .vuelosTable .xpdrDot{
+  width:5px;
+  height:5px;
+  border-radius:999px;
+  background:transparent;
+  box-shadow:none;
+  opacity:.14;
+  flex:0 0 5px;
+}
+#vuelosList .vuelosTable tr.emergency .xpdrDot{
+  background:#ff2d2d;
+  opacity:1;
+  animation:xpdrPulse 1s ease-in-out infinite;
+  box-shadow:0 0 0 0 rgba(255,45,45,.65);
+}
+#vuelosList .vuelosTable tr.emergency .vuelosXpdrInput{
+  color:#ffd4d4;
+}
+@keyframes xpdrPulse{
+  0%{ transform:scale(1); box-shadow:0 0 0 0 rgba(255,45,45,.65); }
+  70%{ transform:scale(1.22); box-shadow:0 0 0 7px rgba(255,45,45,0); }
+  100%{ transform:scale(1); box-shadow:0 0 0 0 rgba(255,45,45,0); }
 }
 
 /* Botones finales: ocupan TODO el ancho (3 columnas iguales) */
@@ -876,6 +1046,13 @@ canvas#radar {
       <div class="panel-header"><h3>Panel de Navegación</h3><span class="toggle" data-target="#pNavBody">▾</span></div>
       <div id="pNavBody" class="panel-body" style="max-height:70vh;overflow:auto; font-size:14px;"><div id="navCards" class="col"></div></div>
     </section>
+
+    <section class="panel" id="pVuelos">
+      <div class="panel-header"><h3>Vuelos</h3><span class="toggle" data-target="#pVuelosBody">▾</span></div>
+      <div id="pVuelosBody" class="panel-body">
+        <div id="vuelosList" class="col"></div>
+      </div>
+    </section>
   </aside>
 
   <main id="center" class="panel">
@@ -1178,6 +1355,16 @@ function llToLocalNM(lat, lon, refLat, refLon){
   const k = Math.cos(refLat * Math.PI/180);
   return { x: (lon - refLon) * k * 60, y: -(lat - refLat) * 60 };
 }
+function randomPeruSpawnNM(jitterNM=18){
+  const pool = (Array.isArray(AIRPORTS_PE) && AIRPORTS_PE.length) ? AIRPORTS_PE : [CENTER_AIRPORT];
+  const ap = pool[(Math.random()*pool.length)|0] || CENTER_AIRPORT;
+  const base = llToLocalNM(ap.lat, ap.lon, CENTER_AIRPORT.lat, CENTER_AIRPORT.lon);
+  return {
+    x: base.x + (Math.random()*2-1)*jitterNM,
+    y: base.y + (Math.random()*2-1)*jitterNM,
+    airport: ap
+  };
+}
 function setupAirports(){
   st.radarCenter = { ...CENTER_AIRPORT, label: `${CENTER_AIRPORT.icao}/${CENTER_AIRPORT.iata}` };
   st.airports = AIRPORTS_PE.map(ap=>{
@@ -1197,10 +1384,11 @@ function setupAirports(){
 window.__uiShowAirports = !!window.__uiAptoCfg.enabled && (window.__uiAptoCfg.mode!=='custom' || window.__uiAptoCfg.customSet.size>0);
 }
 const CONTACT_PERSIST_MS=5000; // ← 5 seg en analógico
+const __INIT_SPAWNS = [randomPeruSpawnNM(14), randomPeruSpawnNM(14), randomPeruSpawnNM(14)];
 const INIT_PLANES=[
-  {name:'R1',id:'R1',x:-30,y:0,hdg:0, spd:450, tgtSpd:450, alt:20000, tgtAlt:20000, turn:2, tgtHdg:0, ghosts:[], lastDet:0, fail:{comms:false,eng:'none',cab:'none',gear:false,bird:false}, kills:0, fuel:100, jamming:false},
-  {name:'R2',id:'R2',x:30,y:0, hdg:45, spd:450, tgtSpd:450, alt:21000, tgtAlt:21000, turn:2, tgtHdg:45, ghosts:[], lastDet:0, fail:{comms:false,eng:'none',cab:'none',gear:false,bird:false}, kills:0, fuel:100, jamming:false},
-  {name:'R3',id:'R3',x:0,y:-40,hdg:90, spd:500, tgtSpd:500, alt:22000, tgtAlt:22000, turn:2.5,tgtHdg:90, ghosts:[], lastDet:0, fail:{comms:false,eng:'none',cab:'none',gear:false,bird:false}, kills:0, fuel:100, jamming:false},
+  {name:'R1',id:'R1',x:__INIT_SPAWNS[0].x,y:__INIT_SPAWNS[0].y,hdg:0, spd:450, tgtSpd:450, alt:20000, tgtAlt:20000, turn:2, tgtHdg:0, ghosts:[], lastDet:0, fail:{comms:false,eng:'none',cab:'none',gear:false,bird:false}, kills:0, fuel:100, jamming:false, xpdr:''},
+  {name:'R2',id:'R2',x:__INIT_SPAWNS[1].x,y:__INIT_SPAWNS[1].y, hdg:45, spd:450, tgtSpd:450, alt:21000, tgtAlt:21000, turn:2, tgtHdg:45, ghosts:[], lastDet:0, fail:{comms:false,eng:'none',cab:'none',gear:false,bird:false}, kills:0, fuel:100, jamming:false, xpdr:''},
+  {name:'R3',id:'R3',x:__INIT_SPAWNS[2].x,y:__INIT_SPAWNS[2].y,hdg:90, spd:500, tgtSpd:500, alt:22000, tgtAlt:22000, turn:2.5,tgtHdg:90, ghosts:[], lastDet:0, fail:{comms:false,eng:'none',cab:'none',gear:false,bird:false}, kills:0, fuel:100, jamming:false, xpdr:''},
 ];
 let st={
   showLabels:true,
@@ -1506,7 +1694,7 @@ function spawnFormation(key){
     default: planes = GenForm.LINEABREAST2(center); break;
   }
   planes.forEach(p=>{ st.planes.push(p); st.roles[p.id] = Math.random()>.5?'Friend':'Bandit'; });
-  repaintPlanesList(); repaintNav(); repaintAlt();
+  repaintPlanesList(); repaintNav(); repaintAlt(); repaintVuelos();
 }
 
 
@@ -1545,7 +1733,7 @@ const MIN_Z = 0.02, MAX_Z = 15; // límites de zoom
 cvs.addEventListener('wheel', e => {
   e.preventDefault();
 
-  const BASE = 1.01; // suavidad base
+  const BASE = 1.022; // ligeramente más rápido
   const dy = Math.max(-240, Math.min(240, e.deltaY || 0));
   const f = Math.pow(BASE, -dy / 100); // factor de escala suave
 
@@ -1608,6 +1796,21 @@ function sweepDetect(dt){
 }
 
 /* ===== Aviones ===== */
+const EMERGENCY_XPDR_CODES = new Set(['7500','7600','7700']);
+function sanitizeXpdr(v){
+  return String(v ?? '').replace(/\D/g,'').slice(0,4);
+}
+function getPlaneXpdr(p){
+  const raw = sanitizeXpdr(p && p.xpdr);
+  return raw;
+}
+function setPlaneXpdr(p, value){
+  if(!p) return;
+  p.xpdr = sanitizeXpdr(value);
+}
+function planeHasEmergencyXpdr(p){
+  return EMERGENCY_XPDR_CODES.has(sanitizeXpdr(p && p.xpdr));
+}
 function updatePlane(p,dt){
   const acc=40;
   if(p.spd<p.tgtSpd) p.spd=Math.min(p.spd+acc*dt,p.tgtSpd);
@@ -1652,8 +1855,8 @@ function drawPlane(p){
   const color=role==='Civilian'?'#4de3ff':(role==='Friend'?'#35ff79':(role==='Bandit'?'#ff7070':'#7CFC00'));
   p.ghosts.forEach((g,i)=>{const sg=toScreen(g.x,g.y);const op=(i+1)/p.ghosts.length*.35;ctx.fillStyle=`rgba(179,0,255,${op})`;ctx.fillRect(sg.x-1,sg.y-1,2,2);});
   ctx.save();ctx.translate(s.x,s.y);ctx.rotate(p.hdg*Math.PI/180);ctx.strokeStyle=color;ctx.lineWidth=2;ctx.strokeRect(-5,-5,10,10);ctx.restore();
-  const lr=(p.hdg-90)*Math.PI/180;ctx.beginPath();ctx.moveTo(s.x,s.y);ctx.lineTo(s.x+Math.cos(lr)*25,s.y+Math.sin(lr)*25);ctx.strokeStyle='#35ff79';ctx.lineWidth=1;ctx.stroke();
-  if(st.predMin>0){const t=st.predMin*60,nmps=(p.spd/NM2KM)/3600;const d=nmps*t;const ex=p.x+Math.cos(lr)*d,ey=p.y+Math.sin(lr)*d;const se=toScreen(ex,ey);ctx.setLineDash([5,5]);ctx.strokeStyle='#2ee74f';ctx.beginPath();ctx.moveTo(s.x,s.y);ctx.lineTo(se.x,se.y);ctx.stroke();ctx.setLineDash([]);}
+  const lr=(p.hdg-90)*Math.PI/180;ctx.beginPath();ctx.moveTo(s.x,s.y);ctx.lineTo(s.x+Math.cos(lr)*25,s.y+Math.sin(lr)*25);ctx.strokeStyle=color;ctx.lineWidth=.8;ctx.stroke();
+  if(st.predMin>0){const t=st.predMin*60,nmps=(p.spd/NM2KM)/3600;const d=nmps*t;const ex=p.x+Math.cos(lr)*d,ey=p.y+Math.sin(lr)*d;const se=toScreen(ex,ey);ctx.setLineDash([4,5]);ctx.strokeStyle=color;ctx.lineWidth=.75;ctx.beginPath();ctx.moveTo(s.x,s.y);ctx.lineTo(se.x,se.y);ctx.stroke();ctx.setLineDash([]);}
   ctx.fillStyle='#eaffea';ctx.font='12px monospace';ctx.textAlign='left';
   // labelMode: 0 = normal (data block), 1 = solo nombre, 2 = sin etiquetas, 3 = radar analógico
   if(st.labelMode===0 || st.labelMode===1){
@@ -1667,7 +1870,10 @@ function drawPlane(p){
       // Solo nombre (sin data block)
       ctx.fillText(p.name, bx+2, by);
     } else {
-      const w = 88;
+      const xpdrCode = getPlaneXpdr(p);
+      const nameW = ctx.measureText(p.name || '').width;
+      const xpdrW = ctx.measureText(xpdrCode).width;
+      const w = Math.max(88, Math.ceil(nameW + xpdrW + 18));
       const h = 56;
 
       // --- connector line (very thin) ---
@@ -1679,12 +1885,15 @@ function drawPlane(p){
       ctx.stroke();
 
       // --- transparent box ---
-      ctx.strokeStyle = 'rgba(255,255,255,0.8)';
-      ctx.lineWidth = 0.4;
+      ctx.strokeStyle = planeHasEmergencyXpdr(p) ? 'rgba(255,90,90,0.95)' : 'rgba(255,255,255,0.8)';
+      ctx.lineWidth = planeHasEmergencyXpdr(p) ? 0.8 : 0.4;
       ctx.strokeRect(bx, by-12, w, h);
 
-      // --- text ---
+      // --- text (nombre + transponder sincronizado) ---
       ctx.fillText(p.name, bx+4, by);
+      ctx.textAlign='right';
+      ctx.fillText(xpdrCode, bx+w-4, by);
+      ctx.textAlign='left';
       if(st.metric){
         ctx.fillText(`${(p.alt*FT2M|0)} m`, bx+4, by+14);
         ctx.fillText(`${p.spd.toFixed(0)} km/h`, bx+4, by+28);
@@ -1695,6 +1904,20 @@ function drawPlane(p){
         ctx.fillText(`${String(p.hdg|0).padStart(3,'0')}°`, bx+4, by+42);
       }
     }
+  }
+  if(planeHasEmergencyXpdr(p)){
+    const phase = (performance.now()%1200)/1200;
+    const pulse = 0.5 + 0.5*Math.sin(phase*2*Math.PI);
+    const r1 = 14 + pulse*8;
+    const r2 = 22 + pulse*10;
+    ctx.save();
+    ctx.strokeStyle=`rgba(255,40,40,${0.55 + 0.35*pulse})`;
+    ctx.lineWidth=2;
+    ctx.beginPath();ctx.arc(s.x,s.y,r1,0,2*Math.PI);ctx.stroke();
+    ctx.strokeStyle=`rgba(255,40,40,${0.20 + 0.20*pulse})`;
+    ctx.lineWidth=1.4;
+    ctx.beginPath();ctx.arc(s.x,s.y,r2,0,2*Math.PI);ctx.stroke();
+    ctx.restore();
   }
   if(st.sel.includes(p.id)){ctx.strokeStyle='#ffe066';ctx.strokeRect(s.x-10,s.y-10,20,20);}
   if(p.jamming){
@@ -3368,7 +3591,145 @@ function repaintPlanesList(){
     list.appendChild(b);
   });
 }
+function getRoleUiColor(role){
+  return role==='Civilian' ? '#4de3ff' : (role==='Friend' ? '#35ff79' : (role==='Bandit' ? '#ff7070' : '#7CFC00'));
+}
+function applyVuelosRoleVisual(roleSelect, tr, role){
+  const rv = role || 'Neutral';
+  if(tr) tr.dataset.role = rv;
+  if(!roleSelect) return;
+  roleSelect.classList.remove('roleFriend','roleBandit','roleNeutral','roleCivilian');
+  const cls = rv==='Friend' ? 'roleFriend' : rv==='Bandit' ? 'roleBandit' : rv==='Civilian' ? 'roleCivilian' : 'roleNeutral';
+  roleSelect.classList.add(cls);
+  roleSelect.title = 'Rol: ' + rv;
+}
+
+function repaintVuelos(){
+  const wrap = $('#vuelosList');
+  if(!wrap) return;
+  wrap.innerHTML = '';
+
+  if(!st.planes || st.planes.length===0){
+    wrap.innerHTML = '<div class="mini" style="opacity:.8">Sin vuelos</div>';
+    return;
+  }
+
+  const syncPlaneEditsToNav = (plane)=>{
+    if(!plane) return;
+    const id = plane.id;
+    const navName = document.getElementById('nm-'+id);
+    if(navName && navName.value !== (plane.name||'')) navName.value = plane.name || '';
+
+    const navRole = document.getElementById('role-'+id);
+    const roleVal = st.roles[id] || 'Neutral';
+    if(navRole && navRole.value !== roleVal) navRole.value = roleVal;
+
+    const navXpdr = document.getElementById('xpdr-'+id);
+    const xpdrVal = getPlaneXpdr(plane);
+    if(navXpdr && navXpdr.value !== xpdrVal) navXpdr.value = xpdrVal;
+  };
+
+  const setEmergencyRowState = (tr, xpdrCode)=>{
+    if(!tr) return;
+    tr.classList.toggle('emergency', EMERGENCY_XPDR_CODES.has(sanitizeXpdr(xpdrCode)));
+  };
+
+  const table = document.createElement('table');
+  table.className = 'vuelosTable';
+  table.innerHTML = `
+    <thead>
+      <tr>
+        <th style="width:43%">Avión</th>
+        <th style="width:31%">Rol</th>
+        <th style="width:26%">XPDR</th>
+      </tr>
+    </thead>
+    <tbody></tbody>
+  `;
+  const tbody = table.querySelector('tbody');
+
+  st.planes.forEach(p=>{
+    const tr = document.createElement('tr');
+    tr.dataset.id = p.id;
+
+    const xpdr = getPlaneXpdr(p);
+    const roleVal = st.roles[p.id] || 'Neutral';
+
+    tr.innerHTML = `
+      <td>
+        <input class="ghost focusable focusAlt vuelosNameInput" type="text" value="${String(p.name||'').replace(/"/g,'&quot;')}" placeholder="Callsign">
+      </td>
+      <td>
+        <select class="ghost focusable focusAlt vuelosRoleSelect">
+          <option${roleVal==='Friend'?' selected':''}>Friend</option>
+          <option${roleVal==='Bandit'?' selected':''}>Bandit</option>
+          <option${roleVal==='Neutral'?' selected':''}>Neutral</option>
+          <option${roleVal==='Civilian'?' selected':''}>Civilian</option>
+        </select>
+      </td>
+      <td>
+        <div class="xpdrWrap">
+          <span class="xpdrDot" aria-hidden="true"></span>
+          <input class="ghost focusable focusAlt vuelosXpdrInput" type="text" inputmode="numeric" maxlength="4" placeholder="----" value="${xpdr}">
+        </div>
+      </td>
+    `;
+    setEmergencyRowState(tr, xpdr);
+
+    const nameInput = tr.querySelector('.vuelosNameInput');
+    const roleSelect = tr.querySelector('.vuelosRoleSelect');
+    const xpdrInput = tr.querySelector('.vuelosXpdrInput');
+    applyVuelosRoleVisual(roleSelect, tr, roleVal);
+
+    // Glow/focus visual consistente
+    [nameInput, roleSelect, xpdrInput].forEach(el=>{
+      el.addEventListener('focus',()=>el.classList.add('focusGlow'));
+      el.addEventListener('blur',()=>el.classList.remove('focusGlow'));
+    });
+
+    nameInput.addEventListener('input', e=>{
+      p.name = e.target.value;
+      syncPlaneEditsToNav(p);   // sincroniza panel de navegación (si el avión está seleccionado)
+      repaintAlt();             // sincroniza lista/alt panel que usa nombre
+      // El data block se actualiza en el render loop leyendo p.name
+    });
+    nameInput.addEventListener('change', ()=>{
+      // Re-render solo cuando termina edición para refrescar labels dependientes (ej. objetivos)
+      repaintNav();
+    });
+
+    roleSelect.addEventListener('change', e=>{
+      const newRole = e.target.value || 'Neutral';
+      st.roles[p.id] = newRole;
+      applyVuelosRoleVisual(roleSelect, tr, newRole);
+      syncPlaneEditsToNav(p);
+      // El data block y etiquetas se actualizan automáticamente con el estado global
+    });
+
+    xpdrInput.addEventListener('input', e=>{
+      const v = sanitizeXpdr(e.target.value);
+      if(e.target.value !== v) e.target.value = v;
+      setPlaneXpdr(p, v);
+      setEmergencyRowState(tr, v);
+      syncPlaneEditsToNav(p);
+      // Alerta visual de aeronave se actualiza en el próximo frame (usa p.xpdr)
+    });
+    xpdrInput.addEventListener('change', e=>{
+      const v = sanitizeXpdr(e.target.value);
+      e.target.value = v;
+      setPlaneXpdr(p, v);
+      setEmergencyRowState(tr, v);
+      syncPlaneEditsToNav(p);
+    });
+
+    tbody.appendChild(tr);
+  });
+
+  wrap.appendChild(table);
+}
+
 function repaintNav(){
+  repaintVuelos();
   const wrap=$('#navCards'); 
   if(!wrap) return;
   wrap.innerHTML='';
@@ -3382,6 +3743,7 @@ function repaintNav(){
     c.innerHTML=`
       <div class="navHeader">
         <input id="nm-${id}" class="ghost focusable focusAlt" type="text" value="${p.name}" style="flex:1;width:auto;min-width:90px">
+        <input id="xpdr-${id}" class="ghost focusable focusAlt xpdrInput" type="text" inputmode="numeric" maxlength="4" placeholder="----" title="Código transponder (4 cifras)" value="${getPlaneXpdr(p)}">
         <span class="navTitle">RUMBO</span>
         <span class="pill">${p.hdg.toFixed(0)}°</span>
       </div>
@@ -3447,7 +3809,22 @@ function repaintNav(){
     });
 
     // Nombre
-    c.querySelector('#nm-'+id).onchange=e=>{p.name=e.target.value; repaintAlt();};
+    c.querySelector('#nm-'+id).onchange=e=>{p.name=e.target.value; repaintAlt(); repaintVuelos();};
+
+    // Transponder (4 cifras)
+    const xpdrInput = c.querySelector('#xpdr-'+id);
+    xpdrInput.addEventListener('input', e=>{
+      const v = sanitizeXpdr(e.target.value);
+      if(e.target.value !== v) e.target.value = v;
+      setPlaneXpdr(p, v);
+      repaintVuelos();
+    });
+    xpdrInput.addEventListener('change', e=>{
+      const v = sanitizeXpdr(e.target.value);
+      e.target.value = v;
+      setPlaneXpdr(p, e.target.value);
+      repaintVuelos();
+    });
 
     // Botones de rumbo +/-10
     c.querySelectorAll('button[data-hdg]').forEach(btn=>{
@@ -3512,7 +3889,7 @@ function repaintNav(){
     // Rol (estado global)
     const role=c.querySelector('#role-'+id); 
     role.value=st.roles[id]||'Neutral'; 
-    role.onchange=e=>st.roles[id]=e.target.value;
+    role.onchange=e=>{ st.roles[id]=e.target.value; repaintVuelos(); };
 
     // Objetivo
     const tgt=c.querySelector('#tgt-'+id);
@@ -3671,8 +4048,8 @@ $('#toggleLabels').onclick = ()=>{
 };
 $('#reportBtn').onclick=()=>{ $('#report').style.display='block'; renderReport(); };
 $('#closeReport').onclick=()=>{ $('#report').style.display='none'; };
-$('#uMetric').onclick=()=>{ st.metric=true; if(window.__saveLocalPrefs) window.__saveLocalPrefs(); repaintNav(); repaintStudent(); repaintAlt(); if(window.__updateLocalUI) window.__updateLocalUI(); flash($('#uMetric')); };
-$('#uImperial').onclick=()=>{ st.metric=false; if(window.__saveLocalPrefs) window.__saveLocalPrefs(); repaintNav(); repaintStudent(); repaintAlt(); if(window.__updateLocalUI) window.__updateLocalUI(); flash($('#uImperial')); };
+$('#uMetric').onclick=()=>{ st.metric=true; if(window.__saveLocalPrefs) window.__saveLocalPrefs(); repaintNav(); repaintStudent(); repaintAlt(); repaintVuelos(); if(window.__updateLocalUI) window.__updateLocalUI(); flash($('#uMetric')); };
+$('#uImperial').onclick=()=>{ st.metric=false; if(window.__saveLocalPrefs) window.__saveLocalPrefs(); repaintNav(); repaintStudent(); repaintAlt(); repaintVuelos(); if(window.__updateLocalUI) window.__updateLocalUI(); flash($('#uImperial')); };
 $('#windSpd').onchange=e=>{ st.windKmh = st.metric?(+e.target.value||0):((+e.target.value||0)*KTS2KMH); flash(e.target); };
 $('#windDir').onchange=e=>{ st.windDir = +e.target.value||0; flash(e.target); };
 $('#failRadar').onclick=e=>{ st.radarFail=!st.radarFail; e.currentTarget.classList.toggle('hi',st.radarFail); flash(e.currentTarget); };
@@ -3875,14 +4252,15 @@ $('#predPlus').onclick=()=>{ st.predMin=Math.min(60,st.predMin+1); if(window.__s
 $('#predMinus').onclick=()=>{ st.predMin=Math.max(0,st.predMin-1); if(window.__saveLocalPrefs) window.__saveLocalPrefs(); if(window.__updateLocalUI) window.__updateLocalUI(); flash($('#predMinus')); };
 $('#addFighter').onclick=()=>{
   const n=st.planes.length+1,id='R'+n,nm=id;
-  const p={name:nm,id,x:(Math.random()*200-100),y:(Math.random()*200-100),hdg:Math.random()*360,spd:420,tgtSpd:420,alt:20000+(Math.random()*6000|0),tgtAlt:20000+(Math.random()*6000|0),turn:2,tgtHdg:Math.random()*360,ghosts:[],lastDet:0,fail:{comms:false,eng:'none',cab:'none',gear:false,bird:false},kills:0,fuel:100,jamming:false};
-  st.planes.push(p); st.roles[id]=Math.random()>.5?'Friend':'Bandit'; repaintPlanesList(); repaintNav(); repaintPairs(); repaintAlt(); flash($('#addFighter'));
+  const __sp = randomPeruSpawnNM(20);
+  const p={name:nm,id,x:__sp.x,y:__sp.y,hdg:Math.random()*360,spd:420,tgtSpd:420,alt:20000+(Math.random()*6000|0),tgtAlt:20000+(Math.random()*6000|0),turn:2,tgtHdg:Math.random()*360,ghosts:[],lastDet:0,fail:{comms:false,eng:'none',cab:'none',gear:false,bird:false},kills:0,fuel:100,jamming:false};
+  st.planes.push(p); st.roles[id]=Math.random()>.5?'Friend':'Bandit'; repaintPlanesList(); repaintNav(); repaintPairs(); repaintAlt(); repaintVuelos(); flash($('#addFighter'));
 };
 $('#addCom').onclick=()=>{
   const id='COM-'+Date.now(),edge=Math.floor(Math.random()*4),range=MAX_RANGE_NM*1.1; let x=0,y=0,hdg=0;
   if(edge===0){x=-range;y=(Math.random()-0.5)*range;hdg=90;} else if(edge===1){x=range;y=(Math.random()-0.5)*range;hdg=270;} else if(edge===2){y=-range;x=(Math.random()-0.5)*range;hdg=180;} else {y=range;x=(Math.random()-0.5)*range;hdg=0;}
   const p={name:'COMERCIAL '+(Math.floor(Math.random()*900)+100),id,x,y,hdg,spd:850,tgtSpd:850,alt:30000+(Math.random()*8000|0),tgtAlt:30000+(Math.random()*8000|0),turn:1.2,tgtHdg:hdg,ghosts:[],lastDet:0,fail:{comms:false,eng:'none',cab:'none',gear:false,bird:false},kills:0,fuel:100,jamming:false};
-  st.planes.push(p); st.roles[id]='Civilian'; repaintPlanesList(); repaintNav(); repaintPairs(); repaintAlt(); flash($('#addCom'));
+  st.planes.push(p); st.roles[id]='Civilian'; repaintPlanesList(); repaintNav(); repaintPairs(); repaintAlt(); repaintVuelos(); flash($('#addCom'));
 };
 
 $('#altFt').onclick=()=>{ st.altUnit='ft'; if(window.__saveLocalPrefs) window.__saveLocalPrefs(); repaintAlt(); if(window.__updateLocalUI) window.__updateLocalUI(); flash($('#altFt')); };
@@ -3898,13 +4276,13 @@ $('#unPair').onclick=()=>{ st.pairs=[]; repaintPairList(); };
 /* Online (beta) code removed per user request */
 /* ===== Inicialización ===== */
 function initUI(){
-  repaintPlanesList(); repaintNav(); repaintStudent(); repaintPairs(); repaintAlt();
+  repaintPlanesList(); repaintNav(); repaintStudent(); repaintPairs(); repaintAlt(); repaintVuelos();
   const swbtn = $('#toggleSweep'); if(swbtn) swbtn.classList.toggle('hi', !!st.sweep);
   const frbtn = $('#failRadar'); if(frbtn) frbtn.classList.toggle('hi', !!st.radarFail);
   const apbtn = $('#toggleAirports'); if(apbtn) apbtn.classList.toggle('hi', !!window.__uiShowAirports);
 }
 initUI(); try{fitToPlanes && fitToPlanes();}catch(e){}
-requestAnimationFrame(()=>{ repaintPlanesList(); repaintNav(); repaintStudent(); repaintPairs(); repaintAlt(); });
+requestAnimationFrame(()=>{ repaintPlanesList(); repaintNav(); repaintStudent(); repaintPairs(); repaintAlt(); repaintVuelos(); });
 </script>
 <script>
   // === Sync online: debounce + flush (ENTER) ===
@@ -4246,7 +4624,7 @@ requestAnimationFrame(()=>{ repaintPlanesList(); repaintNav(); repaintStudent();
   cvs.addEventListener('touchmove', (e)=>{
     if(pinch && e.touches.length === 2){
       e.preventDefault();
-      const scale = dist(e) / pinch.d0;
+      const scale = Math.pow(dist(e) / pinch.d0, 1.12); // ligeramente más rápido
       const newZoom = Math.min(MAX_Z, Math.max(MIN_Z, pinch.z0 * scale));
 
       // Mantiene el punto medio fijo durante el zoom
@@ -7501,3 +7879,4 @@ document.querySelectorAll('#pCmdBody .btn').forEach(btn=>{
 </body>
 </html>
 B Y     W   A   L   L   A   C   E 
+
