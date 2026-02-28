@@ -257,6 +257,63 @@ document.getElementById('cancelDelete').onclick = ()=>{
   .badge{display:inline-block;padding:1px 6px;border-radius:999px;border:1px solid #48bb78;background:#0c2a19;font:11px monospace;color:#d6ffe5}
   /* Alturas: números un poco más grandes */
   #altList .badge{font-size:13px;padding:2px 8px}
+/* ===== INFO AYUDA AL VUELO: compacto / profesional ===== */
+#pAlt .panel-header{padding-bottom:4px}
+#pAlt .panel-header h3{font-size:12.5px; letter-spacing:.2px}
+#pAltBody{gap:6px}
+#pAltBody .alt-wind-row{
+  display:grid;
+  grid-template-columns:auto auto 52px auto 52px;
+  gap:4px 6px;
+  align-items:center;
+  padding:0;
+  margin:0;
+}
+#pAltBody .chip{
+  padding:1px 7px;
+  font-size:11px;
+  border-color:#246b48;
+  background:rgba(18,33,24,.55);
+}
+#pAltBody .mini{font-size:10px;opacity:.88}
+#pAltBody .ghost{
+  height:24px;
+  min-height:24px;
+  padding:1px 6px;
+  font-size:12px;
+  border-radius:6px;
+}
+#pAltBody #altList{
+  gap:2px;
+  padding-right:2px;
+}
+#pAltBody #altList .alt-row{
+  display:grid;
+  grid-template-columns:minmax(0,1fr) auto;
+  gap:6px;
+  align-items:center;
+  padding:2px 0;
+  border-bottom:1px solid rgba(120,180,150,.10);
+}
+#pAltBody #altList .alt-row:last-child{border-bottom:none}
+#pAltBody #altList .alt-name{
+  min-width:0;
+  overflow:hidden;
+  text-overflow:ellipsis;
+  white-space:nowrap;
+  font-size:11px;
+  color:#d8efe0;
+  letter-spacing:.15px;
+}
+#pAltBody #altList .alt-val{
+  font:600 11px/1.1 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  color:#eaffea;
+  opacity:.95;
+}
+#pAltBody #altList .alt-ground{
+  opacity:.58;
+}
+
 
 #pNet{display:none!important}
 
@@ -1003,6 +1060,7 @@ canvas#radar {
           <div class="btn-grid small radar3">
             <button id="failRadar" class="btn mini focusable">Falla Radar</button>
             <button id="toggleSweep" class="btn mini focusable">Haz Radar</button>
+            <button id="toggleHalos" class="btn mini focusable">Halos</button>
                       <button id="toggleAirports" class="btn mini focusable">APTO</button>
 </div>
         </div>
@@ -1025,6 +1083,10 @@ canvas#radar {
           <div class="btn-grid small">
             <button id="addFighter" class="btn mini focusable">➕ Caza</button>
             <button id="addCom" class="btn mini focusable">✈️ Comercial</button>
+            <button id="addTrans" class="btn mini focusable">🛩️ Transporte</button>
+            <button id="addHeli" class="btn mini focusable">🚁 Helicóptero</button>
+            <button id="addAwacs" class="btn mini focusable">📡 AWACS</button>
+            <button id="addTanker" class="btn mini focusable">⛽ Tanker</button>
             <button id="delLast" class="btn mini focusable">🗑️ Eliminar</button>
           </div>
 
@@ -1084,13 +1146,13 @@ canvas#radar {
       <div id="pAltBody" class="panel-body">
         <div class="row" style="display:none"><button id="altFt" class="btn mini focusable">FT</button><button id="altM" class="btn mini focusable">M</button></div>
 
-        <div class="row">
+        <div class="row alt-wind-row">
           <span class="chip">Viento</span>
-          <span class="mini">Vel</span><input id="windSpd" class="ghost focusable" type="number" value="0" style="width:55px">
-          <span class="mini">Dir</span><input id="windDir" class="ghost focusable" type="number" value="0" style="width:55px">
+          <span class="mini">Vel</span><input id="windSpd" class="ghost focusable" type="number" value="0" style="width:52px">
+          <span class="mini">Dir</span><input id="windDir" class="ghost focusable" type="number" value="0" style="width:52px">
         </div>
 
-        <div id="altList" class="col" style="max-height:22vh;overflow:auto"></div>
+        <div id="altList" class="col" style="max-height:42vh;overflow:auto"></div>
       </div>
     </section>
 <section class="panel" id="pDraw">
@@ -1401,6 +1463,7 @@ let st={
   t0:0, elapsed:0,
   windKmh:0, windDir:0,
   sweep:true, sweepAng:0, sweepSpd:24, // ← más lento
+  showHalos:true,
   predMin:5,
   mode:'digital',
   missiles:[],
@@ -1854,7 +1917,7 @@ function drawPlane(p){
   const role=st.roles[p.id]||'Neutral';
   const color=role==='Civilian'?'#4de3ff':(role==='Friend'?'#35ff79':(role==='Bandit'?'#ff7070':'#7CFC00'));
   p.ghosts.forEach((g,i)=>{const sg=toScreen(g.x,g.y);const op=(i+1)/p.ghosts.length*.35;ctx.fillStyle=`rgba(179,0,255,${op})`;ctx.fillRect(sg.x-1,sg.y-1,2,2);});
-  ctx.save();ctx.translate(s.x,s.y);ctx.rotate(p.hdg*Math.PI/180);ctx.strokeStyle=color;ctx.lineWidth=2;ctx.strokeRect(-5,-5,10,10);ctx.restore();
+  ctx.save();ctx.beginPath();ctx.arc(s.x,s.y,3,0,2*Math.PI);ctx.fillStyle=color;ctx.fill();ctx.lineWidth=1;ctx.strokeStyle='rgba(0,0,0,0.55)';ctx.stroke();ctx.restore();
   const lr=(p.hdg-90)*Math.PI/180;ctx.beginPath();ctx.moveTo(s.x,s.y);ctx.lineTo(s.x+Math.cos(lr)*25,s.y+Math.sin(lr)*25);ctx.strokeStyle=color;ctx.lineWidth=.8;ctx.stroke();
   if(st.predMin>0){const t=st.predMin*60,nmps=(p.spd/NM2KM)/3600;const d=nmps*t;const ex=p.x+Math.cos(lr)*d,ey=p.y+Math.sin(lr)*d;const se=toScreen(ex,ey);ctx.setLineDash([4,5]);ctx.strokeStyle=color;ctx.lineWidth=.75;ctx.beginPath();ctx.moveTo(s.x,s.y);ctx.lineTo(se.x,se.y);ctx.stroke();ctx.setLineDash([]);}
   ctx.fillStyle='#eaffea';ctx.font='12px monospace';ctx.textAlign='left';
@@ -1986,9 +2049,11 @@ function drawAirports(){
 function drawGrid(){
   const grd=ctx.createLinearGradient(0,0,0,H);grd.addColorStop(0,'#031106');grd.addColorStop(1,'#000');ctx.fillStyle=grd;ctx.fillRect(0,0,W,H);
 ctx.strokeStyle='#0d2c13';ctx.lineWidth=1;
-  for(let r=GRID_STEP_NM;r<=MAX_RANGE_NM;r+=GRID_STEP_NM){
-    ctx.beginPath();ctx.arc(CX+offX,CY+offY,r*zoom*PX_PER_NM,0,2*Math.PI);ctx.stroke();
-    if(r%50===0){ctx.fillStyle='#164a1f';ctx.font='10px monospace';ctx.textAlign='center';const txt=st.metric?`${(r*NM2KM).toFixed(0)} km`:`${r} NM`;ctx.fillText(txt,CX+offX,CY+offY-r*zoom*PX_PER_NM-4);}
+  if(st.showHalos!==false){
+    for(let r=GRID_STEP_NM;r<=MAX_RANGE_NM;r+=GRID_STEP_NM){
+      ctx.beginPath();ctx.arc(CX+offX,CY+offY,r*zoom*PX_PER_NM,0,2*Math.PI);ctx.stroke();
+      if(r%50===0){ctx.fillStyle='#164a1f';ctx.font='10px monospace';ctx.textAlign='center';const txt=st.metric?`${(r*NM2KM).toFixed(0)} km`:`${r} NM`;ctx.fillText(txt,CX+offX,CY+offY-r*zoom*PX_PER_NM-4);}
+    }
   }
   ctx.strokeStyle='#0e3a17';
   for(let a=0;a<360;a+=30){const rad=(a-90)*Math.PI/180;const ex=CX+offX+Math.cos(rad)*MAX_RANGE_NM*zoom*PX_PER_NM,ey=CY+offY+Math.sin(rad)*MAX_RANGE_NM*zoom*PX_PER_NM;ctx.beginPath();ctx.moveTo(CX+offX,CY+offY);ctx.lineTo(ex,ey);ctx.stroke();}
@@ -2188,13 +2253,13 @@ function rebuildPeruMapCache(){
     c.setTransform(sx, 0, 0, sx, CX+offX, CY+offY);
 
     // Estilo táctico, líneas delgadas como los aros
-    const wThinPx = 0.8;   // principal
-    const wGlowPx = 1.6;   // halo muy suave
+    const wThinPx = 0.65;   // principal (más delgado)
+    const wGlowPx = 1.20;   // halo muy suave (más delgado)
     const lwThin  = wThinPx / sx;
     const lwGlow  = wGlowPx / sx;
 
     // Halo suave
-    c.strokeStyle = 'rgba(46,231,79,0.10)';
+    c.strokeStyle = 'rgba(245,238,220,0.10)';
     c.lineWidth = lwGlow;
     c.beginPath();
     for(let r=0;r<PERU_DEPT_RINGS.length;r++){ 
@@ -2207,7 +2272,7 @@ function rebuildPeruMapCache(){
     c.stroke();
 
     // Trazo principal
-    c.strokeStyle = 'rgba(46,231,79,0.32)';
+    c.strokeStyle = 'rgba(245,238,220,0.55)';
     c.lineWidth = lwThin;
     c.beginPath();
     for(let r=0;r<PERU_DEPT_RINGS.length;r++){ 
@@ -3934,33 +3999,28 @@ function repaintAlt(){
   // Panel informativo: nombre + altura en FT (ordenado de mayor a menor)
   const sorted=[...st.planes].sort((a,b)=>(b.alt||0)-(a.alt||0));
   sorted.forEach(p=>{
-    const row=document.createElement('div'); 
-    row.className='row'; 
-    row.style.justifyContent='space-between'; 
-    row.style.alignItems='center';
+    const row=document.createElement('div');
+    row.className='alt-row';
 
-    const tag=document.createElement('span'); 
-    tag.className='pill'; 
+    const tag=document.createElement('span');
+    tag.className='alt-name';
     tag.textContent=p.name;
 
-    const val=document.createElement('span'); 
-    val.className='badge'; 
+    const val=document.createElement('span');
+    val.className='alt-val';
     val.textContent=`${(p.alt||0)|0} ft`;
 
-    row.appendChild(tag); 
-    row.appendChild(val); 
+    row.appendChild(tag);
+    row.appendChild(val);
     list.appendChild(row);
   });
 
   // Referencia al suelo (0 ft)
   const ground=document.createElement('div');
-  ground.className='row';
-  ground.style.justifyContent='space-between';
-  ground.style.alignItems='center';
-  ground.style.opacity='0.65';
+  ground.className='alt-row alt-ground';
 
-  const g1=document.createElement('span'); g1.className='pill'; g1.textContent='SUELO';
-  const g2=document.createElement('span'); g2.className='badge'; g2.textContent='0 ft';
+  const g1=document.createElement('span'); g1.className='alt-name'; g1.textContent='SUELO';
+  const g2=document.createElement('span'); g2.className='alt-val'; g2.textContent='0 ft';
   ground.appendChild(g1); ground.appendChild(g2);
   list.appendChild(ground);
 }
@@ -4054,6 +4114,7 @@ $('#windSpd').onchange=e=>{ st.windKmh = st.metric?(+e.target.value||0):((+e.tar
 $('#windDir').onchange=e=>{ st.windDir = +e.target.value||0; flash(e.target); };
 $('#failRadar').onclick=e=>{ st.radarFail=!st.radarFail; e.currentTarget.classList.toggle('hi',st.radarFail); flash(e.currentTarget); };
 $('#toggleSweep').onclick=e=>{ st.sweep=!st.sweep; e.currentTarget.classList.toggle('hi',st.sweep); flash(e.currentTarget); };
+$('#toggleHalos').onclick=e=>{ st.showHalos = !st.showHalos; e.currentTarget.classList.toggle('hi', !!st.showHalos); flash(e.currentTarget); };
 $('#toggleAirports').onclick=e=>{ 
   openAptoModal();
   flash(e.currentTarget);
@@ -4250,17 +4311,100 @@ window.addEventListener('DOMContentLoaded', bindAptoUI);
 $('#modeDigital').onclick=()=>{ st.mode='digital'; if(window.__saveLocalPrefs) window.__saveLocalPrefs(); flash($('#modeDigital')); };
 $('#predPlus').onclick=()=>{ st.predMin=Math.min(60,st.predMin+1); if(window.__saveLocalPrefs) window.__saveLocalPrefs(); if(window.__updateLocalUI) window.__updateLocalUI(); flash($('#predPlus')); };
 $('#predMinus').onclick=()=>{ st.predMin=Math.max(0,st.predMin-1); if(window.__saveLocalPrefs) window.__saveLocalPrefs(); if(window.__updateLocalUI) window.__updateLocalUI(); flash($('#predMinus')); };
+function __spawnEdgeAircraft(cfg){
+  const id=(cfg.idPrefix||'AC')+'-'+Date.now()+'-'+Math.floor(Math.random()*1000);
+  const edge=Math.floor(Math.random()*4),range=MAX_RANGE_NM*1.1; let x=0,y=0,hdg=0;
+  if(edge===0){x=-range;y=(Math.random()-0.5)*range;hdg=90;}
+  else if(edge===1){x=range;y=(Math.random()-0.5)*range;hdg=270;}
+  else if(edge===2){y=-range;x=(Math.random()-0.5)*range;hdg=180;}
+  else {y=range;x=(Math.random()-0.5)*range;hdg=0;}
+  const altMin = cfg.altMin ?? 30000, altVar = cfg.altVar ?? 8000;
+  const alt0 = altMin + (Math.random()*altVar|0);
+  const p={
+    name:(cfg.namePrefix||'AERONAVE')+' '+(Math.floor(Math.random()*900)+100),
+    id,x,y,hdg,
+    spd:cfg.spd ?? 450,tgtSpd:cfg.spd ?? 450,
+    alt:alt0,tgtAlt:alt0,
+    turn:cfg.turn ?? 1.5,tgtHdg:hdg,
+    turnBias:null,
+    ghosts:[],lastDet:0,
+    fail:{comms:false,eng:'none',cab:'none',gear:false,bird:false},
+    kills:0,fuel:100,jamming:false,
+    xpdr:'',
+    tagDx:12,tagDy:-6
+  };
+  st.planes.push(p);
+  st.roles[id]=cfg.role || 'Friend';
+}
+
+function __spawnInlandAircraft(cfg){
+  const n=st.planes.length+1;
+  const id=(cfg.idPrefix||'R')+n;
+  const __sp = randomPeruSpawnNM(cfg.spawnMargin ?? 20);
+  const altMin = cfg.altMin ?? 20000, altVar = cfg.altVar ?? 6000;
+  const alt0 = altMin + (Math.random()*altVar|0);
+  const p={
+    name:(cfg.namePrefix||id),
+    id,x:__sp.x,y:__sp.y,
+    hdg:Math.random()*360,
+    spd:cfg.spd ?? 420,tgtSpd:cfg.spd ?? 420,
+    alt:alt0,tgtAlt:alt0,
+    turn:cfg.turn ?? 2,tgtHdg:Math.random()*360,
+    turnBias:null,
+    ghosts:[],lastDet:0,
+    fail:{comms:false,eng:'none',cab:'none',gear:false,bird:false},
+    kills:0,fuel:100,jamming:false,
+    xpdr:'',
+    tagDx:12,tagDy:-6
+  };
+  st.planes.push(p);
+  st.roles[id]=cfg.role || 'Friend';
+}
+
 $('#addFighter').onclick=()=>{
   const n=st.planes.length+1,id='R'+n,nm=id;
   const __sp = randomPeruSpawnNM(20);
-  const p={name:nm,id,x:__sp.x,y:__sp.y,hdg:Math.random()*360,spd:420,tgtSpd:420,alt:20000+(Math.random()*6000|0),tgtAlt:20000+(Math.random()*6000|0),turn:2,tgtHdg:Math.random()*360,ghosts:[],lastDet:0,fail:{comms:false,eng:'none',cab:'none',gear:false,bird:false},kills:0,fuel:100,jamming:false};
+  const spd0 = 900 + (Math.random()*350|0);     // caza: ~900–1250 km/h
+  const alt0 = 24000 + (Math.random()*16000|0); // caza: ~24k–40k ft
+  const p={
+    name:nm,id,x:__sp.x,y:__sp.y,
+    hdg:Math.random()*360,
+    spd:spd0,tgtSpd:spd0,
+    alt:alt0,tgtAlt:alt0,
+    turn:4.8,tgtHdg:Math.random()*360,
+    turnBias:null,
+    ghosts:[],lastDet:0,
+    fail:{comms:false,eng:'none',cab:'none',gear:false,bird:false},
+    kills:0,fuel:100,jamming:false,
+    xpdr:'',
+    tagDx:12,tagDy:-6
+  };
   st.planes.push(p); st.roles[id]=Math.random()>.5?'Friend':'Bandit'; repaintPlanesList(); repaintNav(); repaintPairs(); repaintAlt(); repaintVuelos(); flash($('#addFighter'));
 };
 $('#addCom').onclick=()=>{
-  const id='COM-'+Date.now(),edge=Math.floor(Math.random()*4),range=MAX_RANGE_NM*1.1; let x=0,y=0,hdg=0;
-  if(edge===0){x=-range;y=(Math.random()-0.5)*range;hdg=90;} else if(edge===1){x=range;y=(Math.random()-0.5)*range;hdg=270;} else if(edge===2){y=-range;x=(Math.random()-0.5)*range;hdg=180;} else {y=range;x=(Math.random()-0.5)*range;hdg=0;}
-  const p={name:'COMERCIAL '+(Math.floor(Math.random()*900)+100),id,x,y,hdg,spd:850,tgtSpd:850,alt:30000+(Math.random()*8000|0),tgtAlt:30000+(Math.random()*8000|0),turn:1.2,tgtHdg:hdg,ghosts:[],lastDet:0,fail:{comms:false,eng:'none',cab:'none',gear:false,bird:false},kills:0,fuel:100,jamming:false};
-  st.planes.push(p); st.roles[id]='Civilian'; repaintPlanesList(); repaintNav(); repaintPairs(); repaintAlt(); repaintVuelos(); flash($('#addCom'));
+  // Parámetros de avión comercial (jet)
+  __spawnEdgeAircraft({idPrefix:'COM',namePrefix:'COMERCIAL',spd:850,turn:1.2,altMin:30000,altVar:8000,role:'Civilian'});
+  repaintPlanesList(); repaintNav(); repaintPairs(); repaintAlt(); repaintVuelos(); flash($('#addCom'));
+};
+$('#addTrans').onclick=()=>{
+  // Parámetros de avión de transporte (más lento y maniobra moderada)
+  __spawnEdgeAircraft({idPrefix:'TRN',namePrefix:'TRANSPORTE',spd:560,turn:1.8,altMin:16000,altVar:14000,role:'Friend'});
+  repaintPlanesList(); repaintNav(); repaintPairs(); repaintAlt(); repaintVuelos(); flash($('#addTrans'));
+};
+$('#addHeli').onclick=()=>{
+  // Parámetros de helicóptero
+  __spawnInlandAircraft({idPrefix:'HEL',namePrefix:'HELICÓPTERO',spd:220,turn:4.5,altMin:500,altVar:4500,role:'Friend',spawnMargin:12});
+  repaintPlanesList(); repaintNav(); repaintPairs(); repaintAlt(); repaintVuelos(); flash($('#addHeli'));
+};
+$('#addAwacs').onclick=()=>{
+  // AWACS con parámetros de avión comercial (plataforma grande)
+  __spawnEdgeAircraft({idPrefix:'AWACS',namePrefix:'AWACS',spd:760,turn:1.3,altMin:27000,altVar:7000,role:'Friend'});
+  repaintPlanesList(); repaintNav(); repaintPairs(); repaintAlt(); repaintVuelos(); flash($('#addAwacs'));
+};
+$('#addTanker').onclick=()=>{
+  // Tanker con parámetros de avión comercial (plataforma grande)
+  __spawnEdgeAircraft({idPrefix:'TNK',namePrefix:'TANKER',spd:760,turn:1.3,altMin:22000,altVar:10000,role:'Friend'});
+  repaintPlanesList(); repaintNav(); repaintPairs(); repaintAlt(); repaintVuelos(); flash($('#addTanker'));
 };
 
 $('#altFt').onclick=()=>{ st.altUnit='ft'; if(window.__saveLocalPrefs) window.__saveLocalPrefs(); repaintAlt(); if(window.__updateLocalUI) window.__updateLocalUI(); flash($('#altFt')); };
@@ -4279,6 +4423,7 @@ function initUI(){
   repaintPlanesList(); repaintNav(); repaintStudent(); repaintPairs(); repaintAlt(); repaintVuelos();
   const swbtn = $('#toggleSweep'); if(swbtn) swbtn.classList.toggle('hi', !!st.sweep);
   const frbtn = $('#failRadar'); if(frbtn) frbtn.classList.toggle('hi', !!st.radarFail);
+  const hbtn = $('#toggleHalos'); if(hbtn) hbtn.classList.toggle('hi', st.showHalos!==false);
   const apbtn = $('#toggleAirports'); if(apbtn) apbtn.classList.toggle('hi', !!window.__uiShowAirports);
 }
 initUI(); try{fitToPlanes && fitToPlanes();}catch(e){}
@@ -4313,7 +4458,7 @@ requestAnimationFrame(()=>{ repaintPlanesList(); repaintNav(); repaintStudent();
   window.flushSync = flushSync;
 
   // Conectar con los botones principales
-  ['#addFighter','#addCom','#delLast','#pause','#start'].forEach(id=>{
+  ['#addFighter','#addCom','#addTrans','#addHeli','#addAwacs','#addTanker','#delLast','#pause','#start'].forEach(id=>{
     const el = document.querySelector(id);
     if(el){
       const orig = el.onclick;
@@ -6779,23 +6924,25 @@ document.querySelectorAll('#pCmdBody .btn').forEach(btn=>{
     return Number.isFinite(n) ? n : null;
   }
   function clamp(n, a, b){ return Math.max(a, Math.min(b, n)); }
-  function planePickThresholdNM(){
-    let z = 1;
-    try{ if(typeof zoom !== 'undefined') z = Math.max(0.02, zoom || 1); }catch(_){ z = 1; }
-    return 15 / z;
+  function planePickThresholdPx(){
+    // Selección V+click muy precisa: prácticamente solo el símbolo del avión (cuadro ~10x10 px)
+    // Se usa radio corto para evitar capturar aeronaves vecinas cuando están juntas.
+    return 7;
   }
   function findPlaneAtClient(clientX, clientY){
     if(!window.st || !Array.isArray(st.planes)) return null;
     const r = cvs.getBoundingClientRect();
     if(clientX < r.left || clientX > r.right || clientY < r.top || clientY > r.bottom) return null;
-    if(typeof toWorld !== 'function') return null;
-    const w = toWorld(clientX - r.left, clientY - r.top);
-    const th = planePickThresholdNM();
+    if(typeof toScreen !== 'function') return null;
+    const px = clientX - r.left;
+    const py = clientY - r.top;
+    const thPx = planePickThresholdPx();
     let best = null, bd = 1e9;
     for(const p of st.planes){
       if(!p) continue;
-      const d = Math.hypot((w.x||0) - (p.x||0), (w.y||0) - (p.y||0));
-      if(d < th && d < bd){ bd = d; best = p; }
+      const s = toScreen(p.x||0, p.y||0);
+      const d = Math.hypot(px - s.x, py - s.y);
+      if(d <= thPx && d < bd){ bd = d; best = p; }
     }
     return best;
   }
