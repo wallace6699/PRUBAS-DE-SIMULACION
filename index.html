@@ -1,4 +1,4 @@
-ESTE SIMULADOR SE ENCUENTRA EN FASE DE PRUEBA - PUEDEN OCURRIR ERRORES DURANTE EL FUNCIONAMIENTO 2.2-040326
+ESTE SIMULADOR SE ENCUENTRA EN FASE DE PRUEBA - PUEDEN OCURRIR ERRORES DURANTE EL FUNCIONAMIENTO 2.5.2
 <!DOCTYPE html>
 <html lang="es">
 <head>
@@ -62,32 +62,53 @@ document.getElementById('cancelDelete').onclick = ()=>{
     onDisconnect(presRef).remove();
   });
 
+  // Cola de envíos: evita solapar escrituras y siempre manda el último estado
+  let __pushInFlight = false;
+  let __pushQueued = false;
+  let __pushLast = null;
+
   async function pushStateToCloud(local) {
     if (!local) return;
+    __pushLast = local;
 
-    // ⚠️ LOCAL ONLY (no sync): Data Block offsets (tagDx/tagDy/dataBlock), unidades, predicción
-    // Enviamos a la nube el estado compartido, pero sin esas preferencias locales.
-    const planesClean = Array.isArray(local.planes) ? local.planes.map(p=>{
-      if(!p || typeof p !== 'object') return p;
-      const q = {...p};
-      delete q.tagDx;
-      delete q.tagDy;
-      delete q.dataBlock; // drag Z+click solo local por equipo/usuario
-      return q;
-    }) : local.planes;
+    // Si ya hay un envío en curso, marcamos pendiente y salimos (se reenviará al terminar)
+    if(__pushInFlight){ __pushQueued = true; return; }
+    __pushInFlight = true;
 
-    const payload = {
-      planes: planesClean,
-      roles: local.roles,
-      drawings: local.drawings,
-      lastWriteBy: currentUID,
-      missiles: local.missiles,
-      lastUpdate: serverTimestamp()
-    };
-    await set(stateRef, payload);
+    try{
+      do{
+        __pushQueued = false;
+        const snap = __pushLast;
+
+        // ⚠️ LOCAL ONLY (no sync): Data Block offsets (tagDx/tagDy/dataBlock), unidades, predicción
+        // Enviamos a la nube el estado compartido, pero sin esas preferencias locales.
+        const planesClean = Array.isArray(snap.planes) ? snap.planes.map(p=>{
+          if(!p || typeof p !== 'object') return p;
+          const q = {...p};
+          delete q.tagDx;
+          delete q.tagDy;
+          delete q.dataBlock; // drag Z+click solo local por equipo/usuario
+          return q;
+        }) : snap.planes;
+
+        const payload = {
+          planes: planesClean,
+          roles: snap.roles,
+          drawings: snap.drawings,
+          lastWriteBy: currentUID,
+          missiles: snap.missiles,
+          lastUpdate: serverTimestamp()
+        };
+
+        await set(stateRef, payload);
+      }while(__pushQueued);
+    }finally{
+      __pushInFlight = false;
+    }
   }
 
-  onValue(stateRef, (snap) => {
+
+onValue(stateRef, (snap) => {
     const v = snap.val();
     if (!v || v.lastWriteBy === currentUID) return;
     try {
@@ -4525,7 +4546,7 @@ requestAnimationFrame(()=>{ repaintPlanesList(); repaintNav(); repaintStudent();
   let __syncTimer = null;
   let __syncPending = false;
 
-  function scheduleSync(delay=90){
+  function scheduleSync(delay=60){
     __syncPending = true;
     if(__syncTimer) return;
     __syncTimer = setTimeout(()=>{
@@ -4560,14 +4581,21 @@ requestAnimationFrame(()=>{ repaintPlanesList(); repaintNav(); repaintStudent();
   // Cuando se suelta el mouse (mover aviones o dibujos)
   addEventListener('mouseup', ()=>scheduleSync(), {passive:true});
 
-  // ENTER en navegación => aplicar change y FLUSH inmediato
+  // ENTER en navegación/vuelos => aplicar change y FLUSH inmediato
   addEventListener('keydown', (e)=>{
     if(e.key!=='Enter') return;
     const t = e.target;
     if(!t || t.tagName!=='INPUT') return;
+
     const id = (t.id||'');
-    // Campos del panel de navegación
-    if(/^((nm|hdg|spd|alt|tr)-)/.test(id)){
+    const isNav = /^((nm|xpdr|hdg|spd|alt|tr)-)/.test(id);
+    const isVuelos = t.classList && (
+      t.classList.contains('vuelosNameInput') ||
+      t.classList.contains('vuelosXpdrInput') ||
+      t.classList.contains('vuelosTipoInput')
+    );
+
+    if(isNav || isVuelos){
       try{
         // forzar onchange (en algunos navegadores Enter no dispara change)
         t.dispatchEvent(new Event('change', {bubbles:true}));
@@ -4576,7 +4604,49 @@ requestAnimationFrame(()=>{ repaintPlanesList(); repaintNav(); repaintStudent();
     }
   }, true);
 
-  // Enviar un primer estado al cargar
+  // === REALTIME SYNC (NAV + VUELOS) ===
+  // Dispara sincronización al editar rumbo/vel/alt/giro/IFF/rol/nombre sin esperar blur.
+  function __setcaAffectsSharedState(t){
+    if(!t) return false;
+    const id = (t.id || '');
+    if(id && /^((nm|xpdr|hdg|spd|alt|tr|role|tgt)-)/.test(id)) return true;
+
+    // Panel VUELOS (no tiene IDs por fila)
+    if(t.classList){
+      if(t.classList.contains('vuelosNameInput')) return true;
+      if(t.classList.contains('vuelosRoleSelect')) return true;
+      if(t.classList.contains('vuelosXpdrInput')) return true;
+      if(t.classList.contains('vuelosTipoInput')) return true; // opcional (tipo)
+    }
+    return false;
+  }
+
+  // INPUT: debounced (fluido mientras se escribe)
+  addEventListener('input', (e)=>{
+    const t = e.target;
+    if(!__setcaAffectsSharedState(t)) return;
+    // Esperar al final del tick por si otro handler actualiza el estado primero
+    setTimeout(()=>scheduleSync(65), 0);
+  }, true);
+
+  // CHANGE: casi inmediato (al terminar edición o seleccionar)
+  addEventListener('change', (e)=>{
+    const t = e.target;
+    if(!__setcaAffectsSharedState(t)) return;
+    setTimeout(()=>scheduleSync(0), 0);
+  }, true);
+
+  // CLICKS en botones del panel NAV (±10/±50/±100, sesgo I/D, armas, etc.)
+  addEventListener('click', (e)=>{
+    const btn = e.target && e.target.closest ? e.target.closest('#navCards button, #vuelosList button') : null;
+    if(!btn) return;
+    // Solo los botones con data- (los que realmente cambian estado compartido)
+    if(btn.matches('[data-hdg],[data-spd],[data-alt],[data-turn],[data-bias],[data-m]')){
+      setTimeout(()=>scheduleSync(0), 0);
+    }
+  }, true);
+
+// Enviar un primer estado al cargar
   setTimeout(()=>scheduleSync(0),1200);
 </script>
 <!-- === SETCA Enhancements Patch (Alumno + Emparejamientos + Falla Radar + Pinch Zoom + Título) === -->
