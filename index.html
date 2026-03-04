@@ -1,4 +1,4 @@
-ESTE SIMULADOR SE ENCUENTRA EN FASE DE PRUEBA - PUEDEN OCURRIR ERRORES DURANTE EL FUNCIONAMIENTO 2.5.2
+ESTE SIMULADOR SE ENCUENTRA EN FASE DE PRUEBA - PUEDEN OCURRIR ERRORES DURANTE EL FUNCIONAMIENTO 2.2-040326
 <!DOCTYPE html>
 <html lang="es">
 <head>
@@ -611,12 +611,14 @@ canvas#radar {
   letter-spacing:.01em;
 }
 #vuelosList .vuelosTable .vuelosNameInput,
+#vuelosList .vuelosTable .vuelosTipoInput,
 #vuelosList .vuelosTable .vuelosRoleSelect,
 #vuelosList .vuelosTable .vuelosXpdrInput{
   border:none !important;
   border-bottom:none !important;
 }
 #vuelosList .vuelosTable .vuelosNameInput:hover,
+#vuelosList .vuelosTable .vuelosTipoInput:hover,
 #vuelosList .vuelosTable .vuelosRoleSelect:hover,
 #vuelosList .vuelosTable .vuelosXpdrInput:hover,
 #vuelosList .vuelosTable .focusGlow{
@@ -625,6 +627,13 @@ canvas#radar {
   background:transparent !important;
   box-shadow:none !important;
   outline:none !important;
+}
+
+#vuelosList .vuelosTable .vuelosTipoInput{
+  width:100%;
+  text-align:center;
+  font-weight:600;
+  letter-spacing:.01em;
 }
 
 #vuelosList .vuelosTable .vuelosRoleSelect{
@@ -1448,9 +1457,9 @@ window.__uiShowAirports = !!window.__uiAptoCfg.enabled && (window.__uiAptoCfg.mo
 const CONTACT_PERSIST_MS=5000; // ← 5 seg en analógico
 const __INIT_SPAWNS = [randomPeruSpawnNM(14), randomPeruSpawnNM(14), randomPeruSpawnNM(14)];
 const INIT_PLANES=[
-  {name:'R1',id:'R1',x:__INIT_SPAWNS[0].x,y:__INIT_SPAWNS[0].y,hdg:0, spd:450, tgtSpd:450, alt:20000, tgtAlt:20000, turn:2, tgtHdg:0, ghosts:[], lastDet:0, fail:{comms:false,eng:'none',cab:'none',gear:false,bird:false}, kills:0, fuel:100, jamming:false, xpdr:''},
-  {name:'R2',id:'R2',x:__INIT_SPAWNS[1].x,y:__INIT_SPAWNS[1].y, hdg:45, spd:450, tgtSpd:450, alt:21000, tgtAlt:21000, turn:2, tgtHdg:45, ghosts:[], lastDet:0, fail:{comms:false,eng:'none',cab:'none',gear:false,bird:false}, kills:0, fuel:100, jamming:false, xpdr:''},
-  {name:'R3',id:'R3',x:__INIT_SPAWNS[2].x,y:__INIT_SPAWNS[2].y,hdg:90, spd:500, tgtSpd:500, alt:22000, tgtAlt:22000, turn:2.5,tgtHdg:90, ghosts:[], lastDet:0, fail:{comms:false,eng:'none',cab:'none',gear:false,bird:false}, kills:0, fuel:100, jamming:false, xpdr:''},
+  {name:'R1',id:'R1',x:__INIT_SPAWNS[0].x,y:__INIT_SPAWNS[0].y,hdg:0, spd:450, tgtSpd:450, alt:20000, tgtAlt:20000, turn:2, tgtHdg:0, ghosts:[], lastDet:0, fail:{comms:false,eng:'none',cab:'none',gear:false,bird:false}, kills:0, fuel:100, jamming:false, xpdr:'', tipo:'Caza'},
+  {name:'R2',id:'R2',x:__INIT_SPAWNS[1].x,y:__INIT_SPAWNS[1].y, hdg:45, spd:450, tgtSpd:450, alt:21000, tgtAlt:21000, turn:2, tgtHdg:45, ghosts:[], lastDet:0, fail:{comms:false,eng:'none',cab:'none',gear:false,bird:false}, kills:0, fuel:100, jamming:false, xpdr:'', tipo:'Caza'},
+  {name:'R3',id:'R3',x:__INIT_SPAWNS[2].x,y:__INIT_SPAWNS[2].y,hdg:90, spd:500, tgtSpd:500, alt:22000, tgtAlt:22000, turn:2.5,tgtHdg:90, ghosts:[], lastDet:0, fail:{comms:false,eng:'none',cab:'none',gear:false,bird:false}, kills:0, fuel:100, jamming:false, xpdr:'', tipo:'Caza'},
 ];
 let st={
   showLabels:true,
@@ -1921,6 +1930,9 @@ function drawPlane(p){
   const lr=(p.hdg-90)*Math.PI/180;ctx.beginPath();ctx.moveTo(s.x,s.y);ctx.lineTo(s.x+Math.cos(lr)*25,s.y+Math.sin(lr)*25);ctx.strokeStyle=color;ctx.lineWidth=.8;ctx.stroke();
   if(st.predMin>0){const t=st.predMin*60,nmps=(p.spd/NM2KM)/3600;const d=nmps*t;const ex=p.x+Math.cos(lr)*d,ey=p.y+Math.sin(lr)*d;const se=toScreen(ex,ey);ctx.setLineDash([4,5]);ctx.strokeStyle=color;ctx.lineWidth=.75;ctx.beginPath();ctx.moveTo(s.x,s.y);ctx.lineTo(se.x,se.y);ctx.stroke();ctx.setLineDash([]);}
   ctx.fillStyle='#eaffea';ctx.font='12px monospace';ctx.textAlign='left';
+  const tipoDb = String(getPlaneTipoDisplay(p) || '').trim();
+  const callsignDb = String(p.name || '').trim();
+  const callsignTipoDb = (callsignDb && tipoDb) ? `${callsignDb}/${tipoDb}` : (callsignDb || tipoDb);
   // labelMode: 0 = normal (data block), 1 = solo nombre, 2 = sin etiquetas, 3 = radar analógico
   if(st.labelMode===0 || st.labelMode===1){
     if(p.tagDx===undefined) p.tagDx=12;
@@ -1931,13 +1943,18 @@ function drawPlane(p){
 
     if(st.labelMode===1){
       // Solo nombre (sin data block)
+      ctx.fillStyle = color;
       ctx.fillText(p.name, bx+2, by);
+      ctx.fillStyle = '#eaffea';
     } else {
       const xpdrCode = getPlaneXpdr(p);
-      const nameW = ctx.measureText(p.name || '').width;
+      const nameW = ctx.measureText(callsignTipoDb || '').width;
       const xpdrW = ctx.measureText(xpdrCode).width;
-      const w = Math.max(88, Math.ceil(nameW + xpdrW + 18));
-      const h = 56;
+      const __beText = (typeof window.__SETCA_BE_getTextForPlane === 'function') ? (window.__SETCA_BE_getTextForPlane(p) || '') : '';
+      const __hasBeText = !!__beText;
+      const __beW = __hasBeText ? ctx.measureText(__beText).width : 0;
+      const w = Math.max(88, Math.ceil(Math.max(nameW + xpdrW + 18, __beW + 10)));
+      const h = __hasBeText ? 70 : 56;
 
       // --- connector line (very thin) ---
       ctx.strokeStyle = 'rgba(255,255,255,0.6)';
@@ -1953,7 +1970,12 @@ function drawPlane(p){
       ctx.strokeRect(bx, by-12, w, h);
 
       // --- text (nombre + transponder sincronizado) ---
-      ctx.fillText(p.name, bx+4, by);
+      // CALLSIGN (y TIPO) con color según rol
+      ctx.fillStyle = color;
+      ctx.fillText(callsignTipoDb || p.name || '', bx+4, by);
+
+      // IFF / resto del data block en color estándar
+      ctx.fillStyle = '#eaffea';
       ctx.textAlign='right';
       ctx.fillText(xpdrCode, bx+w-4, by);
       ctx.textAlign='left';
@@ -1965,6 +1987,15 @@ function drawPlane(p){
         ctx.fillText(`${p.alt|0} ft`, bx+4, by+14);
         ctx.fillText(`${(p.spd*KMH2KTS).toFixed(0)} kts`, bx+4, by+28);
         ctx.fillText(`${String(p.hdg|0).padStart(3,'0')}°`, bx+4, by+42);
+      }
+      if(__hasBeText){
+        const __prevFont = ctx.font;
+        const __prevFill = ctx.fillStyle;
+        ctx.font = '10px monospace';
+        ctx.fillStyle = '#ffe066';
+        ctx.fillText(__beText, bx+4, by+54);
+        ctx.font = __prevFont;
+        ctx.fillStyle = __prevFill;
       }
     }
   }
@@ -2337,11 +2368,27 @@ function drawShapes(){
 
     // --- PUNTO ---
     if(d.type === 'point'){
-      // Puntito sutil blanco
-      ctx.fillStyle = d.dotColor || d.color || 'rgba(255,255,255,0.75)';
-      ctx.beginPath();
-      ctx.arc(s.x, s.y, 2.2, 0, 2*Math.PI);
-      ctx.fill();
+      // Punto normal o marcador "+" (para coordenadas manuales)
+      const __ptColor = d.dotColor || d.color || 'rgba(255,255,255,0.75)';
+      ctx.fillStyle = __ptColor;
+      ctx.strokeStyle = __ptColor;
+
+      if(d.marker === 'plus'){
+        const __r = (typeof d.plusSize === 'number' && isFinite(d.plusSize)) ? d.plusSize : 4.5;
+        const __pw = (typeof d.plusWidth === 'number' && isFinite(d.plusWidth)) ? d.plusWidth : 1.2;
+        ctx.lineWidth = Math.max(0.8, __pw);
+        ctx.beginPath();
+        ctx.moveTo(s.x - __r, s.y);
+        ctx.lineTo(s.x + __r, s.y);
+        ctx.moveTo(s.x, s.y - __r);
+        ctx.lineTo(s.x, s.y + __r);
+        ctx.stroke();
+      }else{
+        // Puntito sutil blanco
+        ctx.beginPath();
+        ctx.arc(s.x, s.y, 2.2, 0, 2*Math.PI);
+        ctx.fill();
+      }
     }
 
     // --- LÍNEA ---
@@ -3385,8 +3432,8 @@ addEventListener('mouseup',()=>{
       const p = llToLocalNM(lat, lon, ref.lat, ref.lon);
       const x = p.x, y = p.y;
       const id='D-'+Math.random().toString(36).slice(2,10).toUpperCase();
-      // Punto por coordenadas: blanco sutil, renombrable (muestra nombre si lo asignas)
-      st.drawings.push({id,type:'point',x,y,dotColor:'rgba(255,255,255,0.75)',showName:true});
+      // Punto por coordenadas: usar "+" para diferenciarlo visualmente, renombrable
+      st.drawings.push({id,type:'point',x,y,dotColor:'rgba(255,255,255,0.85)',showName:true,marker:'plus',plusSize:4.5,plusWidth:1.2});
       st.selectedDrawing=id;
       resetDrawTool();
     };
@@ -3669,6 +3716,22 @@ function applyVuelosRoleVisual(roleSelect, tr, role){
   roleSelect.title = 'Rol: ' + rv;
 }
 
+function getPlaneTipoDisplay(p){
+  const custom = String((p && (p.tipo ?? p.tipoAeronave ?? p.planeType)) || '').trim();
+  if(custom) return custom;
+  const id = String((p && p.id) || '').toUpperCase();
+  const name = String((p && p.name) || '').toUpperCase();
+
+  if(id.startsWith('AWACS') || name.includes('AWACS')) return 'AWACS';
+  if(id.startsWith('TNK') || name.includes('TANKER')) return 'Tanker';
+  if(id.startsWith('HEL') || name.includes('HELICÓPTERO') || name.includes('HELICOPTERO')) return 'Helicóptero';
+  if(id.startsWith('TRN') || name.includes('TRANSPORTE')) return 'Transporte';
+  if(id.startsWith('COM') || name.includes('COMERCIAL')) return 'Comercial';
+  if(/^R\d+/i.test(id) || name.startsWith('R')) return 'Caza';
+
+  return '';
+}
+
 function repaintVuelos(){
   const wrap = $('#vuelosList');
   if(!wrap) return;
@@ -3704,9 +3767,11 @@ function repaintVuelos(){
   table.innerHTML = `
     <thead>
       <tr>
-        <th style="width:43%">Avión</th>
-        <th style="width:31%">Rol</th>
-        <th style="width:26%">XPDR</th>
+        <th style="width:28%">CALLSIGN</th>
+        <th style="width:18%">TIPO</th>
+        <th style="width:22%">Rol</th>
+        <th style="width:10%">M1</th>
+        <th style="width:22%">IFF</th>
       </tr>
     </thead>
     <tbody></tbody>
@@ -3725,12 +3790,18 @@ function repaintVuelos(){
         <input class="ghost focusable focusAlt vuelosNameInput" type="text" value="${String(p.name||'').replace(/"/g,'&quot;')}" placeholder="Callsign">
       </td>
       <td>
+        <input class="ghost focusable focusAlt vuelosTipoInput" type="text" value="${String(getPlaneTipoDisplay(p)).replace(/"/g,'&quot;')}" placeholder="Tipo">
+      </td>
+      <td>
         <select class="ghost focusable focusAlt vuelosRoleSelect">
           <option${roleVal==='Friend'?' selected':''}>Friend</option>
           <option${roleVal==='Bandit'?' selected':''}>Bandit</option>
           <option${roleVal==='Neutral'?' selected':''}>Neutral</option>
           <option${roleVal==='Civilian'?' selected':''}>Civilian</option>
         </select>
+      </td>
+      <td>
+        <input class="ghost focusable focusAlt vuelosM1Input" type="text" inputmode="numeric" maxlength="2" placeholder="00" value="">
       </td>
       <td>
         <div class="xpdrWrap">
@@ -3742,12 +3813,14 @@ function repaintVuelos(){
     setEmergencyRowState(tr, xpdr);
 
     const nameInput = tr.querySelector('.vuelosNameInput');
+    const tipoInput = tr.querySelector('.vuelosTipoInput');
     const roleSelect = tr.querySelector('.vuelosRoleSelect');
+    const m1Input = tr.querySelector('.vuelosM1Input');
     const xpdrInput = tr.querySelector('.vuelosXpdrInput');
     applyVuelosRoleVisual(roleSelect, tr, roleVal);
 
     // Glow/focus visual consistente
-    [nameInput, roleSelect, xpdrInput].forEach(el=>{
+    [nameInput, tipoInput, roleSelect, m1Input, xpdrInput].forEach(el=>{
       el.addEventListener('focus',()=>el.classList.add('focusGlow'));
       el.addEventListener('blur',()=>el.classList.remove('focusGlow'));
     });
@@ -3761,6 +3834,21 @@ function repaintVuelos(){
     nameInput.addEventListener('change', ()=>{
       // Re-render solo cuando termina edición para refrescar labels dependientes (ej. objetivos)
       repaintNav();
+    });
+
+    tipoInput.addEventListener('input', e=>{
+      p.tipo = (e.target.value || '').trimStart();
+      // Solo dato adicional en panel de vuelos (no se pinta en data block por ahora)
+    });
+    tipoInput.addEventListener('change', e=>{
+      p.tipo = (e.target.value || '').trim();
+      e.target.value = p.tipo;
+    });
+
+    m1Input.addEventListener('input', e=>{
+      const v = (e.target.value || '').replace(/\D+/g,'').slice(0,2);
+      if(e.target.value !== v) e.target.value = v;
+      // M1 es campo local del panel de vuelos (no sincroniza por ahora)
     });
 
     roleSelect.addEventListener('change', e=>{
@@ -4331,6 +4419,7 @@ function __spawnEdgeAircraft(cfg){
     fail:{comms:false,eng:'none',cab:'none',gear:false,bird:false},
     kills:0,fuel:100,jamming:false,
     xpdr:'',
+    tipo:(cfg.tipo ?? ''),
     tagDx:12,tagDy:-6
   };
   st.planes.push(p);
@@ -4355,6 +4444,7 @@ function __spawnInlandAircraft(cfg){
     fail:{comms:false,eng:'none',cab:'none',gear:false,bird:false},
     kills:0,fuel:100,jamming:false,
     xpdr:'',
+    tipo:(cfg.tipo ?? ''),
     tagDx:12,tagDy:-6
   };
   st.planes.push(p);
@@ -4377,33 +4467,34 @@ $('#addFighter').onclick=()=>{
     fail:{comms:false,eng:'none',cab:'none',gear:false,bird:false},
     kills:0,fuel:100,jamming:false,
     xpdr:'',
+    tipo:'Caza',
     tagDx:12,tagDy:-6
   };
   st.planes.push(p); st.roles[id]=Math.random()>.5?'Friend':'Bandit'; repaintPlanesList(); repaintNav(); repaintPairs(); repaintAlt(); repaintVuelos(); flash($('#addFighter'));
 };
 $('#addCom').onclick=()=>{
   // Parámetros de avión comercial (jet)
-  __spawnEdgeAircraft({idPrefix:'COM',namePrefix:'COMERCIAL',spd:850,turn:1.2,altMin:30000,altVar:8000,role:'Civilian'});
+  __spawnEdgeAircraft({idPrefix:'COM',namePrefix:'COMERCIAL',tipo:'Comercial',spd:850,turn:1.2,altMin:30000,altVar:8000,role:'Civilian'});
   repaintPlanesList(); repaintNav(); repaintPairs(); repaintAlt(); repaintVuelos(); flash($('#addCom'));
 };
 $('#addTrans').onclick=()=>{
   // Parámetros de avión de transporte (más lento y maniobra moderada)
-  __spawnEdgeAircraft({idPrefix:'TRN',namePrefix:'TRANSPORTE',spd:560,turn:1.8,altMin:16000,altVar:14000,role:'Friend'});
+  __spawnEdgeAircraft({idPrefix:'TRN',namePrefix:'TRANSPORTE',tipo:'Transporte',spd:560,turn:1.8,altMin:16000,altVar:14000,role:'Friend'});
   repaintPlanesList(); repaintNav(); repaintPairs(); repaintAlt(); repaintVuelos(); flash($('#addTrans'));
 };
 $('#addHeli').onclick=()=>{
   // Parámetros de helicóptero
-  __spawnInlandAircraft({idPrefix:'HEL',namePrefix:'HELICÓPTERO',spd:220,turn:4.5,altMin:500,altVar:4500,role:'Friend',spawnMargin:12});
+  __spawnInlandAircraft({idPrefix:'HEL',namePrefix:'HELICÓPTERO',tipo:'Helicóptero',spd:220,turn:4.5,altMin:500,altVar:4500,role:'Friend',spawnMargin:12});
   repaintPlanesList(); repaintNav(); repaintPairs(); repaintAlt(); repaintVuelos(); flash($('#addHeli'));
 };
 $('#addAwacs').onclick=()=>{
   // AWACS con parámetros de avión comercial (plataforma grande)
-  __spawnEdgeAircraft({idPrefix:'AWACS',namePrefix:'AWACS',spd:760,turn:1.3,altMin:27000,altVar:7000,role:'Friend'});
+  __spawnEdgeAircraft({idPrefix:'AWACS',namePrefix:'AWACS',tipo:'AWACS',spd:760,turn:1.3,altMin:27000,altVar:7000,role:'Friend'});
   repaintPlanesList(); repaintNav(); repaintPairs(); repaintAlt(); repaintVuelos(); flash($('#addAwacs'));
 };
 $('#addTanker').onclick=()=>{
   // Tanker con parámetros de avión comercial (plataforma grande)
-  __spawnEdgeAircraft({idPrefix:'TNK',namePrefix:'TANKER',spd:760,turn:1.3,altMin:22000,altVar:10000,role:'Friend'});
+  __spawnEdgeAircraft({idPrefix:'TNK',namePrefix:'TANKER',tipo:'Tanker',spd:760,turn:1.3,altMin:22000,altVar:10000,role:'Friend'});
   repaintPlanesList(); repaintNav(); repaintPairs(); repaintAlt(); repaintVuelos(); flash($('#addTanker'));
 };
 
@@ -8020,6 +8111,240 @@ document.querySelectorAll('#pCmdBody .btn').forEach(btn=>{
       return false;
     }
   };
+})();
+</script>
+
+
+<script>
+/* === PATCH: Bullseye utilitario asignable por click derecho en avión === */
+(function(){
+  if(window.__SETCA_BULLSEYE_ASSIGN_PATCH__) return;
+  window.__SETCA_BULLSEYE_ASSIGN_PATCH__ = true;
+
+  const cvs = document.getElementById('radar');
+  if(!cvs) return;
+
+  function nowMs(){ return Date.now(); }
+  function consume(e){
+    if(!e) return;
+    try{ e.preventDefault && e.preventDefault(); }catch(_){}
+    try{ e.stopImmediatePropagation ? e.stopImmediatePropagation() : e.stopPropagation && e.stopPropagation(); }catch(_){}
+  }
+  function planePickThresholdPx(){ return 8; }
+
+  function findPlaneAtClient(clientX, clientY){
+    if(!window.st || !Array.isArray(st.planes) || typeof toScreen !== 'function') return null;
+    const r = cvs.getBoundingClientRect();
+    const px = clientX - r.left, py = clientY - r.top;
+    if(px < 0 || py < 0 || px > r.width || py > r.height) return null;
+    let best = null, bestD = 1e9;
+    const th = planePickThresholdPx();
+    for(const p of st.planes){
+      if(!p) continue;
+      const s = toScreen(p.x||0, p.y||0);
+      const d = Math.hypot(px - s.x, py - s.y);
+      if(d <= th && d < bestD){ bestD = d; best = p; }
+    }
+    return best;
+  }
+
+  function getBullseyeDrawings(){
+    if(!window.st || !Array.isArray(st.drawings)) return [];
+    return st.drawings.filter(d => d && d.type === 'bullseye');
+  }
+  function findBullseyeById(id){
+    return getBullseyeDrawings().find(d => d.id === id) || null;
+  }
+  function formatBullseyeBraForPlane(plane){
+    if(!plane || !plane.beAssignedId) return '';
+    const be = findBullseyeById(plane.beAssignedId);
+    if(!be) return '';
+    const dx = (plane.x||0) - (be.x||0);
+    const dy = (plane.y||0) - (be.y||0);
+    const brg = (Math.atan2(dx, -dy) * 180 / Math.PI + 360) % 360;
+    const distNm = Math.hypot(dx, dy);
+    const brgTxt = String(Math.round(brg)%360).padStart(3,'0');
+    const distTxt = distNm < 10 ? distNm.toFixed(1) : String(Math.round(distNm));
+    return `BE ${brgTxt}° / ${distTxt} NM`;
+  }
+
+  // Expuesto para drawPlane (data block)
+  window.__SETCA_BE_getTextForPlane = formatBullseyeBraForPlane;
+
+  function pushSync(){
+    try{
+      if(window._SETCA_SYNC && typeof window._SETCA_SYNC.push === 'function') window._SETCA_SYNC.push();
+      else if(typeof scheduleSync === 'function') scheduleSync();
+    }catch(_){}
+  }
+  function repaintAll(){
+    try{ if(typeof repaintVuelos==='function') repaintVuelos(); }catch(_){}
+    try{ if(typeof repaintPlanesList==='function') repaintPlanesList(); }catch(_){}
+    try{ if(typeof repaintNav==='function') repaintNav(); }catch(_){}
+    try{ if(typeof repaintAlt==='function') repaintAlt(); }catch(_){}
+    try{ if(typeof repaintPairs==='function') repaintPairs(); }catch(_){}
+  }
+
+  // --- Mini menú contextual de avión ---
+  let menu = null;
+  let targetPlaneId = null;
+  let lastOpenAt = {x:0,y:0};
+
+  function ensureMenu(){
+    if(menu && menu.isConnected) return menu;
+    if(!document.getElementById('setcaPlaneBeCtxStyle')){
+      const stl = document.createElement('style');
+      stl.id = 'setcaPlaneBeCtxStyle';
+      stl.textContent = `
+        #setcaPlaneBeCtx{
+          position:fixed; z-index:10040; min-width:156px; display:none;
+          background:rgba(10,12,15,.97); color:#eef8ff;
+          border:1px solid rgba(255,224,102,.28); border-radius:10px;
+          box-shadow:0 8px 28px rgba(0,0,0,.45), 0 0 0 1px rgba(255,255,255,.03) inset;
+          padding:6px;
+          font:12px/1.2 system-ui,Segoe UI,Roboto,Arial,sans-serif;
+          backdrop-filter: blur(4px);
+        }
+        #setcaPlaneBeCtx .beCtxHdr{
+          padding:4px 6px 6px 6px; font-weight:700; color:#ffeaa0; border-bottom:1px solid rgba(255,255,255,.07);
+          margin-bottom:6px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;
+        }
+        #setcaPlaneBeCtx .beCtxBtn{
+          width:100%; text-align:left; padding:7px 9px; border-radius:8px; border:1px solid rgba(255,224,102,.15);
+          background:rgba(255,255,255,.04); color:#eef8ff; cursor:pointer; margin:0;
+        }
+        #setcaPlaneBeCtx .beCtxBtn + .beCtxBtn{ margin-top:5px; }
+        #setcaPlaneBeCtx .beCtxBtn:hover{ background:rgba(255,224,102,.10); border-color:rgba(255,224,102,.28); }
+        #setcaPlaneBeCtx .beCtxBtn.warn{ color:#ffd7d7; border-color:rgba(255,120,120,.18); }
+      `;
+      document.head.appendChild(stl);
+    }
+    menu = document.getElementById('setcaPlaneBeCtx');
+    if(!menu){
+      menu = document.createElement('div');
+      menu.id = 'setcaPlaneBeCtx';
+      menu.innerHTML = `
+        <div class="beCtxHdr" id="setcaPlaneBeCtxHdr">Avión</div>
+        <button type="button" class="beCtxBtn" data-act="assign">ASIGNAR BE</button>
+        <button type="button" class="beCtxBtn warn" data-act="clear">Quitar BE</button>
+      `;
+      document.body.appendChild(menu);
+      menu.addEventListener('mousedown', (e)=>consume(e), true);
+      menu.addEventListener('click', (e)=>{
+        const btn = e.target.closest('button[data-act]');
+        if(!btn) return;
+        consume(e);
+        const act = btn.getAttribute('data-act');
+        const p = (window.st && Array.isArray(st.planes)) ? st.planes.find(x => x && x.id === targetPlaneId) : null;
+        if(!p){ hideMenu(); return; }
+
+        if(act === 'assign'){
+          const bes = getBullseyeDrawings();
+          if(!bes.length){
+            alert('No hay gráficos Bullseye disponibles.');
+            hideMenu();
+            return;
+          }
+
+          let chosen = null;
+          if(bes.length === 1){
+            chosen = bes[0];
+          }else{
+            const list = bes.map((d,i)=>{
+              const nm = (d.name && String(d.name).trim()) ? ` - ${String(d.name).trim()}` : '';
+              return `${i+1}) ${d.id}${nm}`;
+            }).join('\n');
+            const cur = p.beAssignedId ? `\nActual: ${p.beAssignedId}` : '';
+            const ans = prompt(
+              `ASIGNAR BE para ${p.name||p.id}\n\nBullseyes disponibles:\n${list}${cur}\n\nEscribe número, ID o nombre exacto del BE:`,
+              p.beAssignedId || bes[0].id
+            );
+            if(ans===null){ hideMenu(); return; }
+            const q = String(ans).trim();
+            if(!q){ hideMenu(); return; }
+            const idx = parseInt(q,10);
+            if(Number.isFinite(idx) && idx>=1 && idx<=bes.length) chosen = bes[idx-1];
+            if(!chosen){
+              const ql = q.toLowerCase();
+              chosen = bes.find(d => d.id===q || (d.name && String(d.name).trim().toLowerCase()===ql)) || null;
+            }
+            if(!chosen){
+              alert('No se encontró ese Bullseye.');
+              hideMenu();
+              return;
+            }
+          }
+
+          p.beAssignedId = chosen.id;
+          try{ if(window.logEvent) logEvent(`BULLSEYE: ${p.name||p.id} asignado a ${chosen.name||chosen.id}.`); }catch(_){}
+          repaintAll();
+          pushSync();
+          hideMenu();
+          return;
+        }
+
+        if(act === 'clear'){
+          if(p.beAssignedId) delete p.beAssignedId;
+          repaintAll();
+          pushSync();
+          hideMenu();
+          return;
+        }
+      }, true);
+    }
+    return menu;
+  }
+
+  function hideMenu(){
+    const m = ensureMenu();
+    m.style.display = 'none';
+    targetPlaneId = null;
+  }
+
+  function showMenu(clientX, clientY, p){
+    if(!p) return;
+    const m = ensureMenu();
+    targetPlaneId = p.id;
+    lastOpenAt = {x:clientX,y:clientY, t:nowMs()};
+    const hdr = m.querySelector('#setcaPlaneBeCtxHdr');
+    if(hdr){
+      const be = p.beAssignedId ? findBullseyeById(p.beAssignedId) : null;
+      hdr.textContent = `${p.name||p.id}${be ? ` · BE:${be.name||be.id}` : ''}`;
+    }
+    const clearBtn = m.querySelector('[data-act="clear"]');
+    if(clearBtn) clearBtn.style.display = p.beAssignedId ? '' : 'none';
+
+    const pad = 8;
+    m.style.display = 'block';
+    m.style.left = '0px';
+    m.style.top = '0px';
+    const rect = m.getBoundingClientRect();
+    const x = Math.min(window.innerWidth - rect.width - pad, Math.max(pad, clientX));
+    const y = Math.min(window.innerHeight - rect.height - pad, Math.max(pad, clientY));
+    m.style.left = x + 'px';
+    m.style.top = y + 'px';
+  }
+
+  document.addEventListener('mousedown', (e)=>{
+    const m = ensureMenu();
+    if(m.style.display === 'none') return;
+    if(m.contains(e.target)) return;
+    hideMenu();
+  }, true);
+  addEventListener('blur', hideMenu, true);
+  addEventListener('scroll', ()=>{ try{ hideMenu(); }catch(_){} }, true);
+
+  // Click derecho sobre avión → menú "ASIGNAR BE"
+  cvs.addEventListener('contextmenu', (e)=>{
+    if(window.st && st.modoObservador) return;
+    // Si está dibujando con herramientas, no intervenimos
+    try{ if(window.tool && tool.tool && tool.tool !== 'none') return; }catch(_){}
+    const p = findPlaneAtClient(e.clientX, e.clientY);
+    if(!p) return;
+    consume(e);
+    try{ if(Array.isArray(st.sel)) st.sel = [p.id]; }catch(_){}
+    showMenu(e.clientX, e.clientY, p);
+  }, true);
 })();
 </script>
 
