@@ -1,4 +1,4 @@
-ESTE SIMULADOR SE ENCUENTRA EN FASE DE PRUEBA - PUEDEN OCURRIR ERRORES DURANTE EL FUNCIONAMIENTO 2.5.2
+ESTE SIMULADOR SE ENCUENTRA EN FASE DE PRUEBA - PUEDEN OCURRIR ERRORES DURANTE EL FUNCIONAMIENTO 2.1 170326
 <!DOCTYPE html>
 <html lang="es">
 <head>
@@ -627,6 +627,28 @@ canvas#radar {
   box-shadow:none !important;
   outline:none !important;
 }
+#vuelosList .vuelosTable .vuelosNameCell{
+  display:flex;
+  align-items:center;
+  gap:6px;
+}
+#vuelosList .vuelosTable .vuelosCenterDot{
+  width:12px;
+  height:12px;
+  min-width:12px;
+  padding:0;
+  border-radius:999px !important;
+  background:#d7d7d7 !important;
+  border:1px solid rgba(255,255,255,0.55) !important;
+  box-shadow:0 0 6px rgba(255,255,255,0.14);
+  cursor:pointer;
+}
+#vuelosList .vuelosTable .vuelosCenterDot:hover{
+  filter:brightness(1.08);
+}
+#vuelosList .vuelosTable .vuelosCenterDot:active{
+  transform:scale(0.95);
+}
 #vuelosList .vuelosTable .vuelosNameInput{
   font-weight:700;
   letter-spacing:.01em;
@@ -1049,6 +1071,125 @@ canvas#radar {
 .aptoFoot{display:flex;gap:8px;padding:10px 12px;border-top:1px solid rgba(46,231,79,.18)}
 .aptoFoot .btn{flex:1}
 
+
+  /* --- GTC tactical (compacto) --- */
+  #pGTC .panel-header h3{
+    font-size:11px;
+    letter-spacing:.14em;
+    text-transform:uppercase;
+  }
+  #pGTCBody{
+    padding:8px 10px;
+  }
+  #pGTCBody #gtcList{gap:2px; margin-top:4px}
+  #pGTCBody .gtc-item{
+    gap:3px;
+    padding:3px 0;
+    border-bottom:1px solid rgba(46,231,79,.12);
+  }
+  #pGTCBody .gtc-row{
+    display:flex;
+    gap:4px;
+    align-items:center;
+    flex-wrap:nowrap;
+  }
+  #pGTCBody .gtc-row input.gtc-name{
+    height:24px;
+    padding:3px 6px;
+    font-size:11px;
+    border-radius:8px;
+    font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,"Liberation Mono",monospace;
+    letter-spacing:.02em;
+  }
+
+  #pGTCBody .gtc-planeSel{
+    max-width:110px;
+    width:110px;
+    height:24px;
+    padding:3px 6px;
+    font-size:11px;
+    border-radius:8px;
+    border:1px solid rgba(255,255,255,.14);
+    background:rgba(0,0,0,.18);
+    color:#eaffea;
+    outline:none;
+    font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,"Liberation Mono",monospace;
+    letter-spacing:.02em;
+  }
+  #pGTCBody .gtc-planeSel option{ background:#0b0f0c; color:#eaffea; }
+
+  #pGTCBody .gtc-row .mini{
+    line-height:1;
+    font-size:10px;
+    font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,"Liberation Mono",monospace;
+    letter-spacing:.03em;
+  }
+  #pGTCBody .gtc-stat{
+    opacity:.72;
+    white-space:nowrap;
+    max-width:130px;
+    overflow:hidden;
+    text-overflow:ellipsis;
+  }
+
+  /* botones pequeños, tácticos */
+  #pGTCBody .btn.mini{
+    height:24px;
+    min-width:26px;
+    padding:0 6px;
+    border-radius:8px;
+    display:inline-flex;
+    align-items:center;
+    justify-content:center;
+    font-size:11px;
+    line-height:1;
+  }
+  #pGTCBody #gtcAdd.btn.mini{
+    padding:0 10px;
+    min-width:auto;
+  }
+
+  #pGTCBody .gtc-green-btn{
+    width:16px; height:16px; min-width:16px; padding:0;
+    border-radius:999px;
+    background:#21c95a;
+    border:1px solid rgba(0,0,0,0.35);
+    box-shadow:0 0 8px rgba(33,201,90,0.28);
+  }
+  #pGTCBody .gtc-green-btn:hover{filter:brightness(1.08)}
+  #pGTCBody .gtc-green-btn:active{transform:scale(0.95)}
+  #pGTCBody .gtc-green-btn.alert{
+    background:#d83a3a;
+    box-shadow:0 0 8px rgba(255,70,70,0.40);
+  }
+
+  #pGTCBody .gtc-center-dot{
+    width:16px; height:16px; min-width:16px; padding:0;
+    border-radius:999px;
+    background:#d7d7d7;
+    border:1px solid rgba(255,255,255,0.55);
+    box-shadow:0 0 6px rgba(255,255,255,0.14);
+  }
+  #pGTCBody .gtc-center-dot:hover{filter:brightness(1.08)}
+  #pGTCBody .gtc-center-dot:active{transform:scale(0.95)}
+
+  /* config compacto */
+  #pGTCBody .gtc-cfg{
+    padding:6px 8px;
+    border:1px solid rgba(42,102,42,0.65);
+    border-radius:10px;
+    background:rgba(12,29,18,0.55);
+  }
+  #pGTCBody .gtc-cfg .row{flex-wrap:nowrap}
+  #pGTCBody .gtc-cfg .ghost{
+    padding:4px 6px;
+    font-size:11px;
+    border-radius:8px;
+  }
+  #pGTCBody .gtc-cfg input[type="range"]{width:100%; height:16px}
+
+
+
 </style>
 </head>
 <body>
@@ -1207,6 +1348,17 @@ canvas#radar {
       </div>
     </section>
 
+    <section class="panel" id="pGTC">
+      <div class="panel-header"><h3>GROUND TACTIC COTROL</h3><span class="toggle" data-target="#pGTCBody">▾</span></div>
+      <div id="pGTCBody" class="panel-body">
+        <div class="row" style="justify-content:space-between; gap:8px; align-items:center;">
+          <button id="gtcAdd" class="btn mini focusable">➕ LANZA</button>
+          <span id="gtcModeChip" class="mini" style="opacity:.75; text-align:right; flex:1;"></span>
+        </div>
+        <div id="gtcList" class="col" style="max-height:24vh; overflow:auto; margin-top:6px;"></div>
+      </div>
+    </section>
+
     <section class="panel" id="pAlerts">
       <div class="panel-header"><h3>Misiles Entrantes</h3><span class="toggle" data-target="#pAlertsBody">▾</span></div>
       <div id="pAlertsBody" class="panel-body"><div id="missileAlerts" class="col"></div></div>
@@ -1228,6 +1380,8 @@ function flash(el){el.classList.add('flash');setTimeout(()=>el.classList.remove(
 /* ===== Constantes / Estado ===== */
 const NM2KM=1.852,KTS2KMH=1.852,KMH2KTS=1/1.852,FT2M=0.3048;
 const MAX_RANGE_NM=1000,GRID_STEP_NM=10,PX_PER_NM=20;
+// GTC: edición solo desde el panel (sin clicks sobre el radar)
+window.GTC_PANEL_ONLY = true;
 /* ===== Aeropuertos (Perú) / Centro radar =====
    Coordenadas en grados decimales (lat/lon). Posición local en NM relativa al centro (SPJC).
 */
@@ -1499,6 +1653,7 @@ let st={
   missiles:[],
   splashes:[],
   drawings:[],
+  gtc:[],
   selectedDrawing:null,
   altUnit:'ft',
   pairs:[],
@@ -1855,11 +2010,40 @@ cvs.addEventListener('wheel', e => {
 
 
   
+
+/* ===== GTC: abrir cobertura con L + click izquierdo ===== */
+let gtcKeyL = false;
+addEventListener('keydown', (e)=>{ if(e.key==='l' || e.key==='L') gtcKeyL = true; }, true);
+addEventListener('keyup',   (e)=>{ if(e.key==='l' || e.key==='L') gtcKeyL = false; }, true);
+addEventListener('blur',    ()=>{ gtcKeyL = false; }, true);
+
 /* ===== Pan con botón derecho ===== */
 let panning=false, panStart=null, offStart=null;
+
+// Evita el menú del navegador
 cvs.addEventListener('contextmenu',e=>e.preventDefault());
+
 cvs.addEventListener('mousedown',e=>{
-  if(e.button===2){ // right button
+  // L + click izquierdo sobre LANZA: abrir ventana de cobertura
+  if(e.button===0 && gtcKeyL && !window.GTC_PANEL_ONLY){
+    if(window.st && st.modoObservador) return;
+    try{
+      const u = (typeof findGtcAtClient==='function') ? findGtcAtClient(e.clientX, e.clientY) : null;
+      if(u){
+        try{ consume(e); }catch(_){
+          if(e.preventDefault) e.preventDefault();
+          if(e.stopImmediatePropagation) e.stopImmediatePropagation();
+          else if(e.stopPropagation) e.stopPropagation();
+        }
+        if(typeof showGtcMenu==='function') showGtcMenu(e.clientX, e.clientY, u);
+        return;
+      }
+    }catch(_){}
+  }
+
+  if(e.button===2){ // right button: pan
+    if(window.st && st.modoObservador) return;
+    try{ if(window.tool && tool.tool && tool.tool !== 'none') return; }catch(_){ }
     panning=true; cvs.classList.add('panning');
     panStart={x:e.clientX,y:e.clientY}; offStart={x:offX,y:offY};
   }
@@ -1870,6 +2054,7 @@ addEventListener('mousemove',e=>{
 addEventListener('mouseup',()=>{ panning=false; cvs.classList.remove('panning'); });
 
 /* ===== Coord HUD ===== */
+
 cvs.addEventListener('mousemove',e=>{const r=cvs.getBoundingClientRect();const xnm=(e.clientX-r.left-CX-offX)/(zoom*PX_PER_NM);const ynm=(e.clientY-r.top-CY-offY)/(zoom*PX_PER_NM);$('#hud').innerHTML=st.metric?`X: ${(xnm*NM2KM).toFixed(1)} km<br>Y: ${(ynm*NM2KM).toFixed(1)} km`:`X: ${xnm.toFixed(1)} NM<br>Y: ${ynm.toFixed(1)} NM`;});
 
 function toScreen(x,y){return {x:CX+offX+x*zoom*PX_PER_NM,y:CY+offY+y*zoom*PX_PER_NM};}
@@ -2141,6 +2326,24 @@ function drawSweep(dt){
 /* ===== Regla (LEFT click & hold) ===== */
 let measuring=false,rA=null,rB=null;
 cvs.addEventListener('mousedown',e=>{ if(e.button!==0) return; // block measure when drawing tool is active
+  // ===== GTC placement (LANZA) =====
+  if(typeof gtcPlacing !== 'undefined' && gtcPlacing){
+    if(window.st && window.st.modoObservador) return;
+    if(e.altKey) return; // ALT reservado a otras acciones
+    const r=cvs.getBoundingClientRect();
+    const w=toWorld(e.clientX-r.left, e.clientY-r.top);
+    const id='GTC-'+Math.random().toString(36).slice(2,8).toUpperCase();
+    st.gtc = Array.isArray(st.gtc) ? st.gtc : [];
+    const name = (typeof gtcNextName === 'function') ? gtcNextName() : ('LANZA'+(st.gtc.length+1));
+    st.gtc.push({id,name,x:w.x,y:w.y,covR:30,covH:15000});
+    try{ if(typeof repaintGTC === 'function') repaintGTC(); }catch(_){}
+    try{ if(typeof setGtcPlacing === 'function') setGtcPlacing(false); else gtcPlacing=false; }catch(_){}
+    try{ if(typeof logEvent === 'function') logEvent(`GTC: ${name} colocado.`); }catch(_){}
+    if(e.preventDefault) e.preventDefault();
+    if(e.stopImmediatePropagation) e.stopImmediatePropagation();
+    else if(e.stopPropagation) e.stopPropagation();
+    return;
+  }
   if(e.altKey) return;
   if(tool && tool.tool && tool.tool!=='none') return; // drawing active, skip measuring
   measuring=true; const r=cvs.getBoundingClientRect();
@@ -2159,11 +2362,40 @@ function updateMissiles(dt){
   st.missiles.forEach(m=>{
     if(m.status!=='fly') return;
     const T=st.planes.find(p=>p.id===m.tgt); if(!T){m.status='lost';return;}
+
+    const maxAlt = (m.maxAltFt!==undefined && isFinite(m.maxAltFt) && +m.maxAltFt>0) ? (+m.maxAltFt) : Infinity;
+    if(isFinite(T.alt) && isFinite(maxAlt) && maxAlt<Infinity && T.alt > maxAlt){ m.status='alt'; return; }
+
     if(T.jamming && Math.random()<0.25*dt){m.drift+=(Math.random()-0.5)*10;}
     const dx=T.x-m.x,dy=T.y-m.y;let angDeg=(Math.atan2(dy,dx)*180/Math.PI)+m.drift;const ang=angDeg*Math.PI/180;
-    const nmps=(m.spd/NM2KM)/3600;const step=nmps*dt; m.travKM+=step*NM2KM; if(m.travKM>=m.rangeKM){m.status='oor';return;}
-    const distNM=Math.hypot(dx,dy); if(distNM<1.0){m.status='hit';st.splashes.push({x:T.x,y:T.y,t:0});T._hit=true;logEvent(`SPLASH: ${T.name} destruido`);const L=st.planes.find(p=>p.id===m.launcher);if(L) L.kills=(L.kills||0)+1;return;}
-    m.x+=Math.cos(ang)*step; m.y+=Math.sin(ang)*step; m.alt += (T.alt-m.alt)*0.5*dt;
+
+    const nmps=(m.spd/NM2KM)/3600;const step=nmps*dt;
+    m.travKM+=step*NM2KM;
+    if(m.travKM>=m.rangeKM){m.status='oor';return;}
+
+    const distNM=Math.hypot(dx,dy);
+    if(distNM<1.0){
+      m.status='hit';
+      st.splashes.push({x:T.x,y:T.y,t:0});
+      T._hit=true;
+      logEvent(`SPLASH: ${T.name} destruido`);
+
+      const L=st.planes.find(p=>p.id===m.launcher);
+      if(L) L.kills=(L.kills||0)+1;
+      else if(m.launcherType==='gtc' && Array.isArray(st.gtc)){
+        const U=st.gtc.find(u=>u && u.id===m.launcher);
+        if(U) U.kills=(U.kills||0)+1;
+      }
+      return;
+    }
+
+    m.x+=Math.cos(ang)*step;
+    m.y+=Math.sin(ang)*step;
+
+    // guía de altura (capada por maxAlt)
+    const tgtAlt = isFinite(T.alt) ? (+T.alt) : 0;
+    m.alt += (tgtAlt - (m.alt||0)) * 0.5 * dt;
+    if(isFinite(maxAlt) && maxAlt<Infinity) m.alt = Math.min(m.alt, maxAlt);
   });
   st.missiles=st.missiles.filter(m=>m.status==='fly');
 }
@@ -2355,6 +2587,127 @@ function drawPeruMap(){
 
 
 const tool={tool:'none',drawing:false,a:null,b:null,poly:[]};
+
+function drawGTC(){
+  const arr = st.gtc || [];
+  if(!arr.length) return;
+  ctx.save();
+  for(const u of arr){
+    const s = toScreen(u.x, u.y);
+
+    // --- Enlace a avión seleccionado (línea entrecortada) ---
+    const __pid = String(u && u.trackPlaneId ? u.trackPlaneId : '');
+    if(__pid){
+      const __planes = (window.st && Array.isArray(st.planes)) ? st.planes : [];
+      const __p = __planes.find(pp=>pp && !pp._hit && String(pp.id||'')===__pid);
+      if(__p){
+        const __t = toScreen(__p.x, __p.y);
+        ctx.save();
+        ctx.strokeStyle = 'rgba(255,255,255,0.55)';
+        ctx.lineWidth = 0.5;
+        ctx.setLineDash([6,6]);
+        ctx.beginPath();
+        ctx.moveTo(s.x, s.y);
+        ctx.lineTo(__t.x, __t.y);
+        ctx.stroke();
+        ctx.restore();
+      }
+    }
+
+    // --- Cobertura (tubo) ---
+    const rNm = (u && typeof u.covR === 'number') ? u.covR : 0;
+    if(isFinite(rNm) && rNm > 0){
+      const rPx = rNm * zoom * PX_PER_NM;
+      const hFt = (u && typeof u.covH === 'number') ? u.covH : 0;
+      const hNorm = Math.max(0, Math.min(1, (isFinite(hFt)?hFt:0) / 80000));
+      const fillA = 0.06 + 0.10*hNorm;   // intensidad visual (no afecta el cálculo)
+      const edgeA = 0.35 + 0.35*hNorm;
+
+      // Relleno uniforme (simula "tubo" de cobertura)
+      ctx.fillStyle = `rgba(255,0,0,${fillA.toFixed(3)})`;
+      ctx.beginPath(); ctx.arc(s.x, s.y, rPx, 0, 2*Math.PI); ctx.fill();
+
+      // Borde punteado
+      ctx.strokeStyle = `rgba(255,0,0,${edgeA.toFixed(3)})`;
+      ctx.lineWidth = 1;
+      ctx.setLineDash([4,4]);
+      ctx.beginPath(); ctx.arc(s.x, s.y, rPx, 0, 2*Math.PI); ctx.stroke();
+      ctx.setLineDash([]);
+
+      // Handles de ajuste (selección / arrastre)
+      const __sel = (typeof gtcSelId !== 'undefined' && gtcSelId && gtcSelId === u.id);
+      const __dragHold = (typeof gtcDrag !== 'undefined' && gtcDrag && gtcDrag.id === u.id);
+      const __dragFree = (typeof gtcRadiusDrag !== 'undefined' && gtcRadiusDrag && gtcRadiusDrag.id === u.id);
+      const __showHandles = __sel || __dragHold || __dragFree;
+
+      if(__showHandles){
+        // Handle RADIO (en el borde)
+        ctx.fillStyle = 'rgba(255,0,0,0.96)';
+        ctx.beginPath(); ctx.arc(s.x + rPx, s.y, 5, 0, 2*Math.PI); ctx.fill();
+        ctx.fillStyle = 'rgba(0,0,0,0.55)';
+        ctx.font = '9px monospace';
+        ctx.textAlign = 'center';
+        ctx.fillText('R', s.x + rPx, s.y + 3);
+
+        // Handle ALTURA (sobre el centro)
+        ctx.fillStyle = 'rgba(255,0,0,0.96)';
+        ctx.beginPath(); ctx.rect(s.x - 5, s.y - 22, 10, 10); ctx.fill();
+        ctx.fillStyle = 'rgba(0,0,0,0.55)';
+        ctx.fillText('H', s.x, s.y - 14);
+
+        // Conector visual
+        ctx.strokeStyle = 'rgba(255,0,0,0.65)';
+        ctx.lineWidth = 1;
+        ctx.beginPath(); ctx.moveTo(s.x, s.y - 12); ctx.lineTo(s.x, s.y - 2); ctx.stroke();
+      }
+
+      // Etiqueta radio/altura
+      if(isFinite(hFt) && hFt > 0 && st.showLabels){
+        ctx.font = '10px monospace';
+        ctx.textAlign = 'center';
+        ctx.fillStyle = 'rgba(255,0,0,0.92)';
+        const rTxt = st.metric ? `${(rNm*NM2KM).toFixed(0)}km` : `${rNm.toFixed(0)}NM`;
+        let hTxt = '';
+        if(st.altUnit === 'm'){
+          const m = hFt*0.3048;
+          hTxt = (m>=1000) ? `${(m/1000).toFixed(1)}km` : `${m.toFixed(0)}m`;
+        }else{
+          hTxt = (hFt>=1000) ? `${(hFt/1000).toFixed(0)}kft` : `${Math.round(hFt)}ft`;
+        }
+        ctx.fillText(`R:${rTxt} H:${hTxt}`, s.x, s.y + rPx + 12);
+      }
+    }
+
+    // --- Símbolo LANZA (triángulo rojo) ---
+    const size = 5; // triángulo pequeño
+    ctx.fillStyle = 'rgba(255,0,0,0.9)';
+    ctx.strokeStyle = 'rgba(255,0,0,0.9)';
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    ctx.moveTo(s.x, s.y - size);
+    ctx.lineTo(s.x - size*0.85, s.y + size*0.85);
+    ctx.lineTo(s.x + size*0.85, s.y + size*0.85);
+    ctx.closePath();
+    ctx.fill();
+
+    // Resalta selección
+    if(typeof gtcSelId !== 'undefined' && gtcSelId && gtcSelId === u.id){
+      ctx.strokeStyle = 'rgba(255,0,0,0.95)';
+      ctx.lineWidth = 1;
+      ctx.beginPath(); ctx.arc(s.x, s.y, 10, 0, 2*Math.PI); ctx.stroke();
+    }
+
+    // Etiqueta opcional
+    if(st.showLabels && u.name){
+      ctx.font = '10px monospace';
+      ctx.textAlign = 'center';
+      ctx.fillStyle = 'rgba(255,0,0,0.95)';
+      ctx.fillText(u.name, s.x, s.y - size - 2);
+    }
+  }
+  ctx.restore();
+}
+
 
 function drawShapes(){
   st.drawings.forEach(d=>{
@@ -3808,7 +4161,10 @@ function repaintVuelos(){
 
     tr.innerHTML = `
       <td>
-        <input class="ghost focusable focusAlt vuelosNameInput" type="text" value="${String(p.name||'').replace(/"/g,'&quot;')}" placeholder="Callsign">
+        <div class="vuelosNameCell">
+          <button class="vuelosCenterDot focusable" type="button" title="Centrar radar en este avión"></button>
+          <input class="ghost focusable focusAlt vuelosNameInput" type="text" value="${String(p.name||'').replace(/"/g,'&quot;')}" placeholder="Callsign">
+        </div>
       </td>
       <td>
         <input class="ghost focusable focusAlt vuelosTipoInput" type="text" value="${String(getPlaneTipoDisplay(p)).replace(/"/g,'&quot;')}" placeholder="Tipo">
@@ -3833,12 +4189,21 @@ function repaintVuelos(){
     `;
     setEmergencyRowState(tr, xpdr);
 
+    const centerBtn = tr.querySelector('.vuelosCenterDot');
     const nameInput = tr.querySelector('.vuelosNameInput');
     const tipoInput = tr.querySelector('.vuelosTipoInput');
     const roleSelect = tr.querySelector('.vuelosRoleSelect');
     const m1Input = tr.querySelector('.vuelosM1Input');
     const xpdrInput = tr.querySelector('.vuelosXpdrInput');
     applyVuelosRoleVisual(roleSelect, tr, roleVal);
+
+    if(centerBtn){
+      centerBtn.addEventListener('click', ()=>{
+        if(!Number.isFinite(p.x) || !Number.isFinite(p.y)) return;
+        centerWorld(p.x, p.y);
+        try{ repaintNav(); }catch(_){}
+      });
+    }
 
     // Glow/focus visual consistente
     [nameInput, tipoInput, roleSelect, m1Input, xpdrInput].forEach(el=>{
@@ -4144,8 +4509,18 @@ function loop(ts){
   if(!st.paused){ st.elapsed = performance.now() - st.t0; telTick += dt; if(telTick>5){logTel(); telTick=0;} }
   ctx.clearRect(0,0,W,H);
   if (st.radarFail) { drawGrid(); ctx.fillStyle='rgba(255,50,50,0.12)'; ctx.fillRect(0,0,W,H); ctx.font='bold 36px monospace'; ctx.fillStyle='#ff4d4d'; ctx.textAlign='center'; ctx.fillText('FALLA DE RADAR', W/2, H/2); requestAnimationFrame(loop); return; }
-  drawGrid(); drawPeruMap(); drawAirports(); sweepDetect(dt); drawSweep(dt);
+  drawGrid(); drawPeruMap(); drawAirports(); drawGTC(); sweepDetect(dt); drawSweep(dt);
   if(!st.paused){ st.planes.forEach(p=>updatePlane(p,dt)); updateMissiles(dt); updatePairs(); }
+
+// Indicador GTC (botón verde/rojo) según contacto dentro de R y H
+try{
+  if(typeof gtcIndTick !== 'number') gtcIndTick = 0;
+  gtcIndTick += dt;
+  if(gtcIndTick > 0.25){
+    gtcIndTick = 0;
+    if(typeof gtcRefreshIndicators === 'function') gtcRefreshIndicators();
+  }
+}catch(e){}
   
 // Trajectory visualization
 if(st.showTraj){
@@ -4217,8 +4592,8 @@ $('#toggleLabels').onclick = ()=>{
 };
 $('#reportBtn').onclick=()=>{ $('#report').style.display='block'; renderReport(); };
 $('#closeReport').onclick=()=>{ $('#report').style.display='none'; };
-$('#uMetric').onclick=()=>{ st.metric=true; if(window.__saveLocalPrefs) window.__saveLocalPrefs(); repaintNav(); repaintStudent(); repaintAlt(); repaintVuelos(); if(window.__updateLocalUI) window.__updateLocalUI(); flash($('#uMetric')); };
-$('#uImperial').onclick=()=>{ st.metric=false; if(window.__saveLocalPrefs) window.__saveLocalPrefs(); repaintNav(); repaintStudent(); repaintAlt(); repaintVuelos(); if(window.__updateLocalUI) window.__updateLocalUI(); flash($('#uImperial')); };
+$('#uMetric').onclick=()=>{ st.metric=true; if(window.__saveLocalPrefs) window.__saveLocalPrefs(); repaintNav(); repaintStudent(); repaintAlt(); repaintVuelos(); try{ repaintGTC(); }catch(_){ } if(window.__updateLocalUI) window.__updateLocalUI(); flash($('#uMetric')); };
+$('#uImperial').onclick=()=>{ st.metric=false; if(window.__saveLocalPrefs) window.__saveLocalPrefs(); repaintNav(); repaintStudent(); repaintAlt(); repaintVuelos(); try{ repaintGTC(); }catch(_){ } if(window.__updateLocalUI) window.__updateLocalUI(); flash($('#uImperial')); };
 $('#windSpd').onchange=e=>{ st.windKmh = st.metric?(+e.target.value||0):((+e.target.value||0)*KTS2KMH); flash(e.target); };
 $('#windDir').onchange=e=>{ st.windDir = +e.target.value||0; flash(e.target); };
 $('#failRadar').onclick=e=>{ st.radarFail=!st.radarFail; e.currentTarget.classList.toggle('hi',st.radarFail); flash(e.currentTarget); };
@@ -4422,19 +4797,16 @@ $('#predPlus').onclick=()=>{ st.predMin=Math.min(60,st.predMin+1); if(window.__s
 $('#predMinus').onclick=()=>{ st.predMin=Math.max(0,st.predMin-1); if(window.__saveLocalPrefs) window.__saveLocalPrefs(); if(window.__updateLocalUI) window.__updateLocalUI(); flash($('#predMinus')); };
 function __spawnEdgeAircraft(cfg){
   const id=(cfg.idPrefix||'AC')+'-'+Date.now()+'-'+Math.floor(Math.random()*1000);
-  const edge=Math.floor(Math.random()*4),range=MAX_RANGE_NM*1.1; let x=0,y=0,hdg=0;
-  if(edge===0){x=-range;y=(Math.random()-0.5)*range;hdg=90;}
-  else if(edge===1){x=range;y=(Math.random()-0.5)*range;hdg=270;}
-  else if(edge===2){y=-range;x=(Math.random()-0.5)*range;hdg=180;}
-  else {y=range;x=(Math.random()-0.5)*range;hdg=0;}
+  const __sp = randomPeruSpawnNM(cfg.spawnMargin ?? 20);
+  const hdg = Math.random()*360;
   const altMin = cfg.altMin ?? 30000, altVar = cfg.altVar ?? 8000;
   const alt0 = altMin + (Math.random()*altVar|0);
   const p={
     name:(cfg.namePrefix||'AERONAVE')+' '+(Math.floor(Math.random()*900)+100),
-    id,x,y,hdg,
+    id,x:__sp.x,y:__sp.y,hdg,
     spd:cfg.spd ?? 450,tgtSpd:cfg.spd ?? 450,
     alt:alt0,tgtAlt:alt0,
-    turn:cfg.turn ?? 1.5,tgtHdg:hdg,
+    turn:cfg.turn ?? 1.5,tgtHdg:Math.random()*360,
     turnBias:null,
     ghosts:[],lastDet:0,
     fail:{comms:false,eng:'none',cab:'none',gear:false,bird:false},
@@ -4519,8 +4891,8 @@ $('#addTanker').onclick=()=>{
   repaintPlanesList(); repaintNav(); repaintPairs(); repaintAlt(); repaintVuelos(); flash($('#addTanker'));
 };
 
-$('#altFt').onclick=()=>{ st.altUnit='ft'; if(window.__saveLocalPrefs) window.__saveLocalPrefs(); repaintAlt(); if(window.__updateLocalUI) window.__updateLocalUI(); flash($('#altFt')); };
-$('#altM').onclick=()=>{ st.altUnit='m'; if(window.__saveLocalPrefs) window.__saveLocalPrefs(); repaintAlt(); if(window.__updateLocalUI) window.__updateLocalUI(); flash($('#altM')); };
+$('#altFt').onclick=()=>{ st.altUnit='ft'; if(window.__saveLocalPrefs) window.__saveLocalPrefs(); repaintAlt(); try{ repaintGTC(); }catch(_){ } if(window.__updateLocalUI) window.__updateLocalUI(); flash($('#altFt')); };
+$('#altM').onclick=()=>{ st.altUnit='m'; if(window.__saveLocalPrefs) window.__saveLocalPrefs(); repaintAlt(); try{ repaintGTC(); }catch(_){ } if(window.__updateLocalUI) window.__updateLocalUI(); flash($('#altM')); };
 $('#doPair').onclick=()=>{
   const a=$('#pairA').value,b=$('#pairB').value;
   if(a&&b&&a!==b){
@@ -4739,8 +5111,21 @@ requestAnimationFrame(()=>{ repaintPlanesList(); repaintNav(); repaintStudent();
     if(!alumnoBtn){
       alumnoBtn = document.createElement('button');
       alumnoBtn.id = 'alumnoBtn';
-      alumnoBtn.textContent = '🎯 Alumno';
+      alumnoBtn.textContent = 'ODI-CO';
       hdr.appendChild(alumnoBtn);
+    }
+
+    // --- ODT ---
+    let odtBtn = document.getElementById('odtBtn');
+    if(!odtBtn){
+      odtBtn = document.createElement('button');
+      odtBtn.id = 'odtBtn';
+      odtBtn.textContent = 'ODT';
+      odtBtn.title = 'ODT';
+      odtBtn.style.marginLeft = '6px';
+      // Insertar al costado de ODI-CO
+      try{ alumnoBtn.insertAdjacentElement('afterend', odtBtn); }
+      catch(_){ hdr.appendChild(odtBtn); }
     }
 
     // --- Observador (solo radar) ---
@@ -4748,13 +5133,13 @@ requestAnimationFrame(()=>{ repaintPlanesList(); repaintNav(); repaintStudent();
     if(!observerBtn){
       observerBtn = document.createElement('button');
       observerBtn.id = 'observerBtn';
-      observerBtn.textContent = '👁 OBSERVADOR';
       observerBtn.title = 'Vista Observador (solo radar)';
       observerBtn.style.marginLeft = '6px';
-      // Insertar al costado de Alumno
-      try{ alumnoBtn.insertAdjacentElement('afterend', observerBtn); }
+      // Insertar al costado de ODT
+      try{ odtBtn.insertAdjacentElement('afterend', observerBtn); }
       catch(_){ hdr.appendChild(observerBtn); }
     }
+    observerBtn.textContent = 'OBSERVADOR';
 
     // --- Salas ---
     let salasBtn = document.getElementById('salasBtn');
@@ -4806,25 +5191,58 @@ requestAnimationFrame(()=>{ repaintPlanesList(); repaintNav(); repaintStudent();
       });
     }
 
-    // Toggle Alumno (oculta paneles laterales)
-    const toHide = ['#pCmd','#pPlanes','#pNav','#pDraw'];
+    const allPanels = ['#pCmd','#pPlanes','#pNav','#pVuelos','#pPair','#pAlt','#pDraw','#pGTC','#pAlerts'];
+    const odiOnlyPanels = ['#pVuelos','#pPair','#pAlt','#pAlerts'];
+    const odtOnlyPanels = ['#pAlt','#pGTC','#pAlerts'];
+
+    function applyPanelMode(mode){
+      const visible = mode === 'odi'
+        ? new Set(odiOnlyPanels)
+        : (mode === 'odt' ? new Set(odtOnlyPanels) : null);
+      allPanels.forEach(sel=>{
+        const el = document.querySelector(sel);
+        if(!el) return;
+        el.style.display = !visible || visible.has(sel) ? '' : 'none';
+      });
+      alumnoBtn.classList.toggle('hi', mode === 'odi');
+      odtBtn.classList.toggle('hi', mode === 'odt');
+      (window.repaintPlanesList||function(){})();
+      (window.repaintNav||function(){})();
+      (window.repaintPairs||function(){})();
+      (window.repaintAlt||function(){})();
+      try{ (window.repaintVuelos||function(){})(); }catch(_){ }
+      try{ (window.repaintGTC||function(){})(); }catch(_){ }
+      try{ window.dispatchEvent(new Event('resize')); }catch(_){ }
+    }
+
+    function exitObserverMode(){
+      if(!st.modoObservador) return;
+      st.modoObservador = false;
+      document.body.classList.remove('observer-mode');
+      observerBtn.classList.remove('hi');
+    }
+
+    // Toggle ODI-CO (solo paneles solicitados)
     if(!alumnoBtn.__setcaWired){
       alumnoBtn.__setcaWired = true;
       alumnoBtn.addEventListener('click', ()=>{
-        // Si está en modo observador, primero salir
-        if(st.modoObservador){
-          st.modoObservador = false;
-          document.body.classList.remove('observer-mode');
-          observerBtn.classList.remove('hi');
-          try{ window.dispatchEvent(new Event('resize')); }catch(_){}
-        }
-        st.modoAlumno = !st.modoAlumno;
-        toHide.forEach(sel=>{ const el = document.querySelector(sel); if(el){ el.style.display = st.modoAlumno ? 'none' : ''; } });
-        alumnoBtn.classList.toggle('hi', !!st.modoAlumno);
-        (window.repaintPlanesList||function(){})();
-        (window.repaintNav||function(){})();
-        (window.repaintPairs||function(){})();
-        (window.repaintAlt||function(){})();
+        exitObserverMode();
+        const nextOn = !st.modoAlumno;
+        st.modoAlumno = nextOn;
+        st.modoODT = false;
+        applyPanelMode(nextOn ? 'odi' : 'normal');
+      });
+    }
+
+    // Toggle ODT (solo paneles solicitados)
+    if(!odtBtn.__setcaWired){
+      odtBtn.__setcaWired = true;
+      odtBtn.addEventListener('click', ()=>{
+        exitObserverMode();
+        const nextOn = !st.modoODT;
+        st.modoODT = nextOn;
+        st.modoAlumno = false;
+        applyPanelMode(nextOn ? 'odt' : 'normal');
       });
     }
 
@@ -4832,6 +5250,9 @@ requestAnimationFrame(()=>{ repaintPlanesList(); repaintNav(); repaintStudent();
     if(!observerBtn.__setcaWired){
       observerBtn.__setcaWired = true;
       observerBtn.addEventListener('click', ()=>{
+        st.modoAlumno = false;
+        st.modoODT = false;
+        applyPanelMode('normal');
         st.modoObservador = !st.modoObservador;
         document.body.classList.toggle('observer-mode', !!st.modoObservador);
         observerBtn.classList.toggle('hi', !!st.modoObservador);
@@ -7502,10 +7923,26 @@ document.querySelectorAll('#pCmdBody .btn').forEach(btn=>{
         p.routePlan[hit.index] = cloneWp(wp);
         p.routeLastChange = nowMs();
         syncSharedState();
+
+        // Si el avión está siguiendo ESTA órbita/waypoint, aplicar cambios inmediatamente
+        try{
+          const curIdx = Number.isFinite(p.routeIdx) ? (p.routeIdx|0) : -1;
+          if(p.routeEnabled && curIdx === (hit.index|0)){
+            // El plan de vuelo debe dominar sobre el "manual hold"
+            p.routeManualUntil = 0;
+            const curWp = p.routePlan[curIdx];
+            if(curWp){
+              if(Number.isFinite(curWp.alt)) p.tgtAlt = curWp.alt;
+              if(Number.isFinite(curWp.spd)) p.tgtSpd = curWp.spd;
+              p.tgtHdg = bearingDeg(p, curWp);
+            }
+          }
+        }catch(_){}
       }
     }
     planner.dragSuppressUntil = nowMs() + 160;
     hideWaypointEditor();
+    try{ repaintLocalPanels(); }catch(_){}
   }
   function deleteWaypointFromEditor(){
     const el = ensureWaypointEditor();
@@ -8416,9 +8853,1244 @@ document.querySelectorAll('#pCmdBody .btn').forEach(btn=>{
     showMenu(e.clientX, e.clientY, p);
   }, true);
 })();
+
+
+/* ===== GROUND TACTIC COTROL (LANZA) ===== */
+let gtcPlacing = false;
+// UI refs para indicadores (botón verde/rojo)
+const gtcUiById = new Map(); // id -> button
+// UI refs para selector de avión (por LANZA)
+const gtcPlaneSelById = new Map(); // id -> select
+let gtcPlaneSig = '';
+let gtcIndTick = 0;
+
+function gtcActivePlanes(){
+  const planes = (window.st && Array.isArray(st.planes)) ? st.planes : [];
+  return planes.filter(p=>p && !p._hit);
+}
+function gtcMakePlaneSig(arr){
+  try{ return (arr||[]).map(p=>`${p.id||''}:${p.name||''}`).join('|'); }catch(_){ return ''; }
+}
+function gtcFillPlaneSelect(sel, selectedId){
+  if(!sel) return;
+  const planes = gtcActivePlanes();
+  const prev = String(selectedId||'');
+  sel.innerHTML = '';
+  const o0 = document.createElement('option');
+  o0.value = '';
+  o0.textContent = '✈ Avión...';
+  sel.appendChild(o0);
+
+  // Orden por nombre para facilidad
+  planes
+    .slice()
+    .sort((a,b)=>String(a.name||a.id||'').localeCompare(String(b.name||b.id||'')))
+    .forEach(p=>{
+      const o = document.createElement('option');
+      o.value = String(p.id||'');
+      o.textContent = String(p.name||p.id||'');
+      sel.appendChild(o);
+    });
+
+  // Conservar selección si sigue activa
+  sel.value = planes.some(p=>String(p.id||'')===prev) ? prev : '';
+}
+function gtcUpdatePlaneSelectOptions(){
+  try{
+    const planes = gtcActivePlanes();
+    const sig = gtcMakePlaneSig(planes);
+    if(sig === gtcPlaneSig) return;
+    gtcPlaneSig = sig;
+
+    for(const [id, sel] of gtcPlaneSelById.entries()){
+      if(!sel) continue;
+      const u = (typeof gtcFindById === 'function') ? gtcFindById(id) : null;
+      const wanted = (u && u.trackPlaneId) ? String(u.trackPlaneId) : String(sel.value||'');
+      gtcFillPlaneSelect(sel, wanted);
+      if(u) u.trackPlaneId = String(sel.value||'');
+    }
+  }catch(_){}
+}
+
+function gtcCheckContact(u){
+  try{
+    if(!u) return {count:0, nearest:null, dist:Infinity, reason:'noUnit'};
+
+    // Solo alertar por el avión seleccionado para este LANZA
+    const pid = String(u.trackPlaneId || '');
+    if(!pid) return {count:0, nearest:null, dist:Infinity, reason:'noSel'};
+
+    const rNm = +u.covR || 0;
+    const hFt = +u.covH || 0;
+    if(!(isFinite(rNm) && rNm > 0 && isFinite(hFt) && hFt > 0)) return {count:0, nearest:null, dist:Infinity, reason:'noCov'};
+
+    const planes = gtcActivePlanes();
+    const p = planes.find(x=>x && String(x.id||'') === pid) || null;
+    if(!p) return {count:0, nearest:null, dist:Infinity, reason:'notFound'};
+
+    const alt = +p.alt;
+    if(!isFinite(alt) || alt < 0 || alt > hFt) return {count:0, nearest:p, dist:Infinity, reason:'alt'};
+
+    const dx = (+p.x||0) - (+u.x||0);
+    const dy = (+p.y||0) - (+u.y||0);
+    const d = Math.hypot(dx, dy);
+
+    if(d <= rNm) return {count:1, nearest:p, dist:d, reason:'in'};
+    return {count:0, nearest:p, dist:d, reason:'range'};
+  }catch(e){
+    return {count:0, nearest:null, dist:Infinity, reason:'err'};
+  }
+}
+
+function gtcRefreshIndicators(){
+  try{
+    // Mantener selector actualizado cuando cambian los aviones activos
+    try{ gtcUpdatePlaneSelectOptions(); }catch(_){}
+
+    const arr = (window.st && Array.isArray(st.gtc)) ? st.gtc : [];
+    if(!arr.length) return;
+
+    for(const u of arr){
+      if(!u || !u.id) continue;
+      const btn = gtcUiById.get(u.id);
+      if(!btn) continue;
+
+      const pid = String(u.trackPlaneId || '');
+      const res = gtcCheckContact(u);
+      const on = !!(res && res.count > 0);
+
+      btn.classList.toggle('alert', on);
+
+      // Tooltip / estado
+      if(!pid){
+        btn.title = 'Selecciona un avión activo para monitorear cobertura';
+        continue;
+      }
+
+      if(res && res.reason === 'notFound'){
+        btn.title = `El avión seleccionado no está activo (${pid})`;
+        continue;
+      }
+
+      const p = res ? res.nearest : null;
+      const nm = (p && p.name) ? p.name : pid;
+
+      let dTxt = '';
+      if(res && isFinite(res.dist) && res.dist < 1e9){
+        dTxt = (window.st && st.metric) ? `${(res.dist*NM2KM).toFixed(1)} km` : `${res.dist.toFixed(1)} NM`;
+      }
+
+      let aTxt = '';
+      if(p && isFinite(p.alt)){
+        aTxt = (window.st && st.altUnit === 'm') ? `${Math.round(p.alt*FT2M)} m` : `${Math.round(p.alt)} ft`;
+      }
+
+      if(on){
+        btn.title = `ALERTA: ${nm} en cobertura${dTxt?` · ${dTxt}`:''}${aTxt?` · ${aTxt}`:''}`;
+      }else{
+        // fuera por distancia o altura
+        if(res && res.reason === 'alt'){
+          btn.title = `${nm} fuera por ALTURA${aTxt?` · ${aTxt}`:''}`;
+        }else if(res && res.reason === 'range'){
+          btn.title = `${nm} fuera por DISTANCIA${dTxt?` · ${dTxt}`:''}${aTxt?` · ${aTxt}`:''}`;
+        }else{
+          btn.title = `${nm} (sin alerta)`;
+        }
+      }
+    }
+  }catch(e){}
+}
+
+
+let gtcMissileSeq = 0;
+function gtcLaunchMissile(u){
+  try{
+    if(!u || !u.id) return;
+
+    const pid = String(u.trackPlaneId || '');
+    if(!pid){
+      try{ logEvent(`LANZAMIENTO: ${(u.name||'LANZA')} sin avión seleccionado`); }catch(_){}
+      return;
+    }
+
+    const planes = (typeof gtcActivePlanes==='function') ? gtcActivePlanes() : ((window.st && Array.isArray(st.planes))?st.planes:[]);
+    const T = planes.find(p=>p && String(p.id||'')===pid) || null;
+    if(!T){
+      try{ logEvent(`LANZAMIENTO: ${(u.name||'LANZA')} avión no activo (${pid})`); }catch(_){}
+      return;
+    }
+
+    const maxRNm = +u.misR || 0;
+    const maxHFt = +u.misH || 0;
+    if(!(isFinite(maxRNm) && maxRNm > 0 && isFinite(maxHFt) && maxHFt > 0)){
+      try{ logEvent(`LANZAMIENTO: ${(u.name||'LANZA')} define alcance/altura del misil`); }catch(_){}
+      return;
+    }
+
+    const dx = (+T.x||0) - (+u.x||0);
+    const dy = (+T.y||0) - (+u.y||0);
+    const dNm = Math.hypot(dx, dy);
+
+    if(dNm > maxRNm){
+      try{ logEvent(`LANZAMIENTO: ${(u.name||'LANZA')} -> ${(T.name||pid)} ABORTADO (fuera de alcance)`); }catch(_){}
+      return;
+    }
+    const tAlt = +T.alt;
+    if(isFinite(tAlt) && tAlt > maxHFt){
+      try{ logEvent(`LANZAMIENTO: ${(u.name||'LANZA')} -> ${(T.name||pid)} ABORTADO (fuera de altura)`); }catch(_){}
+      return;
+    }
+
+    st.missiles = Array.isArray(st.missiles) ? st.missiles : [];
+    const id = 'gtcm_' + Date.now().toString(36) + '_' + Math.random().toString(36).slice(2,6);
+    const name = `MIS${++gtcMissileSeq}`;
+
+    st.missiles.push({
+      id,
+      name,
+      launcher: u.id,
+      launcherType: 'gtc',
+      launcherName: (u.name || 'LANZA'),
+      tgt: T.id,
+      x: +u.x||0,
+      y: +u.y||0,
+      alt: 0,
+      spd: 1800,      // kts (sim)
+      drift: 0,
+      travKM: 0,
+      rangeKM: maxRNm * NM2KM,
+      maxAltFt: maxHFt,
+      status: 'fly'
+    });
+
+    try{ logEvent(`LANZAMIENTO: ${(u.name||'LANZA')} -> ${(T.name||pid)} (${name})`); }catch(_){}
+  }catch(e){}
+}
+
+
+
+function gtcNextName(){
+  let max = 0;
+  (st.gtc || []).forEach(u=>{
+    const m = /^LANZA\s*(\d+)$/i.exec(String(u.name||'').trim());
+    if(m){
+      const n = parseInt(m[1],10);
+      if(Number.isFinite(n)) max = Math.max(max, n);
+    }
+  });
+  return `LANZA${max+1}`;
+}
+
+function centerWorld(x,y){
+  offX = -x * zoom * PX_PER_NM;
+  offY = -y * zoom * PX_PER_NM;
+}
+
+function setGtcPlacing(on){
+  gtcPlacing = !!on;
+  const b = document.getElementById('gtcAdd');
+  const chip = document.getElementById('gtcModeChip');
+  if(b) b.classList.toggle('hi', gtcPlacing);
+  if(chip) chip.textContent = gtcPlacing ? 'CLICK EN RADAR PARA COLOCAR' : '';
+}
+
+
+
+function repaintGTC(){
+  const list = document.getElementById('gtcList');
+  if(!list) return;
+
+  const arr = st.gtc = Array.isArray(st.gtc) ? st.gtc : [];
+  list.innerHTML = '';
+  try{ gtcUiById.clear(); }catch(_){ }
+  try{ gtcPlaneSelById.clear(); }catch(_){ }
+
+  if(arr.length === 0){
+    list.innerHTML = '<div class="mini" style="opacity:.8">Sin medios</div>';
+    return;
+  }
+
+  const rRange = (typeof gtcRadDispRange === 'function') ? gtcRadDispRange() : ({min:1,max:200,step:1});
+  const hRange = (typeof gtcAltDispRange === 'function') ? gtcAltDispRange() : ({min:1000,max:80000,step:500});
+  const rUnit = (window.st && st.metric) ? 'km' : 'NM';
+  const hUnit = (window.st && st.altUnit === 'm') ? 'm' : 'ft';
+
+  arr.forEach(u=>{
+    if(!u) return;
+
+    // Interno: NM (radio), ft (altura)
+    if(!(isFinite(u.covR))) u.covR = 0;
+    if(!(isFinite(u.covH))) u.covH = 0;
+
+    // Misil: NM (alcance), ft (altura máxima)
+    if(!(isFinite(u.misR))) u.misR = 20;
+    if(!(isFinite(u.misH))) u.misH = 30000;
+
+    const wrap = document.createElement('div');
+    wrap.className = 'gtc-item col';
+
+    // --- fila compacta ---
+    const row = document.createElement('div');
+    row.className = 'gtc-row';
+
+    const inp = document.createElement('input');
+    inp.className = 'ghost focusable gtc-name';
+    inp.type = 'text';
+    inp.value = u.name || '';
+    inp.style.flex = '1';
+    inp.style.minWidth = '78px';
+    inp.title = 'Cambiar nombre';
+    inp.addEventListener('input', ()=>{ u.name = inp.value; });
+    inp.addEventListener('change', ()=>{ u.name = inp.value; });
+
+
+    // Selector de avión activo (para alertas por avión específico)
+    const sel = document.createElement('select');
+    sel.className = 'gtc-planeSel focusable';
+    sel.title = 'Seleccionar avión activo para monitorear (la alerta será solo para ese avión)';
+    if(u.trackPlaneId === undefined) u.trackPlaneId = '';
+    gtcFillPlaneSelect(sel, u.trackPlaneId);
+    sel.addEventListener('change', ()=>{
+      u.trackPlaneId = String(sel.value||'');
+      try{ if(typeof gtcRefreshIndicators==='function') gtcRefreshIndicators(); }catch(_){}
+    });
+    try{ if(u.id) gtcPlaneSelById.set(u.id, sel); }catch(_){}
+
+    // Botón circular verde/rojo (alerta + lanzamiento)
+    const gbtn = document.createElement('button');
+    gbtn.className = 'gtc-green-btn focusable';
+    gbtn.title = 'Lanzar misil al avión seleccionado (usa las capacidades configuradas)';
+    gbtn.addEventListener('click', (e)=>{
+      e.stopPropagation();
+      try{ if(typeof gtcLaunchMissile === 'function') gtcLaunchMissile(u); }catch(_){}
+    });
+    try{ if(u.id) gtcUiById.set(u.id, gbtn); }catch(_){ }
+
+// Estado compacto R/H
+    const stat = document.createElement('span');
+    stat.className = 'mini gtc-stat';
+    stat.style.opacity = '.70';
+    stat.style.whiteSpace = 'nowrap';
+    stat.style.maxWidth = '130px';
+    stat.style.overflow = 'hidden';
+    stat.style.textOverflow = 'ellipsis';
+
+    function getRD(){ return (typeof gtcRadToDisp==='function') ? gtcRadToDisp(u.covR) : u.covR; }
+    function getHD(){ return (typeof gtcAltToDisp==='function') ? gtcAltToDisp(u.covH) : u.covH; }
+    function updateStat(){
+      const rd = getRD();
+      const hd = getHD();
+      const rTxt = (rd && isFinite(rd) && rd>0) ? `R ${(+rd).toFixed(0)}${rUnit}` : 'R —';
+      const hTxt = (hd && isFinite(hd) && hd>0) ? `H ${(+hd).toFixed(0)}${hUnit}` : 'H —';
+      stat.textContent = `${rTxt} · ${hTxt}`;
+    }
+    updateStat();
+
+    // Botón de configuración (abre/cierra)
+    const cfgBtn = document.createElement('button');
+    cfgBtn.className = 'btn mini focusable';
+    cfgBtn.textContent = '⚙️';
+    cfgBtn.title = 'Configurar cobertura (Radio/Altura)';
+
+    const cbtn = document.createElement('button');
+    cbtn.className = 'gtc-center-dot focusable';
+    cbtn.textContent = '';
+    cbtn.title = 'Centrar en el radar';
+    cbtn.setAttribute('aria-label', 'Centrar en el radar');
+    cbtn.addEventListener('click', ()=>{
+      if(!Number.isFinite(u.x) || !Number.isFinite(u.y)) return;
+      centerWorld(u.x, u.y);
+      if(typeof repaintNav==='function') repaintNav();
+    });
+
+    const dbtn = document.createElement('button');
+    dbtn.className = 'btn mini focusable';
+    dbtn.textContent = '🗑️';
+    dbtn.title = 'Eliminar';
+    dbtn.addEventListener('click', ()=>{
+      const i = arr.indexOf(u);
+      if(i >= 0) arr.splice(i, 1);
+      repaintGTC();
+      if(typeof repaintNav==='function') repaintNav();
+    });
+
+    row.appendChild(inp);
+    row.appendChild(sel);
+    row.appendChild(gbtn);
+    row.appendChild(stat);
+    row.appendChild(cfgBtn);
+    row.appendChild(cbtn);
+    row.appendChild(dbtn);
+
+    // --- panel de configuración (colapsable) ---
+    const cov = document.createElement('div');
+    cov.className = 'gtc-cfg col';
+    cov.style.gap = '8px';
+    cov.style.display = 'none';
+
+    const mkCtrl = (labelTxt, unitTxt)=>{
+      const box = document.createElement('div');
+      box.className = 'col';
+      box.style.gap = '4px';
+
+      const top = document.createElement('div');
+      top.className = 'row';
+      top.style.gap = '6px';
+      top.style.alignItems = 'center';
+
+      const lab = document.createElement('span');
+      lab.className = 'mini';
+      lab.style.opacity = '.85';
+      lab.textContent = labelTxt;
+
+      const num = document.createElement('input');
+      num.className = 'ghost focusable';
+      num.type = 'number';
+      num.style.width = '74px';
+      num.style.padding = '4px 6px';
+
+      const unit = document.createElement('span');
+      unit.className = 'mini';
+      unit.style.opacity = '.75';
+      unit.textContent = unitTxt;
+
+      top.appendChild(lab);
+      top.appendChild(num);
+      top.appendChild(unit);
+
+      const rng = document.createElement('input');
+      rng.type = 'range';
+      rng.className = 'focusable';
+
+      box.appendChild(top);
+      box.appendChild(rng);
+      return {box, num, rng};
+    };
+
+    const cR = mkCtrl('Radio (R)', rUnit);
+    const cH = mkCtrl('Altura (H)', hUnit);
+
+    const mR = mkCtrl('Misil Alcance', rUnit);
+    const mH = mkCtrl('Misil Altura', hUnit);
+
+    // valores visibles
+    const rDisp0 = getRD();
+    const hDisp0 = getHD();
+
+
+    const mRDisp0 = (typeof gtcRadToDisp==='function') ? gtcRadToDisp(u.misR) : u.misR;
+    const mHDisp0 = (typeof gtcAltToDisp==='function') ? gtcAltToDisp(u.misH) : u.misH;
+    // rangos
+    cR.num.min = 0; cR.num.max = rRange.max; cR.num.step = rRange.step;
+    cR.rng.min = 0; cR.rng.max = rRange.max; cR.rng.step = rRange.step;
+
+    cH.num.min = 0; cH.num.max = hRange.max; cH.num.step = hRange.step;
+    cH.rng.min = 0; cH.rng.max = hRange.max; cH.rng.step = hRange.step;
+
+
+    mR.num.min = 0; mR.num.max = rRange.max; mR.num.step = rRange.step;
+    mR.rng.min = 0; mR.rng.max = rRange.max; mR.rng.step = rRange.step;
+
+    mH.num.min = 0; mH.num.max = hRange.max; mH.num.step = hRange.step;
+    mH.rng.min = 0; mH.rng.max = hRange.max; mH.rng.step = hRange.step;
+    cR.num.value = (isFinite(rDisp0) ? (rDisp0||0) : 0);
+    cR.rng.value = cR.num.value;
+
+    cH.num.value = (isFinite(hDisp0) ? (hDisp0||0) : 0);
+    cH.rng.value = cH.num.value;
+
+
+
+    mR.num.value = (isFinite(mRDisp0) ? (mRDisp0||0) : 0);
+    mR.rng.value = mR.num.value;
+
+    mH.num.value = (isFinite(mHDisp0) ? (mHDisp0||0) : 0);
+    mH.rng.value = mH.num.value;
+    const infoRow = document.createElement('div');
+    infoRow.className = 'row gtc-actions';
+    infoRow.style.gap = '8px';
+    infoRow.style.alignItems = 'center';
+    infoRow.style.justifyContent = 'space-between';
+
+    const leftBtns = document.createElement('div');
+    leftBtns.className = 'row';
+    leftBtns.style.gap = '8px';
+    leftBtns.style.alignItems = 'center';
+    leftBtns.style.flexWrap = 'nowrap';
+
+    function setCovRFromDisp(v){
+      if(!isFinite(v) || v<=0){ u.covR = 0; return; }
+      const cl = Math.max(1, Math.min(rRange.max, v));
+      u.covR = (typeof gtcRadFromDisp==='function') ? gtcRadFromDisp(cl) : cl;
+    }
+    function setCovHFromDisp(v){
+      if(!isFinite(v) || v<=0){ u.covH = 0; return; }
+
+    function setMisRFromDisp(v){
+      if(!isFinite(v) || v<=0){ u.misR = 0; return; }
+      const cl = Math.max(1, Math.min(rRange.max, v));
+      u.misR = (typeof gtcRadFromDisp==='function') ? gtcRadFromDisp(cl) : cl;
+    }
+    function setMisHFromDisp(v){
+      if(!isFinite(v) || v<=0){ u.misH = 0; return; }
+      const cl = Math.max(0, Math.min(hRange.max, v));
+      u.misH = (typeof gtcAltFromDisp==='function') ? gtcAltFromDisp(cl) : cl;
+    }
+
+      const cl = Math.max(0, Math.min(hRange.max, v));
+      u.covH = (typeof gtcAltFromDisp==='function') ? gtcAltFromDisp(cl) : cl;
+    }
+
+    function syncR(v){
+      cR.num.value = v;
+      cR.rng.value = v;
+      setCovRFromDisp(parseFloat(v));
+      updateStat();
+      if(typeof repaintNav==='function') repaintNav();
+    }
+    function syncH(v){
+      cH.num.value = v;
+      cH.rng.value = v;
+      setCovHFromDisp(parseFloat(v));
+      updateStat();
+      if(typeof repaintNav==='function') repaintNav();
+    }
+
+
+    function syncMR(v){
+      mR.num.value = v;
+      mR.rng.value = v;
+      setMisRFromDisp(parseFloat(v));
+      if(typeof repaintNav==='function') repaintNav();
+    }
+    function syncMH(v){
+      mH.num.value = v;
+      mH.rng.value = v;
+      setMisHFromDisp(parseFloat(v));
+      if(typeof repaintNav==='function') repaintNav();
+    }
+
+    cR.num.addEventListener('input', ()=>syncR(cR.num.value));
+    cR.rng.addEventListener('input', ()=>syncR(cR.rng.value));
+    cR.num.addEventListener('change', ()=>{
+      const rd = getRD();
+      syncR(isFinite(rd) ? (rd||0) : 0);
+    });
+
+    cH.num.addEventListener('input', ()=>syncH(cH.num.value));
+    cH.rng.addEventListener('input', ()=>syncH(cH.rng.value));
+    cH.num.addEventListener('change', ()=>{
+      const hd = getHD();
+      syncH(isFinite(hd) ? (hd||0) : 0);
+    });
+
+
+    mR.num.addEventListener('input', ()=>syncMR(mR.num.value));
+    mR.rng.addEventListener('input', ()=>syncMR(mR.rng.value));
+    mR.num.addEventListener('change', ()=>{
+      const v = (typeof gtcRadToDisp==='function') ? gtcRadToDisp(u.misR) : u.misR;
+      syncMR(isFinite(v) ? (v||0) : 0);
+    });
+
+    mH.num.addEventListener('input', ()=>syncMH(mH.num.value));
+    mH.rng.addEventListener('input', ()=>syncMH(mH.rng.value));
+    mH.num.addEventListener('change', ()=>{
+      const v = (typeof gtcAltToDisp==='function') ? gtcAltToDisp(u.misH) : u.misH;
+      syncMH(isFinite(v) ? (v||0) : 0);
+    });
+    leftBtns.appendChild(offBtn);
+
+    infoRow.appendChild(leftBtns);
+
+    cov.appendChild(cR.box);
+    cov.appendChild(cH.box);
+    // Misil
+    cov.appendChild(mR.box);
+    cov.appendChild(mH.box);
+    cov.appendChild(infoRow);
+
+    cfgBtn.addEventListener('click', ()=>{
+      const open = (cov.style.display === 'none');
+      cov.style.display = open ? '' : 'none';
+      cfgBtn.textContent = open ? '✖' : '⚙️';
+      cfgBtn.title = open ? 'Cerrar' : 'Configurar cobertura (Radio/Altura)';
+    });
+
+    wrap.appendChild(row);
+    wrap.appendChild(cov);
+    list.appendChild(wrap);
+  });
+
+  try{ if(typeof gtcRefreshIndicators==='function') gtcRefreshIndicators(); }catch(_){ }
+}
+
+
+
+
+/* ===== GTC: Cobertura (círculo/cone) por click derecho ===== */
+let gtcCtxMenu = null;
+let gtcCtxTargetId = null;
+let gtcRadiusDrag = null; // {id, prevR}
+
+function gtcFindById(id){
+  const arr = (window.st && Array.isArray(st.gtc)) ? st.gtc : [];
+  return arr.find(u => u && u.id === id) || null;
+}
+
+function gtcFmtRadius(rNm){
+  if(!isFinite(rNm)) return '';
+  return st.metric ? `${(rNm*NM2KM).toFixed(0)} km` : `${rNm.toFixed(0)} NM`;
+}
+function gtcFmtHeight(hFt){
+  if(!isFinite(hFt)) return '';
+  const useM = (window.st && st.altUnit === 'm');
+  if(useM){
+    const m = hFt * 0.3048;
+    return (m >= 1000) ? `${(m/1000).toFixed(1)} km` : `${m.toFixed(0)} m`;
+  }
+  return (hFt >= 1000) ? `${(hFt/1000).toFixed(0)} kft` : `${Math.round(hFt)} ft`;
+}
+function gtcConeAngleDeg(rNm, hFt){
+  if(!isFinite(rNm) || !isFinite(hFt) || hFt <= 0) return 0;
+  const rM = rNm * NM2KM * 1000;
+  const hM = hFt * 0.3048;
+  return Math.atan2(rM, hM) * 180 / Math.PI;
+}
+
+function gtcRadToDisp(rNm){ return (window.st && st.metric) ? (rNm*NM2KM) : rNm; }
+function gtcRadFromDisp(v){ return (window.st && st.metric) ? (v/NM2KM) : v; }
+
+function gtcAltToDisp(hFt){ return (window.st && st.altUnit === 'm') ? (hFt*0.3048) : hFt; }
+function gtcAltFromDisp(v){ return (window.st && st.altUnit === 'm') ? (v/0.3048) : v; }
+
+function gtcRadDispRange(){ return (window.st && st.metric) ? ({min:1, max:400, step:1}) : ({min:1, max:200, step:1}); }
+function gtcAltDispRange(){ return (window.st && st.altUnit === 'm') ? ({min:300, max:25000, step:100}) : ({min:1000, max:80000, step:500}); }
+
+function drawGtcMiniCone(u){
+  // Mini vista tipo "tubo" (cilindro): radio constante a lo largo de la altura
+  const c = document.getElementById('gtcConeMini');
+  if(!c || !c.getContext) return;
+  const cx = c.getContext('2d');
+  const W = c.width|0, H = c.height|0;
+  cx.clearRect(0,0,W,H);
+
+  // fondo
+  cx.fillStyle = 'rgba(0,0,0,0.20)';
+  cx.fillRect(0,0,W,H);
+
+  const rNm = (u && isFinite(u.covR)) ? u.covR : 0;
+  const hFt = (u && isFinite(u.covH)) ? u.covH : 0;
+  if(!(rNm>0) || !(hFt>0)){
+    cx.fillStyle = 'rgba(255,255,255,0.65)';
+    cx.font = '11px system-ui,Segoe UI,Roboto,Arial';
+    cx.textAlign = 'center';
+    cx.textBaseline = 'middle';
+    cx.fillText('Ajusta RADIO y ALTURA', W/2, H/2 - 6);
+    cx.fillText('para simular el tubo', W/2, H/2 + 10);
+    return;
+  }
+
+  // Escalado relativo para mostrar (no es mapa; solo visual)
+  const rM = rNm * NM2KM * 1000;
+  const hM = hFt * 0.3048;
+
+  const pad = 10;
+  const sx = (W - 2*pad) / Math.max(1, 2*rM);
+  const sy = (H - 2*pad) / Math.max(1, hM);
+  const s = Math.min(sx, sy);
+
+  const halfW = rM * s;
+  const tubeH = hM * s;
+
+  const baseY = H - pad;
+  const topY  = baseY - tubeH;
+  const midX  = W/2;
+
+  // Rectángulo (sección del tubo)
+  cx.fillStyle = 'rgba(255,0,0,0.14)';
+  cx.strokeStyle = 'rgba(255,0,0,0.72)';
+  cx.lineWidth = 1.6;
+
+  cx.beginPath();
+  cx.rect(midX - halfW, topY, 2*halfW, tubeH);
+  cx.fill();
+  cx.stroke();
+
+  // Línea base
+  cx.strokeStyle = 'rgba(255,255,255,0.16)';
+  cx.lineWidth = 1;
+  cx.beginPath();
+  cx.moveTo(midX - halfW, baseY);
+  cx.lineTo(midX + halfW, baseY);
+  cx.stroke();
+
+  // Etiquetas
+  const rLbl = (window.st && st.metric) ? `${(rNm*NM2KM).toFixed(0)}km` : `${rNm.toFixed(0)}NM`;
+  let hLbl = '';
+  if(window.st && st.altUnit === 'm'){
+    const hm = hM;
+    hLbl = (hm >= 1000) ? `${(hm/1000).toFixed(1)}km` : `${hm.toFixed(0)}m`;
+  }else{
+    hLbl = (hFt >= 1000) ? `${(hFt/1000).toFixed(0)}kft` : `${Math.round(hFt)}ft`;
+  }
+
+  cx.fillStyle = 'rgba(255,255,255,0.78)';
+  cx.font = '10px monospace';
+  cx.textAlign = 'left';
+  cx.textBaseline = 'top';
+  cx.fillText(`R: ${rLbl}`, 8, 6);
+  cx.fillText(`H: ${hLbl}`, 8, 20);
+}
+
+
+function findGtcAtClient(clientX, clientY, hit=20){
+  if(!window.cvs) return null;
+  const arr = (window.st && Array.isArray(st.gtc)) ? st.gtc : [];
+  if(!arr.length) return null;
+  const r = cvs.getBoundingClientRect();
+  const mx = clientX - r.left, my = clientY - r.top;
+  for(let i=arr.length-1;i>=0;i--){
+    const u = arr[i]; if(!u) continue;
+    const s = toScreen(u.x, u.y);
+    const dx = s.x - mx, dy = s.y - my;
+    if(Math.hypot(dx,dy) <= hit) return u;
+  }
+  return null;
+}
+
+function ensureGtcMenu(){
+  if(gtcCtxMenu && gtcCtxMenu.isConnected) return gtcCtxMenu;
+
+  if(!document.getElementById('setcaGtcCtxStyle')){
+    const stl = document.createElement('style');
+    stl.id = 'setcaGtcCtxStyle';
+    stl.textContent = `
+      #setcaGtcCtx{
+        position:fixed; z-index:10041; min-width:220px; display:none;
+        background:rgba(10,12,15,.97); color:#eef8ff;
+        border:1px solid rgba(255,80,80,.35); border-radius:10px;
+        box-shadow:0 8px 28px rgba(0,0,0,.45), 0 0 0 1px rgba(255,255,255,.03) inset;
+        padding:6px;
+        font:12px/1.2 system-ui,Segoe UI,Roboto,Arial,sans-serif;
+        backdrop-filter: blur(4px);
+      }
+      #setcaGtcCtx .hdr{
+        padding:4px 6px 6px 6px; font-weight:800; color:#ffb3b3;
+        border-bottom:1px solid rgba(255,255,255,.07);
+        margin-bottom:6px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;
+      }
+      #setcaGtcCtx .sub{ padding:0 6px 6px 6px; opacity:.9; }
+      #setcaGtcCtx .lbl{ padding:5px 6px 2px 6px; opacity:.9; display:flex; justify-content:space-between; gap:10px; }
+      #setcaGtcCtx input[type="range"]{ width:100%; margin:0; }
+      #setcaGtcCtx .btn{
+        width:100%; text-align:left; padding:7px 9px; border-radius:8px; border:1px solid rgba(255,80,80,.18);
+        background:rgba(255,255,255,.04); color:#eef8ff; cursor:pointer; margin:0;
+      }
+      #setcaGtcCtx .btn + .btn{ margin-top:5px; }
+      #setcaGtcCtx .btn:hover{ background:rgba(255,80,80,.10); border-color:rgba(255,80,80,.32); }
+      #setcaGtcCtx .btn.warn{ color:#ffd7d7; border-color:rgba(255,120,120,.20); }
+      #setcaGtcCtx .row{ display:flex; gap:6px; padding:6px; }
+      #setcaGtcCtx .row .btn{ flex:1; text-align:center; padding:7px 0; }
+      #setcaGtcCtx .mini{ font-size:11px; opacity:.9; padding:2px 6px 0 6px; }
+
+      #setcaGtcCtx .hdr{ display:flex; align-items:center; justify-content:space-between; gap:10px; }
+      #setcaGtcCtx .htext{ flex:1; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+      #setcaGtcCtx .xbtn{
+        border:1px solid rgba(255,255,255,.10);
+        background:rgba(255,255,255,.04);
+        color:#eef8ff;
+        width:26px; height:26px;
+        border-radius:8px;
+        cursor:pointer;
+        line-height:24px;
+        font-weight:800;
+      }
+      #setcaGtcCtx .xbtn:hover{ background:rgba(255,80,80,.12); border-color:rgba(255,80,80,.30); }
+
+      #setcaGtcCtx .field{ display:flex; gap:6px; padding:0 6px 6px 6px; }
+      #setcaGtcCtx .field input[type="number"]{
+        flex:1;
+        padding:6px 8px;
+        border-radius:8px;
+        border:1px solid rgba(255,255,255,.10);
+        background:rgba(0,0,0,.20);
+        color:#eef8ff;
+        outline:none;
+      }
+      #setcaGtcCtx .unit{
+        padding:6px 8px;
+        border-radius:8px;
+        border:1px solid rgba(255,255,255,.10);
+        background:rgba(255,255,255,.03);
+        opacity:.9;
+        min-width:36px;
+        text-align:center;
+      }
+      #setcaGtcCtx canvas{
+        width:100%;
+        border:1px solid rgba(255,255,255,.08);
+        border-radius:8px;
+        background:rgba(0,0,0,.22);
+        margin:6px 0 2px 0;
+      }
+    `;
+    document.head.appendChild(stl);
+  }
+
+  gtcCtxMenu = document.getElementById('setcaGtcCtx');
+  if(!gtcCtxMenu){
+    gtcCtxMenu = document.createElement('div');
+    gtcCtxMenu.id = 'setcaGtcCtx';
+    gtcCtxMenu.innerHTML = `
+      <div class="hdr">
+        <div id="setcaGtcCtxHdr" class="htext">LANZA · COBERTURA</div>
+        <button type="button" class="xbtn" data-act="close" title="Cerrar">✕</button>
+      </div>
+      <div class="sub">Modifica radio de alcance y altura de detección (tubo)</div>
+
+      <div class="lbl"><span>Radio</span><span id="gtcCovRVal">—</span></div>
+      <div class="field">
+        <input id="gtcCovRNum" type="number" />
+        <span class="unit" id="gtcCovRUnit">NM</span>
+      </div>
+      <input id="gtcCovR" type="range" />
+
+      <div class="lbl"><span>Altura</span><span id="gtcCovHVal">—</span></div>
+      <div class="field">
+        <input id="gtcCovHNum" type="number" />
+        <span class="unit" id="gtcCovHUnit">ft</span>
+      </div>
+      <input id="gtcCovH" type="range" />
+
+      <canvas id="gtcConeMini" width="220" height="86"></canvas>
+      <button type="button" class="btn" data-act="dragR">📏 Ajustar radio en el radar</button>
+      <button type="button" class="btn warn" data-act="delCov">🗑️ Quitar cobertura</button>
+
+      <div class="row">
+        <button type="button" class="btn" data-act="center">🎯</button>
+        <button type="button" class="btn warn" data-act="del">🗑️</button>
+      </div>
+    `;
+    document.body.appendChild(gtcCtxMenu);
+
+    // no arrastrar el mundo al clicar el menú
+    gtcCtxMenu.addEventListener('mousedown', (e)=>consume(e), true);
+
+    // sliders + inputs (con unidades reales)
+    const rEl = gtcCtxMenu.querySelector('#gtcCovR');
+    const hEl = gtcCtxMenu.querySelector('#gtcCovH');
+    const rNum = gtcCtxMenu.querySelector('#gtcCovRNum');
+    const hNum = gtcCtxMenu.querySelector('#gtcCovHNum');
+
+    const applyR = (vDisp)=>{
+      const u = gtcFindById(gtcCtxTargetId); if(!u) return;
+      const rr = gtcRadDispRange();
+      const vv = Math.max(rr.min, Math.min(rr.max, (parseFloat(vDisp)||rr.min)));
+      u.covR = Math.max(1, gtcRadFromDisp(vv));
+      updateGtcMenuValues(u);
+      try{ repaintAll(); }catch(_){}
+    };
+    const applyH = (vDisp)=>{
+      const u = gtcFindById(gtcCtxTargetId); if(!u) return;
+      const hr = gtcAltDispRange();
+      const vv = Math.max(hr.min, Math.min(hr.max, (parseFloat(vDisp)||hr.min)));
+      u.covH = Math.max(0, gtcAltFromDisp(vv));
+      updateGtcMenuValues(u);
+      try{ repaintAll(); }catch(_){}
+    };
+
+    if(rEl) rEl.addEventListener('input', ()=>applyR(rEl.value), true);
+    if(hEl) hEl.addEventListener('input', ()=>applyH(hEl.value), true);
+
+    if(rNum){
+      rNum.addEventListener('input', ()=>applyR(rNum.value), true);
+      rNum.addEventListener('change', ()=>applyR(rNum.value), true);
+    }
+    if(hNum){
+      hNum.addEventListener('input', ()=>applyH(hNum.value), true);
+      hNum.addEventListener('change', ()=>applyH(hNum.value), true);
+    }
+
+    // botones
+    gtcCtxMenu.addEventListener('click', (e)=>{
+      const btn = e.target.closest('button[data-act]');
+      if(!btn) return;
+      consume(e);
+      const act = btn.getAttribute('data-act');
+      const u = gtcFindById(gtcCtxTargetId);
+      if(!u) { hideGtcMenu(); return; }
+
+      if(act === 'close'){ hideGtcMenu(); return; }
+
+      if(act === 'center'){
+        if(Number.isFinite(u.x) && Number.isFinite(u.y)) centerWorld(u.x, u.y);
+        hideGtcMenu();
+        return;
+      }
+
+      if(act === 'del'){
+        const arr = st.gtc || [];
+        const i = arr.indexOf(u);
+        if(i >= 0) arr.splice(i,1);
+        try{ repaintGTC(); }catch(_){}
+        try{ repaintAll(); }catch(_){}
+        hideGtcMenu();
+        return;
+      }
+
+      if(act === 'delCov'){
+        u.covR = 0;
+        u.covH = 0;
+        updateGtcMenuValues(u);
+        try{ repaintAll(); }catch(_){}
+        return;
+      }
+
+      if(act === 'dragR'){
+        startGtcRadiusDrag(u);
+        hideGtcMenu();
+        return;
+      }
+    }, true);
+  }
+
+  return gtcCtxMenu;
+}
+
+function updateGtcMenuValues(u){
+  const m = ensureGtcMenu();
+  const rEl = m.querySelector('#gtcCovR');
+  const hEl = m.querySelector('#gtcCovH');
+  const rNum = m.querySelector('#gtcCovRNum');
+  const hNum = m.querySelector('#gtcCovHNum');
+  const rUnit = m.querySelector('#gtcCovRUnit');
+  const hUnit = m.querySelector('#gtcCovHUnit');
+  const rV  = m.querySelector('#gtcCovRVal');
+  const hV  = m.querySelector('#gtcCovHVal');
+  const aV  = m.querySelector('#gtcCovAngVal');
+
+  const rNm = (u && isFinite(u.covR)) ? u.covR : 0;
+  const hFt = (u && isFinite(u.covH)) ? u.covH : 0;
+
+  const radU = (window.st && st.metric) ? 'km' : 'NM';
+  const altU = (window.st && st.altUnit === 'm') ? 'm' : 'ft';
+  if(rUnit) rUnit.textContent = radU;
+  if(hUnit) hUnit.textContent = altU;
+
+  const rr = gtcRadDispRange();
+  const hr = gtcAltDispRange();
+
+  const rDisp = gtcRadToDisp(Math.max(0, rNm));
+  const hDisp = gtcAltToDisp(Math.max(0, hFt));
+
+  if(rEl){
+    rEl.min = rr.min; rEl.max = rr.max; rEl.step = rr.step;
+    rEl.value = String(Math.max(rr.min, Math.min(rr.max, rDisp || rr.min)));
+  }
+  if(hEl){
+    hEl.min = hr.min; hEl.max = hr.max; hEl.step = hr.step;
+    hEl.value = String(Math.max(hr.min, Math.min(hr.max, hDisp || hr.min)));
+  }
+  if(rNum){
+    rNum.min = rr.min; rNum.max = rr.max; rNum.step = rr.step;
+    rNum.value = String(Math.round(Math.max(rr.min, Math.min(rr.max, rDisp || rr.min))));
+  }
+  if(hNum){
+    hNum.min = hr.min; hNum.max = hr.max; hNum.step = hr.step;
+    hNum.value = String(Math.round(Math.max(hr.min, Math.min(hr.max, hDisp || hr.min))));
+  }
+
+  if(rV) rV.textContent = rNm > 0 ? gtcFmtRadius(rNm) : '—';
+  if(hV) hV.textContent = hFt > 0 ? gtcFmtHeight(hFt) : '—';
+
+  const ang = gtcConeAngleDeg(rNm, hFt);
+  if(aV) aV.textContent = (rNm>0 && hFt>0) ? `${ang.toFixed(1)}°` : '—';
+
+  try{ drawGtcMiniCone(u); }catch(_){}
+}
+
+function hideGtcMenu(){
+  const m = ensureGtcMenu();
+  m.style.display = 'none';
+  gtcCtxTargetId = null;
+}
+
+function showGtcMenu(clientX, clientY, u){
+  if(!u) return;
+  const m = ensureGtcMenu();
+  gtcCtxTargetId = u.id;
+
+  // Abrir menú crea cobertura por defecto si no existe
+  if(!(isFinite(u.covR) && u.covR > 0)){
+    u.covR = 20;      // NM
+    u.covH = 30000;   // ft
+  }
+  updateGtcMenuValues(u);
+
+  const hdr = m.querySelector('#setcaGtcCtxHdr');
+  if(hdr) hdr.textContent = (u.name || 'LANZA') + ' · COBERTURA';
+
+  const pad = 8;
+  m.style.display = 'block';
+  m.style.left = '0px';
+  m.style.top = '0px';
+  const rect = m.getBoundingClientRect();
+  const x = Math.min(window.innerWidth - rect.width - pad, Math.max(pad, clientX));
+  const y = Math.min(window.innerHeight - rect.height - pad, Math.max(pad, clientY));
+  m.style.left = x + 'px';
+  m.style.top = y + 'px';
+}
+
+function startGtcRadiusDrag(u){
+  if(!u) return;
+  gtcRadiusDrag = { id: u.id, prevR: (isFinite(u.covR)?u.covR:0) };
+  const chip = document.getElementById('gtcModeChip');
+  if(chip) chip.textContent = 'AJUSTAR RADIO: MUEVE EL MOUSE · CLICK PARA FIJAR · ESC CANCELA';
+}
+
+function cancelGtcRadiusDrag(restore){
+  if(!gtcRadiusDrag) return;
+  const u = gtcFindById(gtcRadiusDrag.id);
+  if(restore && u) u.covR = gtcRadiusDrag.prevR;
+  gtcRadiusDrag = null;
+  const chip = document.getElementById('gtcModeChip');
+  if(chip && !gtcPlacing) chip.textContent = '';
+  try{ repaintAll(); }catch(_){}
+}
+
+// Interacción: ajustar radio arrastrando en el radar
+document.addEventListener('mousemove', (e)=>{
+  if(!gtcRadiusDrag) return;
+  const u = gtcFindById(gtcRadiusDrag.id); if(!u) return;
+  const r = cvs.getBoundingClientRect();
+  const w = toWorld(e.clientX - r.left, e.clientY - r.top);
+  const rr = Math.max(1, Math.hypot(w.x - u.x, w.y - u.y));
+  u.covR = rr;
+  try{ repaintAll(); }catch(_){}
+}, true);
+
+cvs.addEventListener('mousedown', (e)=>{
+  if(!gtcRadiusDrag) return;
+  // confirm con click izquierdo
+  if(e.button === 0){
+    consume(e);
+    cancelGtcRadiusDrag(false);
+  }
+}, true);
+
+addEventListener('keydown', (e)=>{
+  if(e.key === 'Escape' && gtcRadiusDrag){
+    cancelGtcRadiusDrag(true);
+  }
+}, true);
+
+/* ===== GTC: AJUSTE DIRECTO (ARRASTRAR) =====
+   - Click izquierdo sobre LANZA: lo selecciona y crea cobertura por defecto si no existe.
+   - Arrastra desde LANZA (o desde el handle "R") para cambiar el RADIO (escala real en NM/km).
+   - Arrastra desde el handle "H" para cambiar la ALTURA (ft/m).
+   - ESC: cancela arrastre / deselecciona.
+*/
+let gtcSelId = null;
+let gtcDrag = null; // {id, mode:'r'|'h', baseR, baseH, startClientY}
+
+function gtcEnsureCov(u){
+  if(!u) return;
+  if(!(isFinite(u.covR) && u.covR > 0)) u.covR = 30;        // NM (escala real)
+  if(!(isFinite(u.covH) && u.covH > 0)) u.covH = 15000;     // ft (altura real)
+}
+
+function gtcChip(msg){
+  const chip = document.getElementById('gtcModeChip');
+  if(chip) chip.textContent = msg || '';
+}
+
+function gtcFmtRH(u){
+  const rNm = (u && isFinite(u.covR)) ? u.covR : 0;
+  const hFt = (u && isFinite(u.covH)) ? u.covH : 0;
+  const rTxt = st.metric ? `${(rNm*NM2KM).toFixed(0)}km` : `${rNm.toFixed(0)}NM`;
+  const useM = (window.st && st.altUnit === 'm');
+  let hTxt = '';
+  if(useM){
+    const m = hFt * 0.3048;
+    hTxt = (m>=1000) ? `${(m/1000).toFixed(1)}km` : `${m.toFixed(0)}m`;
+  }else{
+    hTxt = (hFt>=1000) ? `${(hFt/1000).toFixed(0)}kft` : `${Math.round(hFt)}ft`;
+  }
+  return {rTxt,hTxt};
+}
+
+function gtcHitHandle(u, clientX, clientY){
+  const r = cvs.getBoundingClientRect();
+  const mx = clientX - r.left, my = clientY - r.top;
+  const s = toScreen(u.x, u.y);
+  const rNm = (u && isFinite(u.covR)) ? u.covR : 0;
+  const rPx = Math.max(0, rNm) * zoom * PX_PER_NM;
+
+  const onH = (Math.hypot(mx-s.x, my-(s.y-17)) <= 12);
+  const onR = (rPx>0) && (Math.hypot(mx-(s.x+rPx), my-s.y) <= 11);
+  if(onH) return 'h';
+  if(onR) return 'r';
+
+  const onC = (Math.hypot(mx-s.x, my-s.y) <= 20);
+  return onC ? 'c' : null;
+}
+
+function gtcSelect(u){
+  if(!u) return;
+  gtcSelId = u.id;
+  gtcEnsureCov(u);
+  const t = gtcFmtRH(u);
+  gtcChip(`LANZA seleccionado · Radio ${t.rTxt} · Altura ${t.hTxt} · Arrastra R (radio) o H (altura) · ESC salir`);
+  try{ repaintAll(); }catch(_){}
+}
+
+function gtcDeselect(){
+  gtcSelId = null;
+  gtcDrag = null;
+  if(!(typeof gtcPlacing !== 'undefined' && gtcPlacing)) gtcChip('');
+  try{ repaintAll(); }catch(_){}
+}
+
+function gtcStartDrag(u, mode, startClientY){
+  gtcDrag = {
+    id: u.id,
+    mode,
+    baseR: (isFinite(u.covR)?u.covR:0),
+    baseH: (isFinite(u.covH)?u.covH:0),
+    startClientY
+  };
+}
+
+// Click izquierdo sobre LANZA => SELECCIONA y empieza ajuste (arrastre)
+cvs.addEventListener('mousedown', (e)=>{
+  if(window.GTC_PANEL_ONLY) return;
+  if(e.button !== 0) return;
+  if(window.st && st.modoObservador) return;
+  if(typeof gtcRadiusDrag !== 'undefined' && gtcRadiusDrag) return; // modo alternativo (botón) ya existente
+  // evita conflicto si estás dibujando algo
+  try{ if(window.tool && tool.tool && tool.tool !== 'none'){} }catch(_){}
+
+  const u = findGtcAtClient(e.clientX, e.clientY, 20);
+  if(!u) return;
+
+  gtcSelect(u);
+
+  const hit = gtcHitHandle(u, e.clientX, e.clientY);
+  const mode = (hit === 'h') ? 'h' : 'r'; // por defecto: radio
+  gtcStartDrag(u, mode, e.clientY);
+
+  consume(e);
+}, true);
+
+document.addEventListener('mousemove', (e)=>{
+  if(!gtcDrag) return;
+  const u = gtcFindById(gtcDrag.id); if(!u) return;
+  gtcEnsureCov(u);
+
+  if(gtcDrag.mode === 'r'){
+    const r = cvs.getBoundingClientRect();
+    const w = toWorld(e.clientX - r.left, e.clientY - r.top);
+    let rr = Math.hypot(w.x - u.x, w.y - u.y); // NM
+    rr = Math.max(1, Math.min(MAX_RANGE_NM, rr));
+    u.covR = rr;
+  }else{
+    // Altura por arrastre vertical (altura real)
+    const dy = (gtcDrag.startClientY - e.clientY);
+    const ftPerPx = 250 / Math.max(0.15, zoom);
+    let hh = (gtcDrag.baseH || 0) + dy * ftPerPx;
+    hh = Math.max(0, Math.min(90000, hh));
+    u.covH = hh;
+  }
+
+  const t = gtcFmtRH(u);
+  gtcChip(`${gtcDrag.mode==='r'?'AJUSTANDO RADIO':'AJUSTANDO ALTURA'} · Radio ${t.rTxt} · Altura ${t.hTxt} · Suelta para fijar · ESC cancela`);
+  try{ repaintAll(); }catch(_){}
+  consume(e);
+}, true);
+
+document.addEventListener('mouseup', (e)=>{
+  if(!gtcDrag) return;
+  const u = gtcFindById(gtcDrag.id);
+  if(u){
+    const t = gtcFmtRH(u);
+    gtcChip(`LANZA seleccionado · Radio ${t.rTxt} · Altura ${t.hTxt} · Arrastra R (radio) o H (altura) · ESC salir`);
+  }
+  gtcDrag = null;
+  try{ repaintAll(); }catch(_){}
+  consume(e);
+}, true);
+
+// ESC: cancela arrastre (revierte) o deselecciona
+addEventListener('keydown', (e)=>{
+  if(e.key !== 'Escape') return;
+
+  if(gtcDrag){
+    const u = gtcFindById(gtcDrag.id);
+    if(u){
+      u.covR = gtcDrag.baseR;
+      u.covH = gtcDrag.baseH;
+    }
+    gtcDrag = null;
+    try{ repaintAll(); }catch(_){}
+    if(gtcSelId){
+      const uu = gtcFindById(gtcSelId);
+      if(uu){
+        const t = gtcFmtRH(uu);
+        gtcChip(`LANZA seleccionado · Radio ${t.rTxt} · Altura ${t.hTxt} · Arrastra R (radio) o H (altura) · ESC salir`);
+      }
+    }
+    if(e.preventDefault) e.preventDefault();
+    return;
+  }
+
+  if(gtcSelId){
+    gtcDeselect();
+    if(e.preventDefault) e.preventDefault();
+    return;
+  }
+}, true);
+
+// Doble click sobre LANZA: abre el popup numérico (opcional)
+cvs.addEventListener('dblclick', (e)=>{
+  if(window.GTC_PANEL_ONLY) return;
+  if(window.st && st.modoObservador) return;
+  const u = findGtcAtClient(e.clientX, e.clientY, 20);
+  if(!u) return;
+  gtcEnsureCov(u);
+  gtcSelect(u);
+  try{ showGtcMenu(e.clientX, e.clientY, u); }catch(_){}
+  consume(e);
+}, true);
+
+// Desactivar menú contextual del navegador (pero NO bloquear el paneo)
+cvs.addEventListener('contextmenu', (e)=>{
+  if(e && e.preventDefault) e.preventDefault();
+}, true);
+
+// cerrar menú al click afuera
+document.addEventListener('mousedown', (e)=>{
+  const m = ensureGtcMenu();
+  if(m.style.display === 'none') return;
+  if(m.contains(e.target)) return;
+  hideGtcMenu();
+}, true);
+addEventListener('blur', hideGtcMenu, true);
+addEventListener('scroll', ()=>{ try{ hideGtcMenu(); }catch(_){} }, true);
+
+
+(function initGTC(){
+  const b = document.getElementById('gtcAdd');
+  if(b){
+    b.addEventListener('click', ()=>{ setGtcPlacing(!gtcPlacing); }, true);
+  }
+  addEventListener('keydown', (e)=>{
+    if(e.key === 'Escape' && gtcPlacing) setGtcPlacing(false);
+  }, true);
+
+  repaintGTC();
+})();
 </script>
 
 </body>
 </html>
 B Y     W   A   L   L   A   C   E 
-
