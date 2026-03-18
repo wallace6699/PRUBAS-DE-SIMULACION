@@ -1,4 +1,4 @@
-ESTE SIMULADOR SE ENCUENTRA EN FASE DE PRUEBA - PUEDEN OCURRIR ERRORES DURANTE EL FUNCIONAMIENTO 2.1 170326
+ESTE SIMULADOR SE ENCUENTRA EN FASE DE PRUEBA - PUEDEN OCURRIR ERRORES DURANTE EL FUNCIONAMIENTO 2.5.2 040326
 <!DOCTYPE html>
 <html lang="es">
 <head>
@@ -95,8 +95,12 @@ document.getElementById('cancelDelete').onclick = ()=>{
           planes: planesClean,
           roles: snap.roles,
           drawings: snap.drawings,
+          gtc: Array.isArray(snap.gtc) ? snap.gtc : [],
+          pairs: Array.isArray(snap.pairs) ? snap.pairs : [],
+          missiles: Array.isArray(snap.missiles) ? snap.missiles : [],
+          windKmh: Number.isFinite(+snap.windKmh) ? +snap.windKmh : 0,
+          windDir: Number.isFinite(+snap.windDir) ? +snap.windDir : 0,
           lastWriteBy: currentUID,
-          missiles: snap.missiles,
           lastUpdate: serverTimestamp()
         };
 
@@ -125,7 +129,11 @@ onValue(stateRef, (snap) => {
       else if (v.planes && typeof v.planes === "object") st.planes = Object.values(v.planes).map(stripRemoteLocalPlane);
       if (v.roles) st.roles = v.roles; 
       if (v.drawings) st.drawings = v.drawings;
-      if (v.missiles) st.missiles = v.missiles;
+      if (Array.isArray(v.gtc)) st.gtc = v.gtc;
+      if (Array.isArray(v.pairs)) st.pairs = v.pairs;
+      if (Array.isArray(v.missiles)) st.missiles = v.missiles;
+      if (Number.isFinite(+v.windKmh)) st.windKmh = +v.windKmh;
+      if (Number.isFinite(+v.windDir)) st.windDir = +v.windDir;
 
       // Reaplicar offsets locales de Data Block (no se sincronizan)
       if (window.__applyLocalTagOffsets) window.__applyLocalTagOffsets();
@@ -134,6 +142,8 @@ onValue(stateRef, (snap) => {
       repaintNav && repaintNav();
       repaintAlt && repaintAlt();
       repaintPairs && repaintPairs();
+      try{ repaintGTC && repaintGTC(); }catch(_){ }
+      try{ paintAlerts && paintAlerts(); }catch(_){ }
       repaintStudent && repaintStudent();
     } catch(e){ console.warn("Apply remote state error:", e); }
   });
@@ -1071,123 +1081,218 @@ canvas#radar {
 .aptoFoot{display:flex;gap:8px;padding:10px 12px;border-top:1px solid rgba(46,231,79,.18)}
 .aptoFoot .btn{flex:1}
 
-
-  /* --- GTC tactical (compacto) --- */
+  /* --- GTC tactical (lista compacta profesional) --- */
   #pGTC .panel-header h3{
     font-size:11px;
-    letter-spacing:.14em;
+    letter-spacing:.16em;
     text-transform:uppercase;
   }
   #pGTCBody{
     padding:8px 10px;
+    overflow:hidden;
   }
-  #pGTCBody #gtcList{gap:2px; margin-top:4px}
-  #pGTCBody .gtc-item{
-    gap:3px;
-    padding:3px 0;
-    border-bottom:1px solid rgba(46,231,79,.12);
-  }
-  #pGTCBody .gtc-row{
+  #pGTCBody .gtc-toolbar{
     display:flex;
-    gap:4px;
     align-items:center;
-    flex-wrap:nowrap;
+    justify-content:space-between;
+    gap:8px;
   }
-  #pGTCBody .gtc-row input.gtc-name{
-    height:24px;
-    padding:3px 6px;
+  #pGTCBody #gtcAdd.btn.mini{
+    height:26px;
+    padding:0 10px;
+    min-width:auto;
     font-size:11px;
-    border-radius:8px;
-    font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,"Liberation Mono",monospace;
-    letter-spacing:.02em;
   }
-
-  #pGTCBody .gtc-planeSel{
-    max-width:110px;
-    width:110px;
-    height:24px;
-    padding:3px 6px;
-    font-size:11px;
-    border-radius:8px;
-    border:1px solid rgba(255,255,255,.14);
-    background:rgba(0,0,0,.18);
-    color:#eaffea;
-    outline:none;
-    font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,"Liberation Mono",monospace;
-    letter-spacing:.02em;
+  #pGTCBody .gtc-toolbar-side{
+    min-width:0;
+    flex:1;
+    display:flex;
+    align-items:center;
+    justify-content:flex-end;
+    gap:8px;
   }
-  #pGTCBody .gtc-planeSel option{ background:#0b0f0c; color:#eaffea; }
-
-  #pGTCBody .gtc-row .mini{
-    line-height:1;
-    font-size:10px;
-    font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,"Liberation Mono",monospace;
-    letter-spacing:.03em;
-  }
-  #pGTCBody .gtc-stat{
-    opacity:.72;
+  #pGTCBody #gtcModeChip{
+    opacity:.75;
+    text-align:right;
+    flex:1;
+    min-width:0;
     white-space:nowrap;
-    max-width:130px;
     overflow:hidden;
     text-overflow:ellipsis;
   }
-
-  /* botones pequeños, tácticos */
-  #pGTCBody .btn.mini{
+  #pGTCBody .gtc-list{
+    margin-top:8px;
+    min-height:44px;
+    max-height:36vh;
+    overflow:auto;
+    min-width:0;
+  }
+  #pGTCBody .gtc-empty{
+    padding:8px 2px 2px;
+    opacity:.72;
+  }
+  #pGTCBody .gtc-row{
+    display:grid;
+    grid-template-columns:minmax(0, 1.2fr) minmax(108px, .9fr) auto;
+    align-items:center;
+    gap:8px;
+    padding:6px 0;
+    border-bottom:1px solid rgba(46,231,79,.12);
+  }
+  #pGTCBody .gtc-row.open{
+    border-bottom-color:transparent;
+  }
+  #pGTCBody .gtc-nameWrap,
+  #pGTCBody .gtc-planeWrap{
+    min-width:0;
+  }
+  #pGTCBody .gtcNameInput,
+  #pGTCBody .gtcPlaneSel{
+    width:100%;
+    min-width:0;
     height:24px;
-    min-width:26px;
-    padding:0 6px;
-    border-radius:8px;
+    padding:0 2px;
+    margin:0;
+    border:none !important;
+    border-radius:0 !important;
+    background:transparent !important;
+    box-shadow:none !important;
+    outline:none !important;
+    color:#eaffea;
+    font-size:10px;
+    line-height:1.1;
+    font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,"Liberation Mono",monospace;
+  }
+  #pGTCBody .gtcNameInput{
+    font-weight:700;
+    letter-spacing:.03em;
+    text-transform:uppercase;
+  }
+  #pGTCBody .gtcPlaneSel{
+    text-align:center;
+    text-align-last:center;
+    appearance:none;
+    -webkit-appearance:none;
+    background-image:none !important;
+  }
+  #pGTCBody .gtcPlaneSel option{
+    background:#0b0f0c;
+    color:#eaffea;
+  }
+  #pGTCBody .gtcNameInput:hover,
+  #pGTCBody .gtcNameInput:focus,
+  #pGTCBody .gtcPlaneSel:hover,
+  #pGTCBody .gtcPlaneSel:focus{
+    border:none !important;
+    background:transparent !important;
+    box-shadow:none !important;
+    outline:none !important;
+  }
+  #pGTCBody .gtcActions{
+    display:flex;
+    align-items:center;
+    justify-content:flex-end;
+    gap:4px;
+    flex-wrap:nowrap;
+  }
+  #pGTCBody .gtcActionBtn,
+  #pGTCBody .gtc-green-btn,
+  #pGTCBody .gtc-center-dot{
+    width:20px;
+    height:20px;
+    min-width:20px;
+    padding:0;
+    border-radius:999px;
     display:inline-flex;
     align-items:center;
     justify-content:center;
-    font-size:11px;
+    font-size:10px;
     line-height:1;
   }
-  #pGTCBody #gtcAdd.btn.mini{
-    padding:0 10px;
-    min-width:auto;
+  #pGTCBody .gtcActionBtn{
+    border:1px solid rgba(42,102,42,.9);
+    background:#102116;
+    color:#eaffea;
+    box-shadow:none;
   }
-
+  #pGTCBody .gtcActionBtn:hover{ filter:brightness(1.08); }
+  #pGTCBody .gtcActionBtn:active{ transform:scale(0.95); }
   #pGTCBody .gtc-green-btn{
-    width:16px; height:16px; min-width:16px; padding:0;
-    border-radius:999px;
     background:#21c95a;
-    border:1px solid rgba(0,0,0,0.35);
-    box-shadow:0 0 8px rgba(33,201,90,0.28);
+    border:1px solid rgba(0,0,0,.35);
+    box-shadow:0 0 8px rgba(33,201,90,.28);
   }
-  #pGTCBody .gtc-green-btn:hover{filter:brightness(1.08)}
-  #pGTCBody .gtc-green-btn:active{transform:scale(0.95)}
+  #pGTCBody .gtc-green-btn:hover{ filter:brightness(1.08); }
+  #pGTCBody .gtc-green-btn:active{ transform:scale(0.95); }
   #pGTCBody .gtc-green-btn.alert{
     background:#d83a3a;
-    box-shadow:0 0 8px rgba(255,70,70,0.40);
+    box-shadow:0 0 8px rgba(255,70,70,.40);
   }
-
   #pGTCBody .gtc-center-dot{
-    width:16px; height:16px; min-width:16px; padding:0;
-    border-radius:999px;
     background:#d7d7d7;
-    border:1px solid rgba(255,255,255,0.55);
-    box-shadow:0 0 6px rgba(255,255,255,0.14);
+    border:1px solid rgba(255,255,255,.55);
+    box-shadow:0 0 6px rgba(255,255,255,.14);
   }
-  #pGTCBody .gtc-center-dot:hover{filter:brightness(1.08)}
-  #pGTCBody .gtc-center-dot:active{transform:scale(0.95)}
-
-  /* config compacto */
+  #pGTCBody .gtc-center-dot:hover{ filter:brightness(1.08); }
+  #pGTCBody .gtc-center-dot:active{ transform:scale(0.95); }
+  #pGTCBody .gtc-cfg-panel{
+    padding:0 0 8px;
+    border-bottom:1px solid rgba(46,231,79,.12);
+  }
+  #pGTCBody .gtc-cfg-panel[hidden]{
+    display:none !important;
+  }
   #pGTCBody .gtc-cfg{
-    padding:6px 8px;
-    border:1px solid rgba(42,102,42,0.65);
+    margin-top:2px;
+    padding:8px;
+    border:1px solid rgba(42,102,42,.72);
     border-radius:10px;
-    background:rgba(12,29,18,0.55);
+    background:rgba(12,29,18,.60);
   }
-  #pGTCBody .gtc-cfg .row{flex-wrap:nowrap}
-  #pGTCBody .gtc-cfg .ghost{
-    padding:4px 6px;
+  #pGTCBody .gtc-cfg-grid{
+    display:grid;
+    grid-template-columns:repeat(2, minmax(0,1fr));
+    gap:8px 10px;
+  }
+  #pGTCBody .gtc-cfg-block{
+    display:flex;
+    flex-direction:column;
+    gap:4px;
+    min-width:0;
+  }
+  #pGTCBody .gtc-cfg-head{
+    display:flex;
+    align-items:center;
+    gap:6px;
+    min-width:0;
+  }
+  #pGTCBody .gtc-cfg-head .mini{
+    opacity:.82;
+    white-space:nowrap;
+  }
+  #pGTCBody .gtc-cfg-head input[type="number"]{
+    width:72px;
+    height:22px;
+    padding:3px 6px;
     font-size:11px;
     border-radius:8px;
   }
-  #pGTCBody .gtc-cfg input[type="range"]{width:100%; height:16px}
-
+  #pGTCBody .gtc-cfg input[type="range"]{
+    width:100%;
+    height:16px;
+    margin:0;
+  }
+  #pGTCBody .gtc-cfg-foot{
+    margin-top:8px;
+    display:flex;
+    align-items:center;
+    justify-content:flex-start;
+    gap:8px;
+    flex-wrap:wrap;
+  }
+  #pGTCBody .gtc-cfg-foot .mini{
+    opacity:.72;
+  }
 
 
 </style>
@@ -1349,13 +1454,16 @@ canvas#radar {
     </section>
 
     <section class="panel" id="pGTC">
-      <div class="panel-header"><h3>GROUND TACTIC COTROL</h3><span class="toggle" data-target="#pGTCBody">▾</span></div>
+      <div class="panel-header"><h3>GROUND TACTIC CONTROL</h3><span class="toggle" data-target="#pGTCBody">▾</span></div>
       <div id="pGTCBody" class="panel-body">
-        <div class="row" style="justify-content:space-between; gap:8px; align-items:center;">
+        <div class="gtc-toolbar">
           <button id="gtcAdd" class="btn mini focusable">➕ LANZA</button>
-          <span id="gtcModeChip" class="mini" style="opacity:.75; text-align:right; flex:1;"></span>
+          <div class="gtc-toolbar-side">
+            <span id="gtcCount" class="pill">0</span>
+            <span id="gtcModeChip" class="mini"></span>
+          </div>
         </div>
-        <div id="gtcList" class="col" style="max-height:24vh; overflow:auto; margin-top:6px;"></div>
+        <div id="gtcList" class="gtc-list"></div>
       </div>
     </section>
 
@@ -2292,8 +2400,10 @@ ctx.strokeStyle='#0d2c13';ctx.lineWidth=1;
       if(r%50===0){ctx.fillStyle='#164a1f';ctx.font='10px monospace';ctx.textAlign='center';const txt=st.metric?`${(r*NM2KM).toFixed(0)} km`:`${r} NM`;ctx.fillText(txt,CX+offX,CY+offY-r*zoom*PX_PER_NM-4);}
     }
   }
-  ctx.strokeStyle='#0e3a17';
-  for(let a=0;a<360;a+=30){const rad=(a-90)*Math.PI/180;const ex=CX+offX+Math.cos(rad)*MAX_RANGE_NM*zoom*PX_PER_NM,ey=CY+offY+Math.sin(rad)*MAX_RANGE_NM*zoom*PX_PER_NM;ctx.beginPath();ctx.moveTo(CX+offX,CY+offY);ctx.lineTo(ex,ey);ctx.stroke();}
+  if(st.showHalos!==false){
+    ctx.strokeStyle='#0e3a17';
+    for(let a=0;a<360;a+=30){const rad=(a-90)*Math.PI/180;const ex=CX+offX+Math.cos(rad)*MAX_RANGE_NM*zoom*PX_PER_NM,ey=CY+offY+Math.sin(rad)*MAX_RANGE_NM*zoom*PX_PER_NM;ctx.beginPath();ctx.moveTo(CX+offX,CY+offY);ctx.lineTo(ex,ey);ctx.stroke();}
+  }
   // Centro radar (Aeropuerto de referencia)
   if(st.radarCenter){
     ctx.fillStyle = 'rgba(255,224,102,.9)';
@@ -2335,10 +2445,22 @@ cvs.addEventListener('mousedown',e=>{ if(e.button!==0) return; // block measure 
     const id='GTC-'+Math.random().toString(36).slice(2,8).toUpperCase();
     st.gtc = Array.isArray(st.gtc) ? st.gtc : [];
     const name = (typeof gtcNextName === 'function') ? gtcNextName() : ('LANZA'+(st.gtc.length+1));
-    st.gtc.push({id,name,x:w.x,y:w.y,covR:30,covH:15000});
-    try{ if(typeof repaintGTC === 'function') repaintGTC(); }catch(_){}
-    try{ if(typeof setGtcPlacing === 'function') setGtcPlacing(false); else gtcPlacing=false; }catch(_){}
-    try{ if(typeof logEvent === 'function') logEvent(`GTC: ${name} colocado.`); }catch(_){}
+    st.gtc.push({
+      id,
+      name,
+      x:w.x,
+      y:w.y,
+      covR:30,
+      covH:15000,
+      misR:20,
+      misH:30000,
+      trackPlaneId:''
+    });
+    try{ if(typeof repaintGTC === 'function') repaintGTC(); }catch(_){ }
+    try{ if(typeof repaintAll === 'function') repaintAll(); }catch(_){ }
+    try{ if(typeof gtcPersist === 'function') gtcPersist('flush'); }catch(_){ }
+    try{ if(typeof setGtcPlacing === 'function') setGtcPlacing(false); else gtcPlacing=false; }catch(_){ }
+    try{ if(typeof logEvent === 'function') logEvent(`GTC: ${name} colocado.`); }catch(_){ }
     if(e.preventDefault) e.preventDefault();
     if(e.stopImmediatePropagation) e.stopImmediatePropagation();
     else if(e.stopPropagation) e.stopPropagation();
@@ -5031,17 +5153,29 @@ requestAnimationFrame(()=>{ repaintPlanesList(); repaintNav(); repaintStudent();
   }
   header .setca-subtitle{ font-size:12px; color:#b6f3b6; margin-top:2px; }
 
-  /* === Modo OBSERVADOR: solo radar en pantalla completa === */
-  body.observer-mode{
+  /* === Modos de vista táctica === */
+  body.observer-mode,
+  body.mode-odi-overlay,
+  body.mode-odt-overlay{
     overflow:hidden !important;
   }
-  body.observer-mode .app{
+  body.observer-mode .app,
+  body.mode-odi-overlay .app,
+  body.mode-odt-overlay .app{
     height:100vh !important;
     min-height:100vh !important;
     grid-template-columns: 1fr !important;
+    grid-template-rows: auto 1fr !important;
     grid-template-areas:
       "top"
       "center" !important;
+  }
+  body.observer-mode #center,
+  body.mode-odi-overlay #center,
+  body.mode-odt-overlay #center{
+    width:100% !important;
+    min-height:0 !important;
+    height:calc(100vh - var(--setca-header-h, 78px) - 16px) !important;
   }
   body.observer-mode #left,
   body.observer-mode #right{
@@ -5056,6 +5190,81 @@ requestAnimationFrame(()=>{ repaintPlanesList(); repaintNav(); repaintStudent();
     display:inline-block !important;
   }
 
+  body.mode-odi-overlay #left,
+  body.mode-odi-overlay #right,
+  body.mode-odt-overlay #left,
+  body.mode-odt-overlay #right{
+    position:fixed !important;
+    inset:0 !important;
+    display:block !important;
+    width:100% !important;
+    height:100% !important;
+    overflow:visible !important;
+    padding:0 !important;
+    margin:0 !important;
+    background:transparent !important;
+    border:none !important;
+    pointer-events:none !important;
+    z-index:45;
+  }
+  body.mode-odi-overlay #left .panel,
+  body.mode-odi-overlay #right .panel,
+  body.mode-odt-overlay #left .panel,
+  body.mode-odt-overlay #right .panel{
+    position:fixed !important;
+    pointer-events:auto !important;
+    width:min(360px, 32vw) !important;
+    max-height:calc(100vh - var(--setca-header-h, 78px) - 24px) !important;
+    overflow:hidden !important;
+    background:rgba(6,18,10,0.38) !important;
+    border:1px solid rgba(88,255,148,0.32) !important;
+    box-shadow:0 12px 28px rgba(0,0,0,0.28) !important;
+    backdrop-filter:blur(6px);
+    -webkit-backdrop-filter:blur(6px);
+  }
+  body.mode-odi-overlay #left .panel .panel-body,
+  body.mode-odi-overlay #right .panel .panel-body,
+  body.mode-odt-overlay #left .panel .panel-body,
+  body.mode-odt-overlay #right .panel .panel-body{
+    overflow:auto !important;
+  }
+  body.mode-odi-overlay .panel-header,
+  body.mode-odt-overlay .panel-header{
+    background:rgba(0,0,0,0.12);
+  }
+  body.mode-odi-overlay #pVuelos{ left:12px; top:calc(var(--setca-header-h, 78px) + 12px); }
+  body.mode-odi-overlay #pPair{ left:12px; bottom:12px; }
+  body.mode-odi-overlay #pAlt{ right:12px; top:calc(var(--setca-header-h, 78px) + 12px); }
+  body.mode-odi-overlay #pAlerts{ right:12px; bottom:12px; }
+
+  body.mode-odt-overlay #pGTC{ left:12px; top:calc(var(--setca-header-h, 78px) + 12px); }
+  body.mode-odt-overlay #pAlt{ right:12px; top:calc(var(--setca-header-h, 78px) + 12px); }
+  body.mode-odt-overlay #pAlerts{ right:12px; bottom:12px; }
+
+  @media (max-width: 1100px){
+    body.mode-odi-overlay #left .panel,
+    body.mode-odi-overlay #right .panel,
+    body.mode-odt-overlay #left .panel,
+    body.mode-odt-overlay #right .panel{
+      width:min(320px, 42vw) !important;
+    }
+  }
+  @media (max-width: 900px){
+    body.mode-odi-overlay #left .panel,
+    body.mode-odi-overlay #right .panel,
+    body.mode-odt-overlay #left .panel,
+    body.mode-odt-overlay #right .panel{
+      width:calc(100vw - 24px) !important;
+      max-height:34vh !important;
+    }
+    body.mode-odi-overlay #pVuelos,
+    body.mode-odt-overlay #pGTC{ left:12px; right:12px; top:calc(var(--setca-header-h, 78px) + 12px); }
+    body.mode-odi-overlay #pAlt,
+    body.mode-odt-overlay #pAlt{ left:12px; right:12px; top:calc(var(--setca-header-h, 78px) + 38vh); }
+    body.mode-odi-overlay #pPair{ left:12px; right:12px; bottom:calc(34vh + 24px); }
+    body.mode-odi-overlay #pAlerts,
+    body.mode-odt-overlay #pAlerts{ left:12px; right:12px; bottom:12px; }
+  }
 
   /* === Menú contextual de gráficos === */
   #drawingCtxMenu{
@@ -5195,23 +5404,41 @@ requestAnimationFrame(()=>{ repaintPlanesList(); repaintNav(); repaintStudent();
     const odiOnlyPanels = ['#pVuelos','#pPair','#pAlt','#pAlerts'];
     const odtOnlyPanels = ['#pAlt','#pGTC','#pAlerts'];
 
+    function updateHeaderOverlayMetric(){
+      try{
+        const hdr = document.querySelector('header');
+        const h = hdr ? Math.ceil(hdr.getBoundingClientRect().height) : 78;
+        document.documentElement.style.setProperty('--setca-header-h', `${h}px`);
+      }catch(_){ }
+    }
+    updateHeaderOverlayMetric();
+    window.addEventListener('resize', updateHeaderOverlayMetric, {passive:true});
+
     function applyPanelMode(mode){
       const visible = mode === 'odi'
         ? new Set(odiOnlyPanels)
         : (mode === 'odt' ? new Set(odtOnlyPanels) : null);
+
+      document.body.classList.remove('mode-odi-overlay', 'mode-odt-overlay');
+      if(mode === 'odi') document.body.classList.add('mode-odi-overlay');
+      if(mode === 'odt') document.body.classList.add('mode-odt-overlay');
+
       allPanels.forEach(sel=>{
         const el = document.querySelector(sel);
         if(!el) return;
-        el.style.display = !visible || visible.has(sel) ? '' : 'none';
+        el.style.display = (!visible || visible.has(sel)) ? '' : 'none';
       });
+
       alumnoBtn.classList.toggle('hi', mode === 'odi');
       odtBtn.classList.toggle('hi', mode === 'odt');
+      updateHeaderOverlayMetric();
       (window.repaintPlanesList||function(){})();
       (window.repaintNav||function(){})();
       (window.repaintPairs||function(){})();
       (window.repaintAlt||function(){})();
       try{ (window.repaintVuelos||function(){})(); }catch(_){ }
       try{ (window.repaintGTC||function(){})(); }catch(_){ }
+      try{ (window.paintAlerts||function(){})(); }catch(_){ }
       try{ window.dispatchEvent(new Event('resize')); }catch(_){ }
     }
 
@@ -6051,10 +6278,13 @@ function ensureDrawingName(d){
 (function(){
   const cvs = document.getElementById('radar');
   function fitRadar(){
-    if(!cvs) return;
-    const w = cvs.parentElement.clientWidth;
+    if(!cvs || !cvs.parentElement) return;
+    const p = cvs.parentElement;
+    const w = Math.max(1, p.clientWidth || 1);
+    const h = Math.max(1, p.clientHeight || w || 1);
     cvs.width = w;
-    cvs.height = w;
+    cvs.height = h;
+    try{ if(typeof resize === 'function') resize(); }catch(_){ }
   }
   window.addEventListener('resize', fitRadar);
   window.addEventListener('orientationchange', fitRadar);
@@ -6070,24 +6300,43 @@ function ensureDrawingName(d){
   const fileInput = document.getElementById('formFileInput');
   if(!exportBtn || !importBtn || !fileInput) return;
 
-  // === EXPORTAR ===
+  // === EXPORTAR TODO EL ESCENARIO TÁCTICO ===
   exportBtn.onclick = ()=>{
-    if(!window.st || !Array.isArray(st.planes) || st.planes.length===0){
-      alert('No hay formaciones para exportar.');
+    const hasScenario = !!(window.st && (
+      (Array.isArray(st.planes) && st.planes.length) ||
+      (Array.isArray(st.drawings) && st.drawings.length) ||
+      (Array.isArray(st.gtc) && st.gtc.length) ||
+      (Array.isArray(st.missiles) && st.missiles.length)
+    ));
+    if(!hasScenario){
+      alert('No hay escenario para exportar.');
       return;
     }
+
     const data = {
-      version: 'SETCA-Form-1.0',
+      version: 'SETCA-Scenario-2.0',
       timestamp: new Date().toISOString(),
-      planes: st.planes,
-      roles: st.roles,
-      drawings: st.drawings
+      scene: {
+        planes: Array.isArray(st.planes) ? st.planes : [],
+        roles: st.roles || {},
+        drawings: Array.isArray(st.drawings) ? st.drawings : [],
+        gtc: Array.isArray(st.gtc) ? st.gtc : [],
+        missiles: Array.isArray(st.missiles) ? st.missiles : [],
+        pairs: Array.isArray(st.pairs) ? st.pairs : [],
+        windKmh: Number.isFinite(+st.windKmh) ? +st.windKmh : 0,
+        windDir: Number.isFinite(+st.windDir) ? +st.windDir : 0,
+        metric: !!st.metric,
+        altUnit: (st.altUnit === 'm') ? 'm' : 'ft',
+        predMin: Number.isFinite(+st.predMin) ? +st.predMin : 5
+      }
     };
+
     const blob = new Blob([JSON.stringify(data,null,2)], {type:'application/json'});
     const a = document.createElement('a');
     a.href = URL.createObjectURL(blob);
-    a.download = `formaciones_${new Date().toISOString().replace(/[:.]/g,'-')}.json`;
+    a.download = `setca_escenario_${new Date().toISOString().replace(/[:.]/g,'-')}.json`;
     a.click();
+    setTimeout(()=>{ try{ URL.revokeObjectURL(a.href); }catch(_){ } }, 1500);
   };
 
   // === IMPORTAR ===
@@ -6100,18 +6349,47 @@ function ensureDrawingName(d){
     reader.onload = (ev)=>{
       try{
         const data = JSON.parse(ev.target.result);
-        if(!data.planes) throw new Error('Archivo inválido');
-        // Limpia los actuales y carga los nuevos
-        st.planes = data.planes;
-        st.roles = data.roles || {};
-        st.drawings = data.drawings || [];
+        const scene = data && typeof data === 'object' && data.scene ? data.scene : data;
+        if(!scene || !Array.isArray(scene.planes)) throw new Error('Archivo inválido');
+
+        st.planes = Array.isArray(scene.planes) ? scene.planes : [];
+        st.roles = scene.roles || {};
+        st.drawings = Array.isArray(scene.drawings) ? scene.drawings : [];
+        st.gtc = Array.isArray(scene.gtc) ? scene.gtc : [];
+        st.missiles = Array.isArray(scene.missiles) ? scene.missiles : [];
+        st.pairs = Array.isArray(scene.pairs) ? scene.pairs : [];
+        st.windKmh = Number.isFinite(+scene.windKmh) ? +scene.windKmh : 0;
+        st.windDir = Number.isFinite(+scene.windDir) ? +scene.windDir : 0;
+
+        if(typeof scene.metric === 'boolean') st.metric = scene.metric;
+        if(scene.altUnit === 'm' || scene.altUnit === 'ft') st.altUnit = scene.altUnit;
+        if(Number.isFinite(+scene.predMin)) st.predMin = Math.max(0, Math.min(60, (+scene.predMin|0)));
+
+        try{
+          const ws = document.getElementById('windSpd');
+          const wd = document.getElementById('windDir');
+          if(ws) ws.value = String(st.windKmh || 0);
+          if(wd) wd.value = String(st.windDir || 0);
+        }catch(_){ }
+
         repaintPlanesList && repaintPlanesList();
         repaintNav && repaintNav();
         repaintAlt && repaintAlt();
         repaintPairs && repaintPairs();
+        try{ repaintPairList && repaintPairList(); }catch(_){ }
+        try{ repaintVuelos && repaintVuelos(); }catch(_){ }
+        try{ repaintGTC && repaintGTC(); }catch(_){ }
+        try{ paintAlerts && paintAlerts(); }catch(_){ }
+        try{ if(window.__applyLocalTagOffsets) window.__applyLocalTagOffsets(); }catch(_){ }
+        try{ if(window.__saveLocalPrefs) window.__saveLocalPrefs(); }catch(_){ }
+        try{ if(window.__updateLocalUI) window.__updateLocalUI(); }catch(_){ }
+        try{ if(window._SETCA_SYNC && typeof window._SETCA_SYNC.push === 'function') window._SETCA_SYNC.push(); }catch(_){ }
+
         alert('Escenario cargado correctamente.');
       }catch(err){
         alert('Error al cargar el archivo: '+err.message);
+      }finally{
+        try{ fileInput.value = ''; }catch(_){ }
       }
     };
     reader.readAsText(file);
@@ -9094,19 +9372,53 @@ function setGtcPlacing(on){
   if(chip) chip.textContent = gtcPlacing ? 'CLICK EN RADAR PARA COLOCAR' : '';
 }
 
+function gtcPersist(kind='soft'){
+  try{
+    if(kind === 'flush' && typeof flushSync === 'function'){
+      flushSync();
+      return;
+    }
+    if(typeof scheduleSync === 'function'){
+      scheduleSync(kind === 'soft' ? 120 : 45);
+      return;
+    }
+    if(window._SETCA_SYNC && typeof window._SETCA_SYNC.push === 'function'){
+      window._SETCA_SYNC.push();
+    }
+  }catch(_){ }
+}
+window.gtcPersist = gtcPersist;
 
+function gtcNormalizeUnit(u, idx){
+  const item = (u && typeof u === 'object') ? u : {};
+  if(!item.id) item.id = 'GTC-' + Math.random().toString(36).slice(2,8).toUpperCase();
+  if(!String(item.name || '').trim()) item.name = `LANZA${idx+1}`;
+  if(!Number.isFinite(+item.x)) item.x = 0;
+  if(!Number.isFinite(+item.y)) item.y = 0;
+  if(!Number.isFinite(+item.covR)) item.covR = 30;
+  if(!Number.isFinite(+item.covH)) item.covH = 15000;
+  if(!Number.isFinite(+item.misR)) item.misR = 20;
+  if(!Number.isFinite(+item.misH)) item.misH = 30000;
+  if(item.trackPlaneId === undefined || item.trackPlaneId === null) item.trackPlaneId = '';
+  return item;
+}
 
 function repaintGTC(){
   const list = document.getElementById('gtcList');
+  const countEl = document.getElementById('gtcCount');
   if(!list) return;
 
-  const arr = st.gtc = Array.isArray(st.gtc) ? st.gtc : [];
+  const src = Array.isArray(st.gtc) ? st.gtc : [];
+  const arr = src.map((u, idx)=>gtcNormalizeUnit(u, idx));
+  st.gtc = arr;
+
   list.innerHTML = '';
   try{ gtcUiById.clear(); }catch(_){ }
   try{ gtcPlaneSelById.clear(); }catch(_){ }
+  if(countEl) countEl.textContent = String(arr.length);
 
   if(arr.length === 0){
-    list.innerHTML = '<div class="mini" style="opacity:.8">Sin medios</div>';
+    list.innerHTML = '<div class="mini gtc-empty">Sin LANZA creados</div>';
     return;
   }
 
@@ -9114,144 +9426,130 @@ function repaintGTC(){
   const hRange = (typeof gtcAltDispRange === 'function') ? gtcAltDispRange() : ({min:1000,max:80000,step:500});
   const rUnit = (window.st && st.metric) ? 'km' : 'NM';
   const hUnit = (window.st && st.altUnit === 'm') ? 'm' : 'ft';
+  const fmtCoord = (v)=> Number.isFinite(+v) ? (+v).toFixed(1) : '0.0';
 
-  arr.forEach(u=>{
-    if(!u) return;
+  const frag = document.createDocumentFragment();
 
-    // Interno: NM (radio), ft (altura)
-    if(!(isFinite(u.covR))) u.covR = 0;
-    if(!(isFinite(u.covH))) u.covH = 0;
-
-    // Misil: NM (alcance), ft (altura máxima)
-    if(!(isFinite(u.misR))) u.misR = 20;
-    if(!(isFinite(u.misH))) u.misH = 30000;
-
-    const wrap = document.createElement('div');
-    wrap.className = 'gtc-item col';
-
-    // --- fila compacta ---
+  arr.forEach((u, idx)=>{
     const row = document.createElement('div');
     row.className = 'gtc-row';
+    row.dataset.gtcId = u.id;
 
+    const nameWrap = document.createElement('div');
+    nameWrap.className = 'gtc-nameWrap';
     const inp = document.createElement('input');
-    inp.className = 'ghost focusable gtc-name';
+    inp.className = 'ghost focusable gtcNameInput';
     inp.type = 'text';
     inp.value = u.name || '';
-    inp.style.flex = '1';
-    inp.style.minWidth = '78px';
-    inp.title = 'Cambiar nombre';
-    inp.addEventListener('input', ()=>{ u.name = inp.value; });
-    inp.addEventListener('change', ()=>{ u.name = inp.value; });
-
-
-    // Selector de avión activo (para alertas por avión específico)
-    const sel = document.createElement('select');
-    sel.className = 'gtc-planeSel focusable';
-    sel.title = 'Seleccionar avión activo para monitorear (la alerta será solo para ese avión)';
-    if(u.trackPlaneId === undefined) u.trackPlaneId = '';
-    gtcFillPlaneSelect(sel, u.trackPlaneId);
-    sel.addEventListener('change', ()=>{
-      u.trackPlaneId = String(sel.value||'');
-      try{ if(typeof gtcRefreshIndicators==='function') gtcRefreshIndicators(); }catch(_){}
+    inp.title = 'Cambiar nombre del LANZA';
+    inp.addEventListener('input', ()=>{
+      u.name = String(inp.value || '').trim() || `LANZA${idx+1}`;
+      gtcPersist('soft');
     });
-    try{ if(u.id) gtcPlaneSelById.set(u.id, sel); }catch(_){}
+    inp.addEventListener('change', ()=>{
+      inp.value = String(inp.value || '').trim() || `LANZA${idx+1}`;
+      u.name = inp.value;
+      gtcPersist('flush');
+    });
+    nameWrap.appendChild(inp);
 
-    // Botón circular verde/rojo (alerta + lanzamiento)
+    const planeWrap = document.createElement('div');
+    planeWrap.className = 'gtc-planeWrap';
+    const sel = document.createElement('select');
+    sel.className = 'gtcPlaneSel focusable';
+    sel.title = 'Seleccionar avión activo para este LANZA';
+    gtcFillPlaneSelect(sel, u.trackPlaneId || '');
+    sel.addEventListener('change', ()=>{
+      u.trackPlaneId = String(sel.value || '');
+      try{ if(typeof gtcRefreshIndicators === 'function') gtcRefreshIndicators(); }catch(_){ }
+      gtcPersist('flush');
+    });
+    try{ if(u.id) gtcPlaneSelById.set(u.id, sel); }catch(_){ }
+    planeWrap.appendChild(sel);
+
+    function getCovRDisp(){ return (typeof gtcRadToDisp === 'function') ? gtcRadToDisp(+u.covR || 0) : (+u.covR || 0); }
+    function getCovHDisp(){ return (typeof gtcAltToDisp === 'function') ? gtcAltToDisp(+u.covH || 0) : (+u.covH || 0); }
+    function getMisRDisp(){ return (typeof gtcRadToDisp === 'function') ? gtcRadToDisp(+u.misR || 0) : (+u.misR || 0); }
+    function getMisHDisp(){ return (typeof gtcAltToDisp === 'function') ? gtcAltToDisp(+u.misH || 0) : (+u.misH || 0); }
+
+    const actions = document.createElement('div');
+    actions.className = 'gtcActions';
+
     const gbtn = document.createElement('button');
     gbtn.className = 'gtc-green-btn focusable';
-    gbtn.title = 'Lanzar misil al avión seleccionado (usa las capacidades configuradas)';
+    gbtn.title = 'Lanzar misil al avión seleccionado';
+    gbtn.setAttribute('aria-label', 'Lanzar misil');
     gbtn.addEventListener('click', (e)=>{
       e.stopPropagation();
-      try{ if(typeof gtcLaunchMissile === 'function') gtcLaunchMissile(u); }catch(_){}
+      try{ if(typeof gtcLaunchMissile === 'function') gtcLaunchMissile(u); }catch(_){ }
+      gtcPersist('flush');
     });
     try{ if(u.id) gtcUiById.set(u.id, gbtn); }catch(_){ }
 
-// Estado compacto R/H
-    const stat = document.createElement('span');
-    stat.className = 'mini gtc-stat';
-    stat.style.opacity = '.70';
-    stat.style.whiteSpace = 'nowrap';
-    stat.style.maxWidth = '130px';
-    stat.style.overflow = 'hidden';
-    stat.style.textOverflow = 'ellipsis';
-
-    function getRD(){ return (typeof gtcRadToDisp==='function') ? gtcRadToDisp(u.covR) : u.covR; }
-    function getHD(){ return (typeof gtcAltToDisp==='function') ? gtcAltToDisp(u.covH) : u.covH; }
-    function updateStat(){
-      const rd = getRD();
-      const hd = getHD();
-      const rTxt = (rd && isFinite(rd) && rd>0) ? `R ${(+rd).toFixed(0)}${rUnit}` : 'R —';
-      const hTxt = (hd && isFinite(hd) && hd>0) ? `H ${(+hd).toFixed(0)}${hUnit}` : 'H —';
-      stat.textContent = `${rTxt} · ${hTxt}`;
-    }
-    updateStat();
-
-    // Botón de configuración (abre/cierra)
     const cfgBtn = document.createElement('button');
-    cfgBtn.className = 'btn mini focusable';
-    cfgBtn.textContent = '⚙️';
-    cfgBtn.title = 'Configurar cobertura (Radio/Altura)';
+    cfgBtn.className = 'gtcActionBtn focusable';
+    cfgBtn.textContent = '⚙';
+    cfgBtn.title = 'Configurar cobertura y misil';
 
     const cbtn = document.createElement('button');
     cbtn.className = 'gtc-center-dot focusable';
-    cbtn.textContent = '';
     cbtn.title = 'Centrar en el radar';
     cbtn.setAttribute('aria-label', 'Centrar en el radar');
     cbtn.addEventListener('click', ()=>{
-      if(!Number.isFinite(u.x) || !Number.isFinite(u.y)) return;
-      centerWorld(u.x, u.y);
-      if(typeof repaintNav==='function') repaintNav();
+      if(!Number.isFinite(+u.x) || !Number.isFinite(+u.y)) return;
+      centerWorld(+u.x, +u.y);
+      try{ if(typeof repaintNav === 'function') repaintNav(); }catch(_){ }
     });
 
     const dbtn = document.createElement('button');
-    dbtn.className = 'btn mini focusable';
-    dbtn.textContent = '🗑️';
-    dbtn.title = 'Eliminar';
+    dbtn.className = 'gtcActionBtn focusable';
+    dbtn.textContent = '✕';
+    dbtn.title = 'Eliminar LANZA';
     dbtn.addEventListener('click', ()=>{
-      const i = arr.indexOf(u);
-      if(i >= 0) arr.splice(i, 1);
+      const nm = String(u.name || `LANZA${idx+1}`).trim() || `LANZA${idx+1}`;
+      if(!window.confirm(`¿Eliminar ${nm}?`)) return;
+      st.gtc = (Array.isArray(st.gtc) ? st.gtc : []).filter(x => x && x.id !== u.id);
       repaintGTC();
-      if(typeof repaintNav==='function') repaintNav();
+      try{ repaintAll(); }catch(_){ }
+      gtcPersist('flush');
     });
 
-    row.appendChild(inp);
-    row.appendChild(sel);
-    row.appendChild(gbtn);
-    row.appendChild(stat);
-    row.appendChild(cfgBtn);
-    row.appendChild(cbtn);
-    row.appendChild(dbtn);
+    actions.appendChild(gbtn);
+    actions.appendChild(cfgBtn);
+    actions.appendChild(cbtn);
+    actions.appendChild(dbtn);
 
-    // --- panel de configuración (colapsable) ---
+    row.appendChild(nameWrap);
+    row.appendChild(planeWrap);
+    row.appendChild(actions);
+
+    const cfgPanel = document.createElement('div');
+    cfgPanel.className = 'gtc-cfg-panel';
+    cfgPanel.hidden = true;
+
     const cov = document.createElement('div');
-    cov.className = 'gtc-cfg col';
-    cov.style.gap = '8px';
-    cov.style.display = 'none';
+    cov.className = 'gtc-cfg';
+
+    const cfgGrid = document.createElement('div');
+    cfgGrid.className = 'gtc-cfg-grid';
 
     const mkCtrl = (labelTxt, unitTxt)=>{
       const box = document.createElement('div');
-      box.className = 'col';
-      box.style.gap = '4px';
+      box.className = 'gtc-cfg-block';
 
       const top = document.createElement('div');
-      top.className = 'row';
-      top.style.gap = '6px';
-      top.style.alignItems = 'center';
+      top.className = 'gtc-cfg-head';
 
       const lab = document.createElement('span');
       lab.className = 'mini';
-      lab.style.opacity = '.85';
       lab.textContent = labelTxt;
 
       const num = document.createElement('input');
       num.className = 'ghost focusable';
       num.type = 'number';
-      num.style.width = '74px';
-      num.style.padding = '4px 6px';
 
       const unit = document.createElement('span');
       unit.className = 'mini';
-      unit.style.opacity = '.75';
       unit.textContent = unitTxt;
 
       top.appendChild(lab);
@@ -9264,167 +9562,136 @@ function repaintGTC(){
 
       box.appendChild(top);
       box.appendChild(rng);
-      return {box, num, rng};
+      return { box, num, rng };
     };
 
-    const cR = mkCtrl('Radio (R)', rUnit);
-    const cH = mkCtrl('Altura (H)', hUnit);
-
-    const mR = mkCtrl('Misil Alcance', rUnit);
+    const cR = mkCtrl('Cob. Radio', rUnit);
+    const cH = mkCtrl('Cob. Altura', hUnit);
+    const mR = mkCtrl('Misil Radio', rUnit);
     const mH = mkCtrl('Misil Altura', hUnit);
 
-    // valores visibles
-    const rDisp0 = getRD();
-    const hDisp0 = getHD();
-
-
-    const mRDisp0 = (typeof gtcRadToDisp==='function') ? gtcRadToDisp(u.misR) : u.misR;
-    const mHDisp0 = (typeof gtcAltToDisp==='function') ? gtcAltToDisp(u.misH) : u.misH;
-    // rangos
-    cR.num.min = 0; cR.num.max = rRange.max; cR.num.step = rRange.step;
-    cR.rng.min = 0; cR.rng.max = rRange.max; cR.rng.step = rRange.step;
-
-    cH.num.min = 0; cH.num.max = hRange.max; cH.num.step = hRange.step;
-    cH.rng.min = 0; cH.rng.max = hRange.max; cH.rng.step = hRange.step;
-
-
-    mR.num.min = 0; mR.num.max = rRange.max; mR.num.step = rRange.step;
-    mR.rng.min = 0; mR.rng.max = rRange.max; mR.rng.step = rRange.step;
-
-    mH.num.min = 0; mH.num.max = hRange.max; mH.num.step = hRange.step;
-    mH.rng.min = 0; mH.rng.max = hRange.max; mH.rng.step = hRange.step;
-    cR.num.value = (isFinite(rDisp0) ? (rDisp0||0) : 0);
-    cR.rng.value = cR.num.value;
-
-    cH.num.value = (isFinite(hDisp0) ? (hDisp0||0) : 0);
-    cH.rng.value = cH.num.value;
-
-
-
-    mR.num.value = (isFinite(mRDisp0) ? (mRDisp0||0) : 0);
-    mR.rng.value = mR.num.value;
-
-    mH.num.value = (isFinite(mHDisp0) ? (mHDisp0||0) : 0);
-    mH.rng.value = mH.num.value;
-    const infoRow = document.createElement('div');
-    infoRow.className = 'row gtc-actions';
-    infoRow.style.gap = '8px';
-    infoRow.style.alignItems = 'center';
-    infoRow.style.justifyContent = 'space-between';
-
-    const leftBtns = document.createElement('div');
-    leftBtns.className = 'row';
-    leftBtns.style.gap = '8px';
-    leftBtns.style.alignItems = 'center';
-    leftBtns.style.flexWrap = 'nowrap';
-
-    function setCovRFromDisp(v){
-      if(!isFinite(v) || v<=0){ u.covR = 0; return; }
-      const cl = Math.max(1, Math.min(rRange.max, v));
-      u.covR = (typeof gtcRadFromDisp==='function') ? gtcRadFromDisp(cl) : cl;
-    }
-    function setCovHFromDisp(v){
-      if(!isFinite(v) || v<=0){ u.covH = 0; return; }
-
-    function setMisRFromDisp(v){
-      if(!isFinite(v) || v<=0){ u.misR = 0; return; }
-      const cl = Math.max(1, Math.min(rRange.max, v));
-      u.misR = (typeof gtcRadFromDisp==='function') ? gtcRadFromDisp(cl) : cl;
-    }
-    function setMisHFromDisp(v){
-      if(!isFinite(v) || v<=0){ u.misH = 0; return; }
-      const cl = Math.max(0, Math.min(hRange.max, v));
-      u.misH = (typeof gtcAltFromDisp==='function') ? gtcAltFromDisp(cl) : cl;
-    }
-
-      const cl = Math.max(0, Math.min(hRange.max, v));
-      u.covH = (typeof gtcAltFromDisp==='function') ? gtcAltFromDisp(cl) : cl;
-    }
-
-    function syncR(v){
-      cR.num.value = v;
-      cR.rng.value = v;
-      setCovRFromDisp(parseFloat(v));
-      updateStat();
-      if(typeof repaintNav==='function') repaintNav();
-    }
-    function syncH(v){
-      cH.num.value = v;
-      cH.rng.value = v;
-      setCovHFromDisp(parseFloat(v));
-      updateStat();
-      if(typeof repaintNav==='function') repaintNav();
-    }
-
-
-    function syncMR(v){
-      mR.num.value = v;
-      mR.rng.value = v;
-      setMisRFromDisp(parseFloat(v));
-      if(typeof repaintNav==='function') repaintNav();
-    }
-    function syncMH(v){
-      mH.num.value = v;
-      mH.rng.value = v;
-      setMisHFromDisp(parseFloat(v));
-      if(typeof repaintNav==='function') repaintNav();
-    }
-
-    cR.num.addEventListener('input', ()=>syncR(cR.num.value));
-    cR.rng.addEventListener('input', ()=>syncR(cR.rng.value));
-    cR.num.addEventListener('change', ()=>{
-      const rd = getRD();
-      syncR(isFinite(rd) ? (rd||0) : 0);
+    [[cR, rRange, getCovRDisp()], [mR, rRange, getMisRDisp()]].forEach(([ctrl, range, value])=>{
+      ctrl.num.min = 0; ctrl.num.max = range.max; ctrl.num.step = range.step;
+      ctrl.rng.min = 0; ctrl.rng.max = range.max; ctrl.rng.step = range.step;
+      ctrl.num.value = String(Math.max(0, Math.round(value || 0)));
+      ctrl.rng.value = ctrl.num.value;
+    });
+    [[cH, hRange, getCovHDisp()], [mH, hRange, getMisHDisp()]].forEach(([ctrl, range, value])=>{
+      ctrl.num.min = 0; ctrl.num.max = range.max; ctrl.num.step = range.step;
+      ctrl.rng.min = 0; ctrl.rng.max = range.max; ctrl.rng.step = range.step;
+      ctrl.num.value = String(Math.max(0, Math.round(value || 0)));
+      ctrl.rng.value = ctrl.num.value;
     });
 
-    cH.num.addEventListener('input', ()=>syncH(cH.num.value));
-    cH.rng.addEventListener('input', ()=>syncH(cH.rng.value));
-    cH.num.addEventListener('change', ()=>{
-      const hd = getHD();
-      syncH(isFinite(hd) ? (hd||0) : 0);
-    });
+    const setCovRFromDisp = (v)=>{
+      const n = parseFloat(v);
+      if(!(n > 0)){ u.covR = 0; return; }
+      const cl = Math.max(1, Math.min(rRange.max, n));
+      u.covR = (typeof gtcRadFromDisp === 'function') ? gtcRadFromDisp(cl) : cl;
+    };
+    const setCovHFromDisp = (v)=>{
+      const n = parseFloat(v);
+      if(!(n > 0)){ u.covH = 0; return; }
+      const cl = Math.max(0, Math.min(hRange.max, n));
+      u.covH = (typeof gtcAltFromDisp === 'function') ? gtcAltFromDisp(cl) : cl;
+    };
+    const setMisRFromDisp = (v)=>{
+      const n = parseFloat(v);
+      if(!(n > 0)){ u.misR = 0; return; }
+      const cl = Math.max(1, Math.min(rRange.max, n));
+      u.misR = (typeof gtcRadFromDisp === 'function') ? gtcRadFromDisp(cl) : cl;
+    };
+    const setMisHFromDisp = (v)=>{
+      const n = parseFloat(v);
+      if(!(n > 0)){ u.misH = 0; return; }
+      const cl = Math.max(0, Math.min(hRange.max, n));
+      u.misH = (typeof gtcAltFromDisp === 'function') ? gtcAltFromDisp(cl) : cl;
+    };
 
+    const syncCovR = (v)=>{
+      const raw = Math.max(0, parseFloat(v) || 0);
+      cR.num.value = String(raw);
+      cR.rng.value = String(raw);
+      setCovRFromDisp(raw);
+      try{ if(typeof gtcRefreshIndicators === 'function') gtcRefreshIndicators(); }catch(_){ }
+      gtcPersist('soft');
+    };
+    const syncCovH = (v)=>{
+      const raw = Math.max(0, parseFloat(v) || 0);
+      cH.num.value = String(raw);
+      cH.rng.value = String(raw);
+      setCovHFromDisp(raw);
+      try{ if(typeof gtcRefreshIndicators === 'function') gtcRefreshIndicators(); }catch(_){ }
+      gtcPersist('soft');
+    };
+    const syncMisR = (v)=>{
+      const raw = Math.max(0, parseFloat(v) || 0);
+      mR.num.value = String(raw);
+      mR.rng.value = String(raw);
+      setMisRFromDisp(raw);
+      gtcPersist('soft');
+    };
+    const syncMisH = (v)=>{
+      const raw = Math.max(0, parseFloat(v) || 0);
+      mH.num.value = String(raw);
+      mH.rng.value = String(raw);
+      setMisHFromDisp(raw);
+      gtcPersist('soft');
+    };
 
-    mR.num.addEventListener('input', ()=>syncMR(mR.num.value));
-    mR.rng.addEventListener('input', ()=>syncMR(mR.rng.value));
-    mR.num.addEventListener('change', ()=>{
-      const v = (typeof gtcRadToDisp==='function') ? gtcRadToDisp(u.misR) : u.misR;
-      syncMR(isFinite(v) ? (v||0) : 0);
-    });
+    cR.num.addEventListener('input', ()=>syncCovR(cR.num.value));
+    cR.rng.addEventListener('input', ()=>syncCovR(cR.rng.value));
+    cR.num.addEventListener('change', ()=>gtcPersist('flush'));
+    cR.rng.addEventListener('change', ()=>gtcPersist('flush'));
 
-    mH.num.addEventListener('input', ()=>syncMH(mH.num.value));
-    mH.rng.addEventListener('input', ()=>syncMH(mH.rng.value));
-    mH.num.addEventListener('change', ()=>{
-      const v = (typeof gtcAltToDisp==='function') ? gtcAltToDisp(u.misH) : u.misH;
-      syncMH(isFinite(v) ? (v||0) : 0);
-    });
-    leftBtns.appendChild(offBtn);
+    cH.num.addEventListener('input', ()=>syncCovH(cH.num.value));
+    cH.rng.addEventListener('input', ()=>syncCovH(cH.rng.value));
+    cH.num.addEventListener('change', ()=>gtcPersist('flush'));
+    cH.rng.addEventListener('change', ()=>gtcPersist('flush'));
 
-    infoRow.appendChild(leftBtns);
+    mR.num.addEventListener('input', ()=>syncMisR(mR.num.value));
+    mR.rng.addEventListener('input', ()=>syncMisR(mR.rng.value));
+    mR.num.addEventListener('change', ()=>gtcPersist('flush'));
+    mR.rng.addEventListener('change', ()=>gtcPersist('flush'));
 
-    cov.appendChild(cR.box);
-    cov.appendChild(cH.box);
-    // Misil
-    cov.appendChild(mR.box);
-    cov.appendChild(mH.box);
-    cov.appendChild(infoRow);
+    mH.num.addEventListener('input', ()=>syncMisH(mH.num.value));
+    mH.rng.addEventListener('input', ()=>syncMisH(mH.rng.value));
+    mH.num.addEventListener('change', ()=>gtcPersist('flush'));
+    mH.rng.addEventListener('change', ()=>gtcPersist('flush'));
+
+    cfgGrid.appendChild(cR.box);
+    cfgGrid.appendChild(cH.box);
+    cfgGrid.appendChild(mR.box);
+    cfgGrid.appendChild(mH.box);
+
+    const foot = document.createElement('div');
+    foot.className = 'gtc-cfg-foot';
+
+    const posTxt = document.createElement('span');
+    posTxt.className = 'mini';
+    posTxt.textContent = `Posición radar: X ${fmtCoord(u.x)} · Y ${fmtCoord(u.y)}`;
+
+    foot.appendChild(posTxt);
+
+    cov.appendChild(cfgGrid);
+    cov.appendChild(foot);
+    cfgPanel.appendChild(cov);
 
     cfgBtn.addEventListener('click', ()=>{
-      const open = (cov.style.display === 'none');
-      cov.style.display = open ? '' : 'none';
-      cfgBtn.textContent = open ? '✖' : '⚙️';
-      cfgBtn.title = open ? 'Cerrar' : 'Configurar cobertura (Radio/Altura)';
+      const open = !row.classList.contains('open');
+      row.classList.toggle('open', open);
+      cfgPanel.hidden = !open;
+      cfgBtn.title = open ? 'Cerrar configuración' : 'Configurar cobertura y misil';
     });
 
-    wrap.appendChild(row);
-    wrap.appendChild(cov);
-    list.appendChild(wrap);
+    frag.appendChild(row);
+    frag.appendChild(cfgPanel);
   });
 
-  try{ if(typeof gtcRefreshIndicators==='function') gtcRefreshIndicators(); }catch(_){ }
+  list.appendChild(frag);
+
+  try{ if(typeof gtcRefreshIndicators === 'function') gtcRefreshIndicators(); }catch(_){ }
 }
-
-
 
 
 /* ===== GTC: Cobertura (círculo/cone) por click derecho ===== */
@@ -9664,7 +9931,6 @@ function ensureGtcMenu(){
 
       <canvas id="gtcConeMini" width="220" height="86"></canvas>
       <button type="button" class="btn" data-act="dragR">📏 Ajustar radio en el radar</button>
-      <button type="button" class="btn warn" data-act="delCov">🗑️ Quitar cobertura</button>
 
       <div class="row">
         <button type="button" class="btn" data-act="center">🎯</button>
@@ -9729,20 +9995,14 @@ function ensureGtcMenu(){
       }
 
       if(act === 'del'){
+        const nm = String(u.name || 'LANZA').trim() || 'LANZA';
+        if(!window.confirm(`¿Eliminar ${nm}?`)) return;
         const arr = st.gtc || [];
         const i = arr.indexOf(u);
         if(i >= 0) arr.splice(i,1);
         try{ repaintGTC(); }catch(_){}
         try{ repaintAll(); }catch(_){}
         hideGtcMenu();
-        return;
-      }
-
-      if(act === 'delCov'){
-        u.covR = 0;
-        u.covH = 0;
-        updateGtcMenuValues(u);
-        try{ repaintAll(); }catch(_){}
         return;
       }
 
@@ -10090,6 +10350,8 @@ addEventListener('scroll', ()=>{ try{ hideGtcMenu(); }catch(_){} }, true);
   repaintGTC();
 })();
 </script>
+
+
 
 </body>
 </html>
