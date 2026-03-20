@@ -1437,6 +1437,7 @@ canvas#radar {
         <div class="btn-grid small">
           <button class="btn mini tool focusable" data-tool="point">Punto</button>
           <button class="btn mini tool focusable" data-tool="line">Línea</button>
+          <button class="btn mini tool focusable" data-tool="route">Ruta</button>
           <button class="btn mini tool focusable" data-tool="arwy">ARWY</button>
           <button class="btn mini tool focusable" data-tool="circle">Círculo</button>
           <button class="btn mini tool focusable" data-tool="square">Cuadrado</button>
@@ -2935,6 +2936,18 @@ function drawShapes(){
       ctx.stroke();
     }
 
+    // --- RUTA ---
+    if(d.type === 'route' && Array.isArray(d.pts) && d.pts.length >= 2){
+      ctx.beginPath();
+      const p0 = toScreen(d.pts[0].x, d.pts[0].y);
+      ctx.moveTo(p0.x, p0.y);
+      for(let i=1;i<d.pts.length;i++){
+        const pi = toScreen(d.pts[i].x, d.pts[i].y);
+        ctx.lineTo(pi.x, pi.y);
+      }
+      ctx.stroke();
+    }
+
     // --- LABEL ---
     if(d.type === 'label'){
       ctx.font = 'bold 14px monospace';
@@ -2952,6 +2965,9 @@ function drawShapes(){
     if(d.name && d.type!=='label' && (d.type!=='point' || d.showName)){
       let nx=d.x, ny=d.y;
       if((d.type==='line' || d.type==='arwy') && d.ex!==undefined){ nx=(d.x+d.ex)/2; ny=(d.y+d.ey)/2; }
+      else if(d.type==='route' && Array.isArray(d.pts) && d.pts.length>=2){
+        try{ const c=polyCentroid(d.pts); nx=c.x; ny=c.y; }catch(_){}
+      }
       else if(d.type==='polygon' && Array.isArray(d.pts) && d.pts.length>=3){
         try{ const c=polyCentroid(d.pts); nx=c.x; ny=c.y; }catch(_){}
       }
@@ -2983,7 +2999,7 @@ function drawShapes(){
       ctx.lineWidth = 0.6;
     }
 
-    if(tool.tool === 'polygon'){
+    if(tool.tool === 'polygon' || tool.tool === 'route'){
       const pts = Array.isArray(tool.poly) ? tool.poly : [];
       if(pts.length){
         ctx.beginPath();
@@ -2996,6 +3012,9 @@ function drawShapes(){
         if(tool.b){
           const pb = toScreen(tool.b.x, tool.b.y);
           ctx.lineTo(pb.x, pb.y);
+        }
+        if(tool.tool === 'polygon' && pts.length >= 2){
+          ctx.closePath();
         }
         ctx.stroke();
       }
@@ -3028,19 +3047,22 @@ function drawShapes(){
     // Siempre en km (desaparece al soltar click porque tool.drawing pasa a false)
     try{
       let measureTxt = '';
-      if(tool.tool === 'polygon'){
+      if(tool.tool === 'polygon' || tool.tool === 'route'){
         const pts = Array.isArray(tool.poly) ? tool.poly : [];
         if(pts.length >= 1 && tool.b){
-          // Perímetro parcial: suma de segmentos + segmento al cursor
-          let perNM = 0;
+          let totalNM = 0;
           for(let i=1;i<pts.length;i++){
-            perNM += Math.hypot(pts[i].x-pts[i-1].x, pts[i].y-pts[i-1].y);
+            totalNM += Math.hypot(pts[i].x-pts[i-1].x, pts[i].y-pts[i-1].y);
           }
-          if(pts.length >= 1){
-            const last = pts[pts.length-1];
-            perNM += Math.hypot(tool.b.x-last.x, tool.b.y-last.y);
+          const last = pts[pts.length-1];
+          totalNM += Math.hypot(tool.b.x-last.x, tool.b.y-last.y);
+          if(tool.tool === 'polygon' && pts.length >= 2){
+            const first = pts[0];
+            totalNM += Math.hypot(tool.b.x-first.x, tool.b.y-first.y);
+            measureTxt = `Perímetro: ${(totalNM * NM2KM).toFixed(2)} km`;
+          }else{
+            measureTxt = `Longitud: ${(totalNM * NM2KM).toFixed(2)} km`;
           }
-          measureTxt = `Perímetro: ${(perNM * NM2KM).toFixed(2)} km`;
         }
       } else if(tool.a && tool.b){
         const dx = tool.b.x - tool.a.x;
@@ -3112,6 +3134,22 @@ function pickShape(wx, wy){
         const dd = Math.hypot(wx - (d.x + t*dx), wy - (d.y + t*dy));
         if(dd < tol) return d.id;
       }
+      continue;
+    }
+
+    if(d.type === 'route' && Array.isArray(d.pts) && d.pts.length >= 2){
+      let best = 1e9;
+      for(let j=0;j<d.pts.length-1;j++){
+        const a=d.pts[j], b=d.pts[j+1];
+        const dx = b.x - a.x, dy = b.y - a.y;
+        if(dx===0 && dy===0) continue;
+        const t = ((wx-a.x)*dx + (wy-a.y)*dy) / (dx*dx + dy*dy);
+        if(t>=0 && t<=1){
+          const dd = Math.hypot(wx - (a.x + t*dx), wy - (a.y + t*dy));
+          if(dd < best) best = dd;
+        }
+      }
+      if(best < tol) return d.id;
       continue;
     }
 
@@ -3194,6 +3232,17 @@ function __hitDrawingPx(d, px, py, tolPx){
     return best <= tolPx;
   }
 
+  if(d.type==='route' && Array.isArray(d.pts) && d.pts.length>=2){
+    let best=1e9;
+    for(let i=0;i<d.pts.length-1;i++){
+      const a=d.pts[i], b=d.pts[i+1];
+      const A=toScreen(a.x,a.y), B=toScreen(b.x,b.y);
+      const dd=__distPointToSegPx(px,py,A.x,A.y,B.x,B.y);
+      if(dd<best) best=dd;
+    }
+    return best <= tolPx;
+  }
+
   if(d.type==='bullseye'){
     const dist=Math.hypot(px-s.x, py-s.y);
     if(dist <= 12 + tolPx) return true;
@@ -3250,9 +3299,9 @@ function __hitDrawingPerimeterPx(d, px, py, tolPx){
     return Math.min(d1,d2,d3,d4) <= tolPx;
   }
 
-  if(d.type==='polygon' && Array.isArray(d.pts) && d.pts.length>=2){
+  if((d.type==='polygon' || d.type==='route') && Array.isArray(d.pts) && d.pts.length>=2){
     let best = 1e9;
-    const closed = d.pts.length >= 3;
+    const closed = d.type==='polygon' && d.pts.length >= 3;
     const n = d.pts.length;
     for(let i=0;i<n-1;i++){
       const A = toScreen(d.pts[i].x,d.pts[i].y), B = toScreen(d.pts[i+1].x,d.pts[i+1].y);
@@ -3761,7 +3810,7 @@ addEventListener('mouseup',()=>{
     const r=cvs.getBoundingClientRect();
     const w=toWorld(e.clientX-r.left, e.clientY-r.top);
 
-    if(tool.tool==='polygon'){
+    if(tool.tool==='polygon' || tool.tool==='route'){
       tool.poly = Array.isArray(tool.poly) ? tool.poly : [];
       tool.poly.push({x:w.x, y:w.y});
       tool.a = tool.poly[0];
@@ -3778,7 +3827,7 @@ addEventListener('mouseup',()=>{
 
   addEventListener('mousemove', e=>{
     // Polygon preview follows mouse even without holding button
-    if(tool.tool==='polygon' && Array.isArray(tool.poly) && tool.poly.length){
+    if((tool.tool==='polygon' || tool.tool==='route') && Array.isArray(tool.poly) && tool.poly.length){
       const r=cvs.getBoundingClientRect();
       const w=toWorld(e.clientX-r.left, e.clientY-r.top);
       tool.b = {x:w.x, y:w.y};
@@ -3794,14 +3843,15 @@ addEventListener('mouseup',()=>{
   });
 
   addEventListener('dblclick', e=>{
-    if(tool.tool!=='polygon') return;
-    if(!Array.isArray(tool.poly) || tool.poly.length < 3) return;
+    if(tool.tool!=='polygon' && tool.tool!=='route') return;
+    const minPts = (tool.tool==='polygon') ? 3 : 2;
+    if(!Array.isArray(tool.poly) || tool.poly.length < minPts) return;
     e.preventDefault();
 
     const pts = tool.poly.slice(0);
     const c = polyCentroid(pts);
     const id='D-'+Math.random().toString(36).slice(2,6).toUpperCase();
-    st.drawings.push({id,type:'polygon',x:c.x,y:c.y,pts,lw:0.6});
+    st.drawings.push({id,type:tool.tool,x:c.x,y:c.y,pts,lw:0.6});
     ensureDrawingName(st.drawings[st.drawings.length-1]);
     st.selectedDrawing = id;
 
@@ -3809,8 +3859,8 @@ addEventListener('mouseup',()=>{
   }, true);
 
   addEventListener('mouseup', e=>{
-    // Polygon finaliza con doble click (arriba)
-    if(tool.tool==='polygon') return;
+    // Polygon / Route finalizan con doble click (arriba)
+    if(tool.tool==='polygon' || tool.tool==='route') return;
 
     if(!tool.drawing || !tool.a || !tool.b) return;
     const a=tool.a, b=tool.b;
@@ -5213,8 +5263,8 @@ requestAnimationFrame(()=>{ repaintPlanesList(); repaintNav(); repaintStudent();
   body.mode-odt-overlay #right .panel{
     position:fixed !important;
     pointer-events:auto !important;
-    width:min(360px, 32vw) !important;
-    max-height:calc(100vh - var(--setca-header-h, 78px) - 24px) !important;
+    width:clamp(260px, calc(var(--setca-center-w, 100vw) * 0.28), 360px) !important;
+    max-height:calc(var(--setca-center-h, 100vh) - 32px) !important;
     overflow:hidden !important;
     background:rgba(6,18,10,0.38) !important;
     border:1px solid rgba(88,255,148,0.32) !important;
@@ -5232,21 +5282,42 @@ requestAnimationFrame(()=>{ repaintPlanesList(); repaintNav(); repaintStudent();
   body.mode-odt-overlay .panel-header{
     background:rgba(0,0,0,0.12);
   }
-  body.mode-odi-overlay #pVuelos{ left:12px; top:calc(var(--setca-header-h, 78px) + 12px); }
-  body.mode-odi-overlay #pPair{ left:12px; bottom:12px; }
-  body.mode-odi-overlay #pAlt{ right:12px; top:calc(var(--setca-header-h, 78px) + 12px); }
-  body.mode-odi-overlay #pAlerts{ right:12px; bottom:12px; }
+  body.mode-odi-overlay #pVuelos{
+    left:calc(var(--setca-center-left, 8px) + 16px);
+    top:calc(var(--setca-center-top, var(--setca-header-h, 78px)) + 16px);
+  }
+  body.mode-odi-overlay #pPair{
+    left:calc(var(--setca-center-left, 8px) + 16px);
+    bottom:calc(100vh - var(--setca-center-bottom, 100vh) + 16px);
+  }
+  body.mode-odi-overlay #pAlt{
+    right:calc(100vw - var(--setca-center-right, 100vw) + 16px);
+    top:calc(var(--setca-center-top, var(--setca-header-h, 78px)) + 16px);
+  }
+  body.mode-odi-overlay #pAlerts{
+    right:calc(100vw - var(--setca-center-right, 100vw) + 16px);
+    bottom:calc(100vh - var(--setca-center-bottom, 100vh) + 16px);
+  }
 
-  body.mode-odt-overlay #pGTC{ left:12px; top:calc(var(--setca-header-h, 78px) + 12px); }
-  body.mode-odt-overlay #pAlt{ right:12px; top:calc(var(--setca-header-h, 78px) + 12px); }
-  body.mode-odt-overlay #pAlerts{ right:12px; bottom:12px; }
+  body.mode-odt-overlay #pGTC{
+    left:calc(var(--setca-center-left, 8px) + 16px);
+    top:calc(var(--setca-center-top, var(--setca-header-h, 78px)) + 16px);
+  }
+  body.mode-odt-overlay #pAlt{
+    right:calc(100vw - var(--setca-center-right, 100vw) + 16px);
+    top:calc(var(--setca-center-top, var(--setca-header-h, 78px)) + 16px);
+  }
+  body.mode-odt-overlay #pAlerts{
+    right:calc(100vw - var(--setca-center-right, 100vw) + 16px);
+    bottom:calc(100vh - var(--setca-center-bottom, 100vh) + 16px);
+  }
 
   @media (max-width: 1100px){
     body.mode-odi-overlay #left .panel,
     body.mode-odi-overlay #right .panel,
     body.mode-odt-overlay #left .panel,
     body.mode-odt-overlay #right .panel{
-      width:min(320px, 42vw) !important;
+      width:min(320px, calc(var(--setca-center-w, 100vw) * 0.4)) !important;
     }
   }
   @media (max-width: 900px){
@@ -5254,16 +5325,32 @@ requestAnimationFrame(()=>{ repaintPlanesList(); repaintNav(); repaintStudent();
     body.mode-odi-overlay #right .panel,
     body.mode-odt-overlay #left .panel,
     body.mode-odt-overlay #right .panel{
-      width:calc(100vw - 24px) !important;
-      max-height:34vh !important;
+      width:calc(var(--setca-center-w, 100vw) - 24px) !important;
+      max-height:calc((var(--setca-center-h, 100vh) - 44px) / 3) !important;
     }
     body.mode-odi-overlay #pVuelos,
-    body.mode-odt-overlay #pGTC{ left:12px; right:12px; top:calc(var(--setca-header-h, 78px) + 12px); }
+    body.mode-odt-overlay #pGTC{
+      left:calc(var(--setca-center-left, 8px) + 12px);
+      right:calc(100vw - var(--setca-center-right, 100vw) + 12px);
+      top:calc(var(--setca-center-top, var(--setca-header-h, 78px)) + 12px);
+    }
     body.mode-odi-overlay #pAlt,
-    body.mode-odt-overlay #pAlt{ left:12px; right:12px; top:calc(var(--setca-header-h, 78px) + 38vh); }
-    body.mode-odi-overlay #pPair{ left:12px; right:12px; bottom:calc(34vh + 24px); }
+    body.mode-odt-overlay #pAlt{
+      left:calc(var(--setca-center-left, 8px) + 12px);
+      right:calc(100vw - var(--setca-center-right, 100vw) + 12px);
+      top:calc(var(--setca-center-top, var(--setca-header-h, 78px)) + 16px + ((var(--setca-center-h, 100vh) - 44px) / 3));
+    }
+    body.mode-odi-overlay #pPair{
+      left:calc(var(--setca-center-left, 8px) + 12px);
+      right:calc(100vw - var(--setca-center-right, 100vw) + 12px);
+      bottom:calc(100vh - var(--setca-center-bottom, 100vh) + 16px + ((var(--setca-center-h, 100vh) - 44px) / 3));
+    }
     body.mode-odi-overlay #pAlerts,
-    body.mode-odt-overlay #pAlerts{ left:12px; right:12px; bottom:12px; }
+    body.mode-odt-overlay #pAlerts{
+      left:calc(var(--setca-center-left, 8px) + 12px);
+      right:calc(100vw - var(--setca-center-right, 100vw) + 12px);
+      bottom:calc(100vh - var(--setca-center-bottom, 100vh) + 12px);
+    }
   }
 
   /* === Menú contextual de gráficos === */
@@ -5411,8 +5498,23 @@ requestAnimationFrame(()=>{ repaintPlanesList(); repaintNav(); repaintStudent();
         document.documentElement.style.setProperty('--setca-header-h', `${h}px`);
       }catch(_){ }
     }
+    function updateRadarOverlayBounds(){
+      try{
+        const center = document.getElementById('center');
+        if(!center) return;
+        const r = center.getBoundingClientRect();
+        const root = document.documentElement;
+        root.style.setProperty('--setca-center-left', `${Math.round(r.left)}px`);
+        root.style.setProperty('--setca-center-top', `${Math.round(r.top)}px`);
+        root.style.setProperty('--setca-center-right', `${Math.round(r.right)}px`);
+        root.style.setProperty('--setca-center-bottom', `${Math.round(r.bottom)}px`);
+        root.style.setProperty('--setca-center-w', `${Math.max(0, Math.round(r.width))}px`);
+        root.style.setProperty('--setca-center-h', `${Math.max(0, Math.round(r.height))}px`);
+      }catch(_){ }
+    }
     updateHeaderOverlayMetric();
-    window.addEventListener('resize', updateHeaderOverlayMetric, {passive:true});
+    updateRadarOverlayBounds();
+    window.addEventListener('resize', ()=>{ updateHeaderOverlayMetric(); updateRadarOverlayBounds(); }, {passive:true});
 
     function applyPanelMode(mode){
       const visible = mode === 'odi'
@@ -5432,6 +5534,8 @@ requestAnimationFrame(()=>{ repaintPlanesList(); repaintNav(); repaintStudent();
       alumnoBtn.classList.toggle('hi', mode === 'odi');
       odtBtn.classList.toggle('hi', mode === 'odt');
       updateHeaderOverlayMetric();
+      updateRadarOverlayBounds();
+      setTimeout(updateRadarOverlayBounds, 50);
       (window.repaintPlanesList||function(){})();
       (window.repaintNav||function(){})();
       (window.repaintPairs||function(){})();
@@ -6221,7 +6325,7 @@ const __delBtn=document.getElementById('delDraw'); if(__delBtn) __delBtn.onclick
 <script>
 function ensureDrawingName(d){
   if(!d || d.name) return;
-  const base = {circle:'Círculo', line:'Línea', arwy:'ARWY', point:'Punto', square:'Cuadrado', bullseye:'Bullseye', label:'Etiqueta', polygon:'Polígono'}[d.type] || 'Gráfico';
+  const base = {circle:'Círculo', line:'Línea', route:'Ruta', arwy:'ARWY', point:'Punto', square:'Cuadrado', bullseye:'Bullseye', label:'Etiqueta', polygon:'Polígono'}[d.type] || 'Gráfico';
   let count = 1;
   if(window.st && Array.isArray(st.drawings)){
     count = st.drawings.filter(x => x.type === d.type).length;
@@ -7555,7 +7659,7 @@ document.querySelectorAll('#pCmdBody .btn').forEach(btn=>{
     const btn2 = document.getElementById('delDraw');
 
     function typeLabel(t){
-      return ({line:'Línea',arwy:'ARWY',circle:'Círculo',polygon:'Polígono',square:'Cuadrado',point:'Punto',bullseye:'Bullseye',label:'Etiqueta'}[t] || t || 'Gráfico');
+      return ({line:'Línea',route:'Ruta',arwy:'ARWY',circle:'Círculo',polygon:'Polígono',square:'Cuadrado',point:'Punto',bullseye:'Bullseye',label:'Etiqueta'}[t] || t || 'Gráfico');
     }
 
     function refreshList(pickId){
