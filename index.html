@@ -1,4 +1,4 @@
-ESTE SIMULADOR SE ENCUENTRA EN FASE DE PRUEBA - PUEDEN OCURRIR ERRORES DURANTE EL FUNCIONAMIENTO 2.3 / KEEP TRAINING
+ESTE SIMULADOR SE ENCUENTRA EN FASE DE PRUEBA - PUEDEN OCURRIR ERRORES DURANTE EL FUNCIONAMIENTO 2.5.2 040326
 <!DOCTYPE html>
 <html lang="es">
 <head>
@@ -12660,6 +12660,321 @@ import { getDatabase, ref, get, set } from "https://www.gstatic.com/firebasejs/1
       };
     }
   }catch(_){ }
+})();
+</script>
+
+
+<script>
+/* === PATCH: CTRL + drag sobre aeronave para fijar rumbo y sentido de giro === */
+(function(){
+  if(window.__SETCA_CTRL_HEADING_DRAG__) return;
+  window.__SETCA_CTRL_HEADING_DRAG__ = true;
+
+  const cvs = document.getElementById('radar');
+  if(!cvs) return;
+
+  const state = {
+    active: false,
+    planeId: null,
+    clientX: 0,
+    clientY: 0,
+    targetHdg: null,
+    turnBias: null
+  };
+
+  function nowMs(){ return Date.now(); }
+  function normDeg(v){
+    v = Number(v) || 0;
+    return ((v % 360) + 360) % 360;
+  }
+  function pickRadiusPx(){
+    const z = (typeof window.zoom === 'number' && isFinite(window.zoom) && window.zoom > 0) ? window.zoom : 1;
+    return Math.max(8, Math.min(16, 11 / Math.sqrt(z)));
+  }
+  function bearingFromPlaneToClient(p, clientX, clientY){
+    if(!p || typeof toWorld !== 'function') return null;
+    const r = cvs.getBoundingClientRect();
+    const w = toWorld(clientX - r.left, clientY - r.top);
+    return normDeg(Math.atan2((w.x||0) - (p.x||0), -((w.y||0) - (p.y||0))) * 180 / Math.PI);
+  }
+  function planeAtClient(clientX, clientY){
+    if(!window.st || !Array.isArray(st.planes) || typeof toScreen !== 'function') return null;
+    const r = cvs.getBoundingClientRect();
+    if(clientX < r.left || clientX > r.right || clientY < r.top || clientY > r.bottom) return null;
+    const mx = clientX - r.left;
+    const my = clientY - r.top;
+    const thPx = pickRadiusPx();
+    let best = null, bd = 1e9;
+    for(const p of st.planes){
+      if(!p) continue;
+      const s = toScreen(p.x||0, p.y||0);
+      const d = Math.hypot(mx - s.x, my - s.y);
+      if(d <= thPx && d < bd){
+        bd = d;
+        best = p;
+      }
+    }
+    return best;
+  }
+  function getPlane(){
+    if(!state.planeId || !window.st || !Array.isArray(st.planes)) return null;
+    return st.planes.find(p => p && String(p.id||'') === String(state.planeId)) || null;
+  }
+  function resolveTurnBias(currentHdg, targetHdg){
+    const cur = normDeg(currentHdg);
+    const tgt = normDeg(targetHdg);
+    const cw = (tgt - cur + 360) % 360;
+    const ccw = (cur - tgt + 360) % 360;
+    if(cw < ccw) return 'R';
+    if(ccw < cw) return 'L';
+    return null;
+  }
+  function pushSync(){
+    try{
+      if(window.__SETCA_isPlanningMode && window.__SETCA_isPlanningMode()) return;
+      if(typeof window.scheduleSync === 'function') window.scheduleSync(0);
+      else if(window._SETCA_SYNC && typeof window._SETCA_SYNC.push === 'function') window._SETCA_SYNC.push();
+    }catch(_){}
+  }
+  function refreshPanels(){
+    try{
+      const p = getPlane();
+      if(p && Array.isArray(st.sel)) st.sel = [p.id];
+    }catch(_){}
+    try{ if(typeof repaintNav === 'function') repaintNav(); }catch(_){}
+    try{ if(typeof repaintPlanesList === 'function') repaintPlanesList(); }catch(_){}
+    try{ if(typeof repaintAlt === 'function') repaintAlt(); }catch(_){}
+    try{ if(typeof repaintVuelos === 'function') repaintVuelos(); }catch(_){}
+  }
+  function startDrag(p, e){
+    if(!p || !e) return false;
+    state.active = true;
+    state.planeId = p.id;
+    state.clientX = e.clientX;
+    state.clientY = e.clientY;
+    const curHdg = normDeg(Number.isFinite(p.hdg) ? p.hdg : (p.tgtHdg || 0));
+    state.targetHdg = curHdg;
+    state.turnBias = null;
+    try{
+      if(Array.isArray(st.sel)) st.sel = [p.id];
+    }catch(_){}
+    refreshPanels();
+    requestGuideOverlay();
+    return true;
+  }
+  function updateDrag(clientX, clientY){
+    if(!state.active) return false;
+    const p = getPlane();
+    if(!p) return false;
+    state.clientX = clientX;
+    state.clientY = clientY;
+    const hdg = bearingFromPlaneToClient(p, clientX, clientY);
+    if(!Number.isFinite(hdg)) return false;
+    state.targetHdg = normDeg(hdg);
+    state.turnBias = resolveTurnBias(Number.isFinite(p.hdg) ? p.hdg : (p.tgtHdg || 0), state.targetHdg);
+    requestGuideOverlay();
+    return true;
+  }
+  function stopDrag(commit){
+    if(!state.active){
+      state.planeId = null;
+      return;
+    }
+    if(commit){
+      const p = getPlane();
+      if(p){
+        if(Number.isFinite(state.targetHdg)) p.tgtHdg = normDeg(state.targetHdg);
+        p.turnBias = state.turnBias || null;
+        p.routeManualUntil = nowMs() + 14000;
+      }
+      refreshPanels();
+      pushSync();
+    }
+    state.active = false;
+    state.planeId = null;
+    state.targetHdg = null;
+    state.turnBias = null;
+    clearGuideOverlay();
+    if(guideRaf){ cancelAnimationFrame(guideRaf); guideRaf = 0; }
+  }
+
+  cvs.addEventListener('mousedown', function(e){
+    if(window.st && window.st.modoObservador) return;
+    if(e.button !== 0 || !e.ctrlKey) return;
+    const p = planeAtClient(e.clientX, e.clientY);
+    if(!p) return;
+    if(startDrag(p, e)){
+      if(e.preventDefault) e.preventDefault();
+      if(e.stopImmediatePropagation) e.stopImmediatePropagation();
+      else if(e.stopPropagation) e.stopPropagation();
+    }
+  }, true);
+
+  addEventListener('mousemove', function(e){
+    if(!state.active) return;
+    updateDrag(e.clientX, e.clientY);
+    if(e.preventDefault) e.preventDefault();
+    if(e.stopImmediatePropagation) e.stopImmediatePropagation();
+    else if(e.stopPropagation) e.stopPropagation();
+  }, true);
+
+  addEventListener('mouseup', function(e){
+    if(!state.active) return;
+    stopDrag(true);
+    if(e && e.preventDefault) e.preventDefault();
+    if(e && e.stopImmediatePropagation) e.stopImmediatePropagation();
+    else if(e && e.stopPropagation) e.stopPropagation();
+  }, true);
+
+  addEventListener('blur', function(){
+    stopDrag(false);
+  }, true);
+
+  let guideCanvas = null;
+  let guideCtx = null;
+  let guideDpr = 1;
+  let guideRaf = 0;
+
+  function ensureGuideCanvas(){
+    try{
+      if(guideCanvas && guideCanvas.isConnected) return guideCanvas;
+      const center = document.getElementById('center') || cvs.parentElement;
+      if(!center) return null;
+      guideCanvas = document.createElement('canvas');
+      guideCanvas.id = 'setcaCtrlHeadingGuide';
+      guideCanvas.setAttribute('aria-hidden', 'true');
+      guideCanvas.style.position = 'absolute';
+      guideCanvas.style.pointerEvents = 'none';
+      guideCanvas.style.left = '0px';
+      guideCanvas.style.top = '0px';
+      guideCanvas.style.width = '0px';
+      guideCanvas.style.height = '0px';
+      guideCanvas.style.zIndex = '6';
+      guideCanvas.style.background = 'transparent';
+      center.appendChild(guideCanvas);
+      guideCtx = guideCanvas.getContext('2d');
+      return guideCanvas;
+    }catch(_){ return null; }
+  }
+
+  function syncGuideCanvas(){
+    const overlay = ensureGuideCanvas();
+    if(!overlay) return null;
+    const radarRect = cvs.getBoundingClientRect();
+    const center = document.getElementById('center') || cvs.parentElement;
+    const hostRect = center.getBoundingClientRect();
+    const cssW = Math.max(1, Math.round(radarRect.width));
+    const cssH = Math.max(1, Math.round(radarRect.height));
+    const left = Math.round(radarRect.left - hostRect.left);
+    const top = Math.round(radarRect.top - hostRect.top);
+    overlay.style.left = left + 'px';
+    overlay.style.top = top + 'px';
+    overlay.style.width = cssW + 'px';
+    overlay.style.height = cssH + 'px';
+    guideDpr = Math.max(1, window.devicePixelRatio || 1);
+    const pxW = Math.max(1, Math.round(cssW * guideDpr));
+    const pxH = Math.max(1, Math.round(cssH * guideDpr));
+    if(overlay.width !== pxW) overlay.width = pxW;
+    if(overlay.height !== pxH) overlay.height = pxH;
+    if(guideCtx) guideCtx.setTransform(guideDpr, 0, 0, guideDpr, 0, 0);
+    return overlay;
+  }
+
+  function clearGuideOverlay(){
+    try{
+      if(!guideCanvas || !guideCtx) return;
+      syncGuideCanvas();
+      guideCtx.clearRect(0, 0, guideCanvas.width, guideCanvas.height);
+    }catch(_){}
+  }
+
+  function renderGuideOverlay(){
+    try{
+      syncGuideCanvas();
+      if(!guideCanvas || !guideCtx){
+        guideRaf = 0;
+        return;
+      }
+      guideCtx.clearRect(0, 0, guideCanvas.width, guideCanvas.height);
+      if(!state.active){
+        guideRaf = 0;
+        return;
+      }
+      const p = getPlane();
+      if(!p || typeof toScreen !== 'function'){
+        guideRaf = 0;
+        return;
+      }
+      const radarRect = cvs.getBoundingClientRect();
+      const s = toScreen(p.x||0, p.y||0);
+      let endX = Number.isFinite(state.clientX) ? (state.clientX - radarRect.left) : NaN;
+      let endY = Number.isFinite(state.clientY) ? (state.clientY - radarRect.top) : NaN;
+      if(!Number.isFinite(endX) || !Number.isFinite(endY)){
+        const tgtHdg = normDeg(Number.isFinite(state.targetHdg) ? state.targetHdg : (p.tgtHdg || p.hdg || 0));
+        const rr = (tgtHdg - 90) * Math.PI / 180;
+        endX = s.x + Math.cos(rr) * 90;
+        endY = s.y + Math.sin(rr) * 90;
+      }
+      const dx = endX - s.x;
+      const dy = endY - s.y;
+      const len = Math.hypot(dx, dy);
+      if(len < 8){
+        guideRaf = requestAnimationFrame(renderGuideOverlay);
+        return;
+      }
+      const ux = dx / len;
+      const uy = dy / len;
+      const px = -uy;
+      const py = ux;
+      const label = String(Math.round(normDeg(Number.isFinite(state.targetHdg) ? state.targetHdg : (p.tgtHdg || p.hdg || 0)))).padStart(3,'0') + '°';
+      const ctx2 = guideCtx;
+
+      ctx2.save();
+      ctx2.strokeStyle = 'rgba(255,255,255,0.92)';
+      ctx2.fillStyle = 'rgba(255,255,255,1)';
+      ctx2.lineCap = 'round';
+      ctx2.lineJoin = 'round';
+      ctx2.lineWidth = 0.2;
+      ctx2.setLineDash([7, 6]);
+      ctx2.shadowColor = 'rgba(255,255,255,0.22)';
+      ctx2.shadowBlur = 0.8;
+
+      // Línea guía ligera, tipo regla punteada, saliendo del avión hacia el drag.
+      ctx2.beginPath();
+      ctx2.moveTo(s.x, s.y);
+      ctx2.lineTo(endX, endY);
+      ctx2.stroke();
+
+      // Rumbo solo en la punta, formato 000°.
+      ctx2.setLineDash([]);
+      ctx2.shadowBlur = 0;
+      ctx2.font = '12px monospace';
+      ctx2.textAlign = 'center';
+      ctx2.textBaseline = 'middle';
+      const tx = endX + ux * 14;
+      const ty = endY + uy * 14;
+      const tw = ctx2.measureText(label).width;
+      ctx2.fillStyle = 'rgba(0,0,0,0.55)';
+      ctx2.fillRect(tx - tw/2 - 4, ty - 8, tw + 8, 16);
+      ctx2.fillStyle = 'rgba(255,255,255,1)';
+      ctx2.fillText(label, tx, ty);
+      ctx2.restore();
+
+      guideRaf = requestAnimationFrame(renderGuideOverlay);
+    }catch(_){
+      guideRaf = 0;
+    }
+  }
+
+  function requestGuideOverlay(){
+    if(guideRaf) return;
+    guideRaf = requestAnimationFrame(renderGuideOverlay);
+  }
+
+  addEventListener('resize', function(){
+    clearGuideOverlay();
+    if(state.active) requestGuideOverlay();
+  }, true);
 })();
 </script>
 
