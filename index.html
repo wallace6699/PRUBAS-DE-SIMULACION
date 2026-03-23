@@ -29,7 +29,7 @@ document.getElementById('cancelDelete').onclick = ()=>{
 <script type="module">
   import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.3/firebase-app.js";
   import { getAuth, signInAnonymously, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/10.12.3/firebase-auth.js";
-  import { getDatabase, ref, onValue, set, onDisconnect, serverTimestamp } from "https://www.gstatic.com/firebasejs/10.12.3/firebase-database.js";
+  import { getDatabase, ref, onValue, set, get, onDisconnect, serverTimestamp } from "https://www.gstatic.com/firebasejs/10.12.3/firebase-database.js";
 
   const firebaseConfig = {
   apiKey: "AIzaSyDzwPIoWMV14NyvfxykylPjpB4GpFVwW9M",
@@ -57,6 +57,7 @@ document.getElementById('cancelDelete').onclick = ()=>{
   onAuthStateChanged(auth, (user) => {
     if (!user) return;
     currentUID = user.uid;
+    try{ window.currentUID = currentUID; }catch(_){ }
     const presRef = ref(db, `rooms/${ROOM_ID}/presence/${currentUID}`);
     set(presRef, true);
     onDisconnect(presRef).remove();
@@ -66,6 +67,13 @@ document.getElementById('cancelDelete').onclick = ()=>{
   let __pushInFlight = false;
   let __pushQueued = false;
   let __pushLast = null;
+
+  function __normalizeMissileStats(src){
+    const raw = (src && typeof src === 'object') ? src : {};
+    const aircraft = Number.isFinite(+raw.aircraft) ? Math.max(0, (+raw.aircraft|0)) : 0;
+    const dart = Number.isFinite(+raw.dart) ? Math.max(0, (+raw.dart|0)) : 0;
+    return { aircraft, dart };
+  }
 
   async function pushStateToCloud(local) {
     if (!local) return;
@@ -98,6 +106,8 @@ document.getElementById('cancelDelete').onclick = ()=>{
           gtc: Array.isArray(snap.gtc) ? snap.gtc : [],
           pairs: Array.isArray(snap.pairs) ? snap.pairs : [],
           missiles: Array.isArray(snap.missiles) ? snap.missiles : [],
+          impactMarks: Array.isArray(snap.impactMarks) ? snap.impactMarks : [],
+          missileStats: __normalizeMissileStats(snap.missileStats),
           windKmh: Number.isFinite(+snap.windKmh) ? +snap.windKmh : 0,
           windDir: Number.isFinite(+snap.windDir) ? +snap.windDir : 0,
           lastWriteBy: currentUID,
@@ -112,9 +122,9 @@ document.getElementById('cancelDelete').onclick = ()=>{
   }
 
 
-onValue(stateRef, (snap) => {
-    const v = snap.val();
-    if (!v || v.lastWriteBy === currentUID) return;
+
+function applyCloudState(v) {
+    if (!v) return false;
     try {
       const stripRemoteLocalPlane = (p)=>{
         if(!p || typeof p !== "object") return p;
@@ -127,11 +137,13 @@ onValue(stateRef, (snap) => {
       };
       if (Array.isArray(v.planes)) st.planes = v.planes.map(stripRemoteLocalPlane);
       else if (v.planes && typeof v.planes === "object") st.planes = Object.values(v.planes).map(stripRemoteLocalPlane);
-      if (v.roles) st.roles = v.roles; 
+      if (v.roles) st.roles = v.roles;
       if (v.drawings) st.drawings = v.drawings;
       if (Array.isArray(v.gtc)) st.gtc = v.gtc;
       if (Array.isArray(v.pairs)) st.pairs = v.pairs;
       if (Array.isArray(v.missiles)) st.missiles = v.missiles;
+      st.impactMarks = Array.isArray(v.impactMarks) ? v.impactMarks : [];
+      st.missileStats = __normalizeMissileStats(v.missileStats || st.missileStats);
       if (Number.isFinite(+v.windKmh)) st.windKmh = +v.windKmh;
       if (Number.isFinite(+v.windDir)) st.windDir = +v.windDir;
 
@@ -142,14 +154,34 @@ onValue(stateRef, (snap) => {
       repaintNav && repaintNav();
       repaintAlt && repaintAlt();
       repaintPairs && repaintPairs();
+      repaintPairList && repaintPairList();
       try{ repaintGTC && repaintGTC(); }catch(_){ }
       try{ paintAlerts && paintAlerts(); }catch(_){ }
+      try{ renderObserverStats && renderObserverStats(); }catch(_){ }
       repaintStudent && repaintStudent();
-    } catch(e){ console.warn("Apply remote state error:", e); }
+      return true;
+    } catch(e){ console.warn("Apply remote state error:", e); return false; }
+  }
+
+  onValue(stateRef, (snap) => {
+    const v = snap.val();
+    if (!v || v.lastWriteBy === currentUID) return;
+    applyCloudState(v);
   });
 
   window._SETCA_SYNC = {
-    push: () => pushStateToCloud(st)
+    push: () => pushStateToCloud(st),
+    pull: async () => {
+      try{
+        const snap = await get(stateRef);
+        const v = snap.val();
+        if(!v) return false;
+        return applyCloudState(v);
+      }catch(e){
+        console.warn("Manual cloud refresh error:", e);
+        return false;
+      }
+    }
   };
 </script>
 
@@ -179,6 +211,20 @@ onValue(stateRef, (snap) => {
   #radar{position:absolute;inset:0;cursor:crosshair;image-rendering:pixelated}
   #radar.panning{cursor:grabbing}
   #hud{position:absolute;top:10px;left:10px;background:rgba(0,0,0,.45);border:1px solid #1b3b1f;border-radius:6px;padding:6px 8px;font-family:monospace;font-size:12px}
+  #observerStatsPanel{position:absolute;top:10px;right:10px;z-index:14;display:none;min-width:250px;max-width:min(34vw,360px);padding:10px 12px;border-radius:10px;border:1px solid rgba(255,224,102,.55);background:rgba(5,14,8,.86);box-shadow:0 10px 24px rgba(0,0,0,.34);backdrop-filter:blur(6px);-webkit-backdrop-filter:blur(6px)}
+  #observerStatsPanel .observerStatsHdr{font-size:12px;font-weight:700;letter-spacing:.14em;color:#ffe57a;margin-bottom:8px}
+  #observerStatsPanel .observerStatsGrid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:6px;margin-bottom:8px}
+  #observerStatsPanel .observerStatCard{border:1px solid rgba(88,255,148,.22);border-radius:8px;padding:6px 8px;background:rgba(10,24,14,.72)}
+  #observerStatsPanel .observerStatK{display:block;font-size:10px;letter-spacing:.12em;text-transform:uppercase;color:#b9d8b9;margin-bottom:3px}
+  #observerStatsPanel .observerStatV{display:block;font-size:18px;font-weight:700;color:#fff6bf;line-height:1.1}
+  #observerStatsPanel .observerStatsSub{font-size:10px;letter-spacing:.12em;text-transform:uppercase;color:#95d795;margin:6px 0 5px}
+  #observerStatsPanel .observerTypeList{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:4px 10px}
+  #observerStatsPanel .observerTypeRow{display:flex;justify-content:space-between;gap:8px;font-size:12px;padding:3px 0;border-bottom:1px dashed rgba(88,255,148,.14)}
+  body.observer-mode #observerStatsPanel{display:block}
+  @media (max-width: 900px){
+    #observerStatsPanel{top:auto;bottom:10px;right:10px;left:10px;max-width:none;min-width:0}
+    #observerStatsPanel .observerTypeList{grid-template-columns:1fr}
+  }
   .row{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
   .col{display:flex;flex-direction:column;gap:8px}
   button,.btn,input[type="number"],input[type="text"],select,textarea{
@@ -815,7 +861,29 @@ canvas#radar {
   font-size:11px !important;
 }
 
-
+/* Compact Gestor de Unidades buttons */
+#pUnitMgrBody .btn-grid{
+  gap:5px !important;
+  grid-template-columns:repeat(auto-fit, minmax(76px, 1fr)) !important;
+  align-items:stretch !important;
+}
+#pUnitMgrBody .btn.mini{
+  padding:2px 5px !important;
+  font-size:10.5px !important;
+  line-height:1.05 !important;
+  min-height:22px !important;
+  min-width:0 !important;
+  border-radius:7px !important;
+  letter-spacing:0.01em !important;
+}
+#pUnitMgrBody .btn-grid[style*="margin-top"]{
+  margin-top:6px !important;
+}
+body[data-setca-role="odi"] #pUnitMgr,
+body[data-setca-role="odt"] #pUnitMgr,
+body[data-setca-role="observer"] #pUnitMgr{
+  display:none !important;
+}
 
 .btn:active, .btn.btn-hold {
   background: yellow !important;
@@ -1296,8 +1364,10 @@ canvas#radar {
 
 
 </style>
+
+
 </head>
-<body>
+<body class="setca-access-locked">
 <div class="app">
 <header>
   <h1>SETCA</h1>
@@ -1334,11 +1404,8 @@ canvas#radar {
         <div class="group">
           <div class="group-title">Radar</div>
           <div class="btn-grid small radar3">
-            <button id="failRadar" class="btn mini focusable">Falla Radar</button>
-            <button id="toggleSweep" class="btn mini focusable">Haz Radar</button>
-            <button id="toggleHalos" class="btn mini focusable">Halos</button>
-                      <button id="toggleAirports" class="btn mini focusable">APTO</button>
-</div>
+            <button id="toggleAirports" class="btn mini focusable">APTO</button>
+          </div>
         </div>
 
         <div class="group">
@@ -1354,24 +1421,32 @@ canvas#radar {
           </div>
         </div>
 
-        <div class="group">
-          <div class="group-title">Gestión de Unidades</div>
-          <div class="btn-grid small">
-            <button id="addFighter" class="btn mini focusable">➕ Caza</button>
-            <button id="addCom" class="btn mini focusable">✈️ Comercial</button>
-            <button id="addTrans" class="btn mini focusable">🛩️ Transporte</button>
-            <button id="addHeli" class="btn mini focusable">🚁 Helicóptero</button>
-            <button id="addAwacs" class="btn mini focusable">📡 AWACS</button>
-            <button id="addTanker" class="btn mini focusable">⛽ Tanker</button>
-            <button id="delLast" class="btn mini focusable">🗑️ Eliminar</button>
-          </div>
 
-          <div class="btn-grid small" style="margin-top:8px">
-            <button id="exportFormBtn" class="btn mini focusable">💾 Exportar</button>
-            <button id="importFormBtn" class="btn mini focusable">📂 Cargar</button>
-          </div>
-          <input type="file" id="formFileInput" accept=".json" style="display:none">
+      </div>
+    </section>
+
+    <section class="panel" id="pUnitMgr">
+      <div class="panel-header"><h3>Gestor de Unidades</h3><span class="toggle" data-target="#pUnitMgrBody">▾</span></div>
+      <div id="pUnitMgrBody" class="panel-body">
+        <div class="btn-grid small">
+          <button id="addFighter" class="btn mini focusable">➕ Caza</button>
+          <button id="addCom" class="btn mini focusable">✈️ Comercial</button>
+          <button id="addTrans" class="btn mini focusable">🛩️ Transporte</button>
+          <button id="addHeli" class="btn mini focusable">🚁 Helicóptero</button>
+          <button id="addAwacs" class="btn mini focusable">📡 AWACS</button>
+          <button id="addTanker" class="btn mini focusable">⛽ Tanker</button>
+          <button id="delLast" class="btn mini focusable">🗑️ Eliminar</button>
         </div>
+
+        <div class="btn-grid small" style="margin-top:8px">
+          <button id="toggleAwacsCov" class="btn mini focusable">📡 Cobertura AWACS: ON</button>
+        </div>
+
+        <div class="btn-grid small" style="margin-top:8px">
+          <button id="exportFormBtn" class="btn mini focusable">💾 Exportar</button>
+          <button id="importFormBtn" class="btn mini focusable">📂 Cargar</button>
+        </div>
+        <input type="file" id="formFileInput" accept=".json" style="display:none">
       </div>
     </section>
 
@@ -1397,6 +1472,10 @@ canvas#radar {
     <canvas id="radar"></canvas>
     <div id="hud" class="mini"></div>
     <div id="status">FPS: <span id="fps">0</span> • Estado: <span id="simstate">PAUSA</span></div>
+    <section id="observerStatsPanel" aria-live="polite" aria-label="Resumen del observador">
+      <div class="observerStatsHdr">RESUMEN OBSERVADOR</div>
+      <div id="observerStatsBody" class="observerStatsBody"></div>
+    </section>
   </main>
 
   <aside id="right">
@@ -1488,6 +1567,10 @@ function flash(el){el.classList.add('flash');setTimeout(()=>el.classList.remove(
 
 /* ===== Constantes / Estado ===== */
 const NM2KM=1.852,KTS2KMH=1.852,KMH2KTS=1/1.852,FT2M=0.3048;
+const AWACS_COVERAGE_KM = 500;
+const AWACS_COVERAGE_NM = AWACS_COVERAGE_KM / NM2KM;
+const AWACS_BEAM_HALF_DEG = 18;
+const AWACS_BEAM_ROT_DEG_PER_SEC = 42;
 const MAX_RANGE_NM=1000,GRID_STEP_NM=10,PX_PER_NM=20;
 // GTC: edición solo desde el panel (sin clicks sobre el radar)
 window.GTC_PANEL_ONLY = true;
@@ -1755,18 +1838,21 @@ let st={
   paused:false,
   t0:0, elapsed:0,
   windKmh:0, windDir:0,
-  sweep:true, sweepAng:0, sweepSpd:24, // ← más lento
-  showHalos:true,
+  sweep:false, sweepAng:0, sweepSpd:24,
+  showHalos:false,
   predMin:5,
   mode:'digital',
   missiles:[],
   splashes:[],
+  impactMarks:[],
+  missileStats:{aircraft:0,dart:0},
   drawings:[],
   gtc:[],
   selectedDrawing:null,
   altUnit:'ft',
   pairs:[],
-  radarFail:false
+  radarFail:false,
+  showAwacsCoverage:true
 };
 
 /* ===== LOCAL ONLY: Unidades + Predicción + Data Block offsets (NO se sincroniza) ===== */
@@ -1818,6 +1904,7 @@ window.__saveLocalPrefs = ()=>{
   __localPrefs.altUnit = (st.altUnit === 'm') ? 'm' : 'ft';
   __localPrefs.predMin = Math.max(0, Math.min(60, (st.predMin|0)));
   __localPrefs.mode = (st.mode || 'digital');
+  __localPrefs.showAwacsCoverage = !!st.showAwacsCoverage;
   __lsSave(__PREF_KEY, __localPrefs);
 };
 
@@ -1838,6 +1925,14 @@ window.__updateLocalUI = ()=>{
     bft.classList.toggle('hi', u === 'ft');
     bm2.classList.toggle('hi', u === 'm');
   }
+
+  const aw = document.getElementById('toggleAwacsCov');
+  if(aw){
+    const on = !!st.showAwacsCoverage;
+    aw.classList.toggle('hi', on);
+    aw.textContent = `📡 Cobertura AWACS: ${on ? 'ON' : 'OFF'}`;
+    aw.title = on ? 'Apagar halo de cobertura AWACS' : 'Encender halo de cobertura AWACS';
+  }
 };
 
 // Aplicar preferencias locales al iniciar (antes de que se pinten los paneles)
@@ -1846,6 +1941,7 @@ window.__updateLocalUI = ()=>{
   if(__localPrefs.altUnit === 'm' || __localPrefs.altUnit === 'ft') st.altUnit = __localPrefs.altUnit;
   if(Number.isFinite(__localPrefs.predMin)) st.predMin = Math.max(0, Math.min(60, (__localPrefs.predMin|0)));
   if(typeof __localPrefs.mode === 'string' && __localPrefs.mode) st.mode = __localPrefs.mode;
+  if(typeof __localPrefs.showAwacsCoverage === 'boolean') st.showAwacsCoverage = __localPrefs.showAwacsCoverage;
 })();
 window.addEventListener('DOMContentLoaded', ()=>{
   if(window.__applyLocalTagOffsets) window.__applyLocalTagOffsets();
@@ -2170,15 +2266,36 @@ function toScreen(x,y){return {x:CX+offX+x*zoom*PX_PER_NM,y:CY+offY+y*zoom*PX_PE
 function toWorld(px,py){return {x:(px-CX-offX)/(zoom*PX_PER_NM),y:(py-CY-offY)/(zoom*PX_PER_NM)};}
 
 /* ===== Analógico: detección por haz ===== */
+function normDeg(a){
+  a = Number(a || 0);
+  return ((a % 360) + 360) % 360;
+}
+function angDiffDeg(a,b){
+  const d = Math.abs(normDeg(a) - normDeg(b));
+  return d > 180 ? 360 - d : d;
+}
+function bearingDeg(dx,dy){
+  return normDeg(Math.atan2(dx, -dy) * 180 / Math.PI);
+}
 function sweepDetect(dt){
-  if(st.paused||!st.sweep) return;
-  st.sweepAng=(st.sweepAng+st.sweepSpd*dt)%360;
-  const start=st.sweepAng,width=10;
-  st.planes.forEach(p=>{
-    const ang=(Math.atan2(p.y,p.x)*180/Math.PI+360)%360;
-    let end=(start+width)%360;
-    const inSector=start<=end?(ang>=start&&ang<=end):(ang>=start||ang<=end);
-    if(inSector) p.lastDet=performance.now();
+  if(!window.st || !Array.isArray(st.planes) || !st.planes.length) return;
+  const now = performance.now();
+  const awacsList = st.planes.filter(p=> p && isAwacsPlane(p) && st.showAwacsCoverage && p.awacsCoverage !== false);
+  if(!awacsList.length) return;
+  awacsList.forEach(aw=>{
+    const nextAng = normDeg((Number.isFinite(aw.awacsSweepAng) ? aw.awacsSweepAng : (aw.hdg || 0)) + AWACS_BEAM_ROT_DEG_PER_SEC * dt);
+    aw.awacsSweepAng = nextAng;
+    st.planes.forEach(tgt=>{
+      if(!tgt || tgt===aw) return;
+      const dx = (tgt.x || 0) - (aw.x || 0);
+      const dy = (tgt.y || 0) - (aw.y || 0);
+      const dist = Math.hypot(dx, dy);
+      if(!isFinite(dist) || dist > AWACS_COVERAGE_NM) return;
+      const brg = bearingDeg(dx, dy);
+      if(angDiffDeg(brg, nextAng) <= AWACS_BEAM_HALF_DEG){
+        tgt.lastDet = now;
+      }
+    });
   });
 }
 
@@ -2228,6 +2345,45 @@ if (Math.min(diffCW, diffCCW) > 0.1) {
 }
 function drawPlane(p){
   const s=toScreen(p.x,p.y);
+
+  if(st.showAwacsCoverage && isAwacsPlane(p) && p.awacsCoverage !== false){
+    const rPx = AWACS_COVERAGE_NM * zoom * PX_PER_NM;
+    if(isFinite(rPx) && rPx > 1){
+      ctx.save();
+      ctx.fillStyle = 'rgba(77,227,255,0.055)';
+      ctx.beginPath();
+      ctx.arc(s.x, s.y, rPx, 0, 2*Math.PI);
+      ctx.fill();
+
+      const beamAng = normDeg(Number.isFinite(p.awacsSweepAng) ? p.awacsSweepAng : (p.hdg || 0));
+      const beamDir = (beamAng - 90) * Math.PI / 180;
+      const beamHalf = AWACS_BEAM_HALF_DEG * Math.PI / 180;
+      const beamRadius = Math.max(12, rPx * 0.94);
+      const beamInner = Math.max(16, Math.min(rPx * 0.26, beamRadius - 8));
+      ctx.fillStyle = st.labelMode===3 ? 'rgba(255,153,0,0.10)' : 'rgba(77,227,255,0.07)';
+      ctx.beginPath();
+      ctx.arc(s.x, s.y, beamRadius, beamDir - beamHalf, beamDir + beamHalf);
+      ctx.arc(s.x, s.y, beamInner, beamDir + beamHalf, beamDir - beamHalf, true);
+      ctx.closePath();
+      ctx.fill();
+
+      ctx.strokeStyle = 'rgba(77,227,255,0.34)';
+      ctx.lineWidth = 1;
+      ctx.setLineDash([6,6]);
+      ctx.beginPath();
+      ctx.arc(s.x, s.y, rPx, 0, 2*Math.PI);
+      ctx.stroke();
+
+      if(st.showLabels && st.labelMode !== 2){
+        ctx.font = '10px monospace';
+        ctx.textAlign = 'center';
+        ctx.fillStyle = 'rgba(77,227,255,0.9)';
+        ctx.fillText('AWACS 500 km', s.x, s.y + rPx + 12);
+      }
+      ctx.restore();
+    }
+  }
+
   // Modo 3: radar analógico (solo puntos naranjas de contactos detectados por el radar)
   if(st.labelMode===3){
     const age=performance.now()-p.lastDet;
@@ -2394,17 +2550,6 @@ function drawAirports(){
 }
 function drawGrid(){
   const grd=ctx.createLinearGradient(0,0,0,H);grd.addColorStop(0,'#031106');grd.addColorStop(1,'#000');ctx.fillStyle=grd;ctx.fillRect(0,0,W,H);
-ctx.strokeStyle='#0d2c13';ctx.lineWidth=1;
-  if(st.showHalos!==false){
-    for(let r=GRID_STEP_NM;r<=MAX_RANGE_NM;r+=GRID_STEP_NM){
-      ctx.beginPath();ctx.arc(CX+offX,CY+offY,r*zoom*PX_PER_NM,0,2*Math.PI);ctx.stroke();
-      if(r%50===0){ctx.fillStyle='#164a1f';ctx.font='10px monospace';ctx.textAlign='center';const txt=st.metric?`${(r*NM2KM).toFixed(0)} km`:`${r} NM`;ctx.fillText(txt,CX+offX,CY+offY-r*zoom*PX_PER_NM-4);}
-    }
-  }
-  if(st.showHalos!==false){
-    ctx.strokeStyle='#0e3a17';
-    for(let a=0;a<360;a+=30){const rad=(a-90)*Math.PI/180;const ex=CX+offX+Math.cos(rad)*MAX_RANGE_NM*zoom*PX_PER_NM,ey=CY+offY+Math.sin(rad)*MAX_RANGE_NM*zoom*PX_PER_NM;ctx.beginPath();ctx.moveTo(CX+offX,CY+offY);ctx.lineTo(ex,ey);ctx.stroke();}
-  }
   // Centro radar (Aeropuerto de referencia)
   if(st.radarCenter){
     ctx.fillStyle = 'rgba(255,224,102,.9)';
@@ -2424,14 +2569,7 @@ ctx.strokeStyle='#0d2c13';ctx.lineWidth=1;
   }
 }
 function drawSweep(dt){
-  if(st.radarFail) return;
-  if(st.sweep){
-    st.sweepAng=(st.sweepAng+(st.paused?0:st.sweepSpd*dt))%360;
-    const rad=Math.max(W,H)*2;const a=st.sweepAng*Math.PI/180;
-    ctx.save();ctx.translate(CX+offX,CY+offY);ctx.rotate(a);
-    const g=ctx.createRadialGradient(0,0,0,0,0,rad);g.addColorStop(0,'rgba(46,231,79,.06)');g.addColorStop(.5,'rgba(46,231,79,.22)');g.addColorStop(1,'rgba(46,231,79,.5)');
-    ctx.beginPath();ctx.moveTo(0,0);ctx.arc(0,0,rad,0,Math.PI/28);ctx.closePath();ctx.fillStyle=g;ctx.fill();ctx.restore();
-  }
+  return;
 }
 
 /* ===== Regla (LEFT click & hold) ===== */
@@ -2447,6 +2585,7 @@ cvs.addEventListener('mousedown',e=>{ if(e.button!==0) return; // block measure 
     st.gtc = Array.isArray(st.gtc) ? st.gtc : [];
     const name = (typeof gtcNextName === 'function') ? gtcNextName() : ('LANZA'+(st.gtc.length+1));
     st.gtc.push({
+      ownerSide:(window.__SETCA_getCurrentSide ? window.__SETCA_getCurrentSide() : 'neutral'),
       id,
       name,
       x:w.x,
@@ -2479,9 +2618,38 @@ addEventListener('mouseup',e=>{ if(measuring){ measuring=false; rA=rB=null; }});
 function launch(launcherId,targetId,type){
   const L=st.planes.find(p=>p.id===launcherId),T=st.planes.find(p=>p.id===targetId);if(!L||!T) return;
   const missile={id:'MS'+Date.now(),name:type==='R77'?'R-77':'AMRAAM',x:L.x,y:L.y,alt:L.alt,spd:2500,tgt:targetId,launcher:launcherId,rangeKM:type==='R77'?110:90,travKM:0,status:'fly',drift:0};
+  st.missileStats = __normalizeMissileStats(st.missileStats);
+  st.missileStats.aircraft += 1;
   st.missiles.push(missile); logEvent(`LANZAMIENTO: ${L.name} lanzó ${missile.name} a ${T.name}`);
 }
+function __registerMissileImpact(target, missile){
+  if(!target) return null;
+  if(!Array.isArray(st.impactMarks)) st.impactMarks = [];
+  const impact = {
+    id:'IMP'+Date.now()+Math.random().toString(36).slice(2,6),
+    x:Number.isFinite(+target.x) ? +target.x : Number(missile && missile.x || 0),
+    y:Number.isFinite(+target.y) ? +target.y : Number(missile && missile.y || 0),
+    by:String(missile && missile.launcher || ''),
+    targetId:String(target.id || ''),
+    targetName:String(target.name || ''),
+    ts:Date.now()
+  };
+  st.impactMarks.push(impact);
+
+  const targetId = String(target.id || '');
+  if(targetId){
+    st.planes = (Array.isArray(st.planes) ? st.planes : []).filter(p => String(p && p.id || '') !== targetId);
+    if(st.roles && Object.prototype.hasOwnProperty.call(st.roles, targetId)) delete st.roles[targetId];
+    if(Array.isArray(st.sel)) st.sel = st.sel.filter(id => String(id || '') !== targetId);
+    if(Array.isArray(st.pairs)) st.pairs = st.pairs.filter(pr => String(pr && pr.a || '') !== targetId && String(pr && pr.b || '') !== targetId);
+    if(Array.isArray(st.missiles)){
+      st.missiles = st.missiles.filter(mm => mm === missile || (String(mm && mm.tgt || '') !== targetId && String(mm && mm.launcher || '') !== targetId));
+    }
+  }
+  return impact;
+}
 function updateMissiles(dt){
+  let __impactChanged = false;
   st.missiles.forEach(m=>{
     if(m.status!=='fly') return;
     const T=st.planes.find(p=>p.id===m.tgt); if(!T){m.status='lost';return;}
@@ -2498,10 +2666,15 @@ function updateMissiles(dt){
 
     const distNM=Math.hypot(dx,dy);
     if(distNM<1.0){
+      const targetName = T.name;
+      const targetX = T.x;
+      const targetY = T.y;
       m.status='hit';
-      st.splashes.push({x:T.x,y:T.y,t:0});
+      st.splashes.push({x:targetX,y:targetY,t:0});
       T._hit=true;
-      logEvent(`SPLASH: ${T.name} destruido`);
+      __registerMissileImpact(T, m);
+      __impactChanged = true;
+      logEvent(`SPLASH: ${targetName} destruido`);
 
       const L=st.planes.find(p=>p.id===m.launcher);
       if(L) L.kills=(L.kills||0)+1;
@@ -2521,6 +2694,16 @@ function updateMissiles(dt){
     if(isFinite(maxAlt) && maxAlt<Infinity) m.alt = Math.min(m.alt, maxAlt);
   });
   st.missiles=st.missiles.filter(m=>m.status==='fly');
+  if(__impactChanged){
+    try{ repaintPlanesList && repaintPlanesList(); }catch(_){}
+    try{ repaintNav && repaintNav(); }catch(_){}
+    try{ repaintAlt && repaintAlt(); }catch(_){}
+    try{ repaintPairs && repaintPairs(); }catch(_){}
+    try{ repaintVuelos && repaintVuelos(); }catch(_){}
+    try{ repaintGTC && repaintGTC(); }catch(_){}
+    try{ repaintStudent && repaintStudent(); }catch(_){}
+    try{ if(typeof scheduleSync==='function') scheduleSync(0); }catch(_){}
+  }
 }
 function drawMissiles(){
   st.missiles.forEach(m=>{const s=toScreen(m.x,m.y);const T=st.planes.find(p=>p.id===m.tgt);if(!T)return;const t=toScreen(T.x,T.y);
@@ -2530,6 +2713,19 @@ function drawMissiles(){
   });
   st.splashes.forEach(sp=>{sp.t+=1/60;const r=(sp.t*60);const s=toScreen(sp.x,sp.y);ctx.strokeStyle=`rgba(255,100,100,${Math.max(0,1-sp.t)})`;ctx.beginPath();ctx.arc(s.x,s.y,r,0,2*Math.PI);ctx.stroke();});
   st.splashes=st.splashes.filter(sp=>sp.t<1.2);
+  (Array.isArray(st.impactMarks) ? st.impactMarks : []).forEach(mark=>{
+    const s = toScreen(mark.x, mark.y);
+    ctx.save();
+    ctx.strokeStyle = 'rgba(255,72,72,0.96)';
+    ctx.lineWidth = 2.2;
+    ctx.beginPath();
+    ctx.moveTo(s.x-8, s.y-8);
+    ctx.lineTo(s.x+8, s.y+8);
+    ctx.moveTo(s.x+8, s.y-8);
+    ctx.lineTo(s.x-8, s.y+8);
+    ctx.stroke();
+    ctx.restore();
+  });
 }
 
 /* ===== Emparejamientos ===== */
@@ -2614,7 +2810,7 @@ function repaintPairList(){
     const row=document.createElement('div'); row.className='row';
     row.innerHTML=`<span class="badge">${A?A.name:pr.a}</span> ↔ <span class="badge">${B?B.name:pr.b}</span>
       <button class="mini btn focusable" data-i="${idx}">Quitar</button>`;
-    const btn=row.querySelector('button'); btn.onclick=()=>{ st.pairs.splice(idx,1); repaintPairList(); };
+    const btn=row.querySelector('button'); btn.onclick=()=>{ st.pairs.splice(idx,1); repaintPairList(); if(typeof flushSync==='function') flushSync(); else if(typeof scheduleSync==='function') scheduleSync(0); };
     list.appendChild(row);
   });
 }
@@ -3851,7 +4047,7 @@ addEventListener('mouseup',()=>{
     const pts = tool.poly.slice(0);
     const c = polyCentroid(pts);
     const id='D-'+Math.random().toString(36).slice(2,6).toUpperCase();
-    st.drawings.push({id,type:tool.tool,x:c.x,y:c.y,pts,lw:0.6});
+    st.drawings.push({ownerSide:(window.__SETCA_getCurrentSide ? window.__SETCA_getCurrentSide() : 'neutral'),id,type:tool.tool,x:c.x,y:c.y,pts,lw:0.6});
     ensureDrawingName(st.drawings[st.drawings.length-1]);
     st.selectedDrawing = id;
 
@@ -3870,28 +4066,28 @@ addEventListener('mouseup',()=>{
     let created = false;
 
     if(tool.tool==='point'){
-      st.drawings.push({id,type:'point',x:a.x,y:a.y}); created = true;
+      st.drawings.push({ownerSide:(window.__SETCA_getCurrentSide ? window.__SETCA_getCurrentSide() : 'neutral'),id,type:'point',x:a.x,y:a.y}); created = true;
 } else if(tool.tool==='line'){
-      st.drawings.push({id,type:'line',x:a.x,y:a.y,ex:b.x,ey:b.y,lw:0.6}); created = true;
+      st.drawings.push({ownerSide:(window.__SETCA_getCurrentSide ? window.__SETCA_getCurrentSide() : 'neutral'),id,type:'line',x:a.x,y:a.y,ex:b.x,ey:b.y,lw:0.6}); created = true;
       ensureDrawingName(st.drawings[st.drawings.length-1]);
     } else if(tool.tool==='arwy'){
-      st.drawings.push({id,type:'arwy',x:a.x,y:a.y,ex:b.x,ey:b.y,lw:0.4}); created = true;
+      st.drawings.push({ownerSide:(window.__SETCA_getCurrentSide ? window.__SETCA_getCurrentSide() : 'neutral'),id,type:'arwy',x:a.x,y:a.y,ex:b.x,ey:b.y,lw:0.4}); created = true;
       ensureDrawingName(st.drawings[st.drawings.length-1]);
     } else if(tool.tool==='circle'){
       const r=Math.hypot(b.x-a.x,b.y-a.y);
-      st.drawings.push({id,type:'circle',x:a.x,y:a.y,r,lw:0.6}); created = true;
+      st.drawings.push({ownerSide:(window.__SETCA_getCurrentSide ? window.__SETCA_getCurrentSide() : 'neutral'),id,type:'circle',x:a.x,y:a.y,r,lw:0.6}); created = true;
       ensureDrawingName(st.drawings[st.drawings.length-1]);
     } else if(tool.tool==='square'){
       const side=Math.max(Math.abs(b.x-a.x),Math.abs(b.y-a.y));
       const cx=a.x+(b.x-a.x)/2, cy=a.y+(b.y-a.y)/2;
-      st.drawings.push({id,type:'square',x:cx,y:cy,a:side,lw:0.6}); created = true;
+      st.drawings.push({ownerSide:(window.__SETCA_getCurrentSide ? window.__SETCA_getCurrentSide() : 'neutral'),id,type:'square',x:cx,y:cy,a:side,lw:0.6}); created = true;
       ensureDrawingName(st.drawings[st.drawings.length-1]);
     } else if(tool.tool==='bullseye'){
-      st.drawings.push({id,type:'bullseye',x:a.x,y:a.y,lw:0.6}); created = true;
+      st.drawings.push({ownerSide:(window.__SETCA_getCurrentSide ? window.__SETCA_getCurrentSide() : 'neutral'),id,type:'bullseye',x:a.x,y:a.y,lw:0.6}); created = true;
       ensureDrawingName(st.drawings[st.drawings.length-1]);
     } else if(tool.tool==='label'){
       const text=prompt('Texto de etiqueta:');
-      if(text){ st.drawings.push({id,type:'label',x:a.x,y:a.y,text}); created = true;
+      if(text){ st.drawings.push({ownerSide:(window.__SETCA_getCurrentSide ? window.__SETCA_getCurrentSide() : 'neutral'),id,type:'label',x:a.x,y:a.y,text}); created = true;
         ensureDrawingName(st.drawings[st.drawings.length-1]);
       }
     }
@@ -3979,7 +4175,7 @@ addEventListener('mouseup',()=>{
       const x = p.x, y = p.y;
       const id='D-'+Math.random().toString(36).slice(2,10).toUpperCase();
       // Punto por coordenadas: usar "+" para diferenciarlo visualmente, renombrable
-      st.drawings.push({id,type:'point',x,y,dotColor:'rgba(255,255,255,0.85)',showName:true,marker:'plus',plusSize:4.5,plusWidth:1.2});
+      st.drawings.push({ownerSide:(window.__SETCA_getCurrentSide ? window.__SETCA_getCurrentSide() : 'neutral'),id,type:'point',x,y,dotColor:'rgba(255,255,255,0.85)',showName:true,marker:'plus',plusSize:4.5,plusWidth:1.2});
       st.selectedDrawing=id;
       resetDrawTool();
     };
@@ -4009,14 +4205,19 @@ function paintAlerts(){
   }
 
   missiles.forEach(m=>{
-    const L = (st.planes||[]).find(p=>p.id===m.launcher) || {name: m.launcher, x:m.x, y:m.y};
-    const T = (st.planes||[]).find(p=>p.id===m.tgt) || {name: m.tgt, x:m.tx||m.x, y:m.ty||m.y};
+    const L = (st.planes||[]).find(p=>p.id===m.launcher)
+          || (st.gtc||[]).find(g=>g && String(g.id||'')===String(m.launcher||''))
+          || {name: m.launcherName || m.launcher, x:m.x, y:m.y};
+    const T = (st.planes||[]).find(p=>p.id===m.tgt) || {name: m.targetName || m.tgt, x:m.tx||m.x, y:m.ty||m.y};
 
     // Distancia SIEMPRE en NM y (KM), independiente del toggle Métrico/Imperial
     const distNM = Math.hypot((T.x||0)-(m.x||0), (T.y||0)-(m.y||0));
     const distKM = distNM * NM2KM;
     const distTxt = `${distNM.toFixed(1)} NM (${distKM.toFixed(1)} KM)`;
-const div=document.createElement('div');
+    const launchName = String(m.launcherName || L.name || m.launcher || 'N/A');
+    const targetName = String(m.targetName || T.name || m.tgt || 'N/A');
+    const dartName = String(m.name || m.type || 'N/A');
+    const div=document.createElement('div');
     div.className='missileCard';
     div.innerHTML = `
       <div class="missileHdr">
@@ -4025,12 +4226,12 @@ const div=document.createElement('div');
       </div>
       <div class="missileGrid">
         <div class="missileRow">
-          <span class="missileK">ORIG</span><span class="missileV">${(L.name||'').toString()}</span>
-          <span class="missileArrow">→</span>
-          <span class="missileK">TGT</span><span class="missileV">${(T.name||'').toString()}</span>
+          <span class="missileK">MISIL</span><span class="missileV">${dartName}</span>
         </div>
         <div class="missileRow">
-          <span class="missileK">TIPO</span><span class="missileV">${(m.name || m.type || 'N/A').toString()}</span>
+          <span class="missileK">SALE DE</span><span class="missileV">${launchName}</span>
+          <span class="missileArrow">→</span>
+          <span class="missileK">VA A</span><span class="missileV">${targetName}</span>
         </div>
       </div>
     `;
@@ -4249,6 +4450,10 @@ function repaintPlanesList(){
     list.appendChild(b);
   });
 }
+function isAwacsPlane(p){
+  return String(getPlaneTipoDisplay(p) || '').trim().toUpperCase() === 'AWACS';
+}
+
 function getRoleUiColor(role){
   return role==='Civilian' ? '#4de3ff' : (role==='Friend' ? '#35ff79' : (role==='Bandit' ? '#ff7070' : '#7CFC00'));
 }
@@ -4680,9 +4885,8 @@ function loop(ts){
   const dt=Math.max(0,(ts-lastTS)/1000); lastTS=ts;
   if(!st.paused){ st.elapsed = performance.now() - st.t0; telTick += dt; if(telTick>5){logTel(); telTick=0;} }
   ctx.clearRect(0,0,W,H);
-  if (st.radarFail) { drawGrid(); ctx.fillStyle='rgba(255,50,50,0.12)'; ctx.fillRect(0,0,W,H); ctx.font='bold 36px monospace'; ctx.fillStyle='#ff4d4d'; ctx.textAlign='center'; ctx.fillText('FALLA DE RADAR', W/2, H/2); requestAnimationFrame(loop); return; }
-  drawGrid(); drawPeruMap(); drawAirports(); drawGTC(); sweepDetect(dt); drawSweep(dt);
-  if(!st.paused){ st.planes.forEach(p=>updatePlane(p,dt)); updateMissiles(dt); updatePairs(); }
+  drawGrid(); drawPeruMap(); drawAirports(); drawGTC();
+  if(!st.paused){ st.planes.forEach(p=>updatePlane(p,dt)); updateMissiles(dt); updatePairs(); sweepDetect(dt); }
 
 // Indicador GTC (botón verde/rojo) según contacto dentro de R y H
 try{
@@ -4699,6 +4903,7 @@ if(st.showTraj){
   ctx.strokeStyle='rgba(46,231,79,0.4)';
   ctx.lineWidth=1;
   st.planes.forEach(p=>{
+    if(!window.__SETCA_canRenderPlane || !window.__SETCA_canRenderPlane(p)) return;
     if(p.ghosts.length>1){
       ctx.beginPath();
       p.ghosts.forEach((g,i)=>{
@@ -4710,7 +4915,7 @@ if(st.showTraj){
   });
 }
 
-  st.planes.forEach(p=>drawPlane(p)); drawPairs(); drawMissiles(); drawShapes();
+  st.planes.forEach(p=>{ if(!window.__SETCA_canRenderPlane || window.__SETCA_canRenderPlane(p)) drawPlane(p); }); drawPairs(); drawMissiles(); drawShapes();
   if(measuring&&rA&&rB){
     ctx.beginPath();ctx.moveTo(rA.x,rA.y);ctx.lineTo(rB.x,rB.y);ctx.strokeStyle='#2ee74f';ctx.lineWidth=1;ctx.stroke();
     const sx=(rA.x-CX-offX)/(zoom*PX_PER_NM),sy=(rA.y-CY-offY)/(zoom*PX_PER_NM),ex=(rB.x-CX-offX)/(zoom*PX_PER_NM),ey=(rB.y-CY-offY)/(zoom*PX_PER_NM);
@@ -4768,9 +4973,6 @@ $('#uMetric').onclick=()=>{ st.metric=true; if(window.__saveLocalPrefs) window._
 $('#uImperial').onclick=()=>{ st.metric=false; if(window.__saveLocalPrefs) window.__saveLocalPrefs(); repaintNav(); repaintStudent(); repaintAlt(); repaintVuelos(); try{ repaintGTC(); }catch(_){ } if(window.__updateLocalUI) window.__updateLocalUI(); flash($('#uImperial')); };
 $('#windSpd').onchange=e=>{ st.windKmh = st.metric?(+e.target.value||0):((+e.target.value||0)*KTS2KMH); flash(e.target); };
 $('#windDir').onchange=e=>{ st.windDir = +e.target.value||0; flash(e.target); };
-$('#failRadar').onclick=e=>{ st.radarFail=!st.radarFail; e.currentTarget.classList.toggle('hi',st.radarFail); flash(e.currentTarget); };
-$('#toggleSweep').onclick=e=>{ st.sweep=!st.sweep; e.currentTarget.classList.toggle('hi',st.sweep); flash(e.currentTarget); };
-$('#toggleHalos').onclick=e=>{ st.showHalos = !st.showHalos; e.currentTarget.classList.toggle('hi', !!st.showHalos); flash(e.currentTarget); };
 $('#toggleAirports').onclick=e=>{ 
   openAptoModal();
   flash(e.currentTarget);
@@ -4985,10 +5187,12 @@ function __spawnEdgeAircraft(cfg){
     kills:0,fuel:100,jamming:false,
     xpdr:'',
     tipo:(cfg.tipo ?? ''),
+    awacsCoverage: (String(cfg.tipo||'').trim().toUpperCase()==='AWACS'),
+    awacsSweepAng: hdg,
     tagDx:12,tagDy:-6
   };
   st.planes.push(p);
-  st.roles[id]=cfg.role || 'Friend';
+  st.roles[id]=(window.__SETCA_resolveSpawnRole ? window.__SETCA_resolveSpawnRole(cfg.role || cfg.tipo || '') : (cfg.role || 'Friend'));
 }
 
 function __spawnInlandAircraft(cfg){
@@ -5013,7 +5217,7 @@ function __spawnInlandAircraft(cfg){
     tagDx:12,tagDy:-6
   };
   st.planes.push(p);
-  st.roles[id]=cfg.role || 'Friend';
+  st.roles[id]=(window.__SETCA_resolveSpawnRole ? window.__SETCA_resolveSpawnRole(cfg.role || cfg.tipo || '') : (cfg.role || 'Friend'));
 }
 
 $('#addFighter').onclick=()=>{
@@ -5035,7 +5239,7 @@ $('#addFighter').onclick=()=>{
     tipo:'Caza',
     tagDx:12,tagDy:-6
   };
-  st.planes.push(p); st.roles[id]=Math.random()>.5?'Friend':'Bandit'; repaintPlanesList(); repaintNav(); repaintPairs(); repaintAlt(); repaintVuelos(); flash($('#addFighter'));
+  st.planes.push(p); st.roles[id]=(window.__SETCA_resolveSpawnRole ? window.__SETCA_resolveSpawnRole('fighter') : (Math.random()>.5?'Friend':'Bandit')); repaintPlanesList(); repaintNav(); repaintPairs(); repaintAlt(); repaintVuelos(); flash($('#addFighter'));
 };
 $('#addCom').onclick=()=>{
   // Parámetros de avión comercial (jet)
@@ -5054,7 +5258,10 @@ $('#addHeli').onclick=()=>{
 };
 $('#addAwacs').onclick=()=>{
   // AWACS con parámetros de avión comercial (plataforma grande)
+  const __before = Array.isArray(st.planes) ? st.planes.length : 0;
   __spawnEdgeAircraft({idPrefix:'AWACS',namePrefix:'AWACS',tipo:'AWACS',spd:760,turn:1.3,altMin:27000,altVar:7000,role:'Friend'});
+  const __newAwacs = Array.isArray(st.planes) ? st.planes.slice(__before).filter(p=>isAwacsPlane(p)) : [];
+  __newAwacs.forEach(p=>{ p.awacsCoverage = true; p.awacsSweepAng = p.hdg || 0; });
   repaintPlanesList(); repaintNav(); repaintPairs(); repaintAlt(); repaintVuelos(); flash($('#addAwacs'));
 };
 $('#addTanker').onclick=()=>{
@@ -5062,6 +5269,14 @@ $('#addTanker').onclick=()=>{
   __spawnEdgeAircraft({idPrefix:'TNK',namePrefix:'TANKER',tipo:'Tanker',spd:760,turn:1.3,altMin:22000,altVar:10000,role:'Friend'});
   repaintPlanesList(); repaintNav(); repaintPairs(); repaintAlt(); repaintVuelos(); flash($('#addTanker'));
 };
+$('#toggleAwacsCov').onclick=()=>{
+  st.showAwacsCoverage = !st.showAwacsCoverage;
+  if(window.__saveLocalPrefs) window.__saveLocalPrefs();
+  if(window.__updateLocalUI) window.__updateLocalUI();
+  try{ if(typeof repaintAll==='function') repaintAll(); }catch(_){}
+  flash($('#toggleAwacsCov'));
+};
+
 
 $('#altFt').onclick=()=>{ st.altUnit='ft'; if(window.__saveLocalPrefs) window.__saveLocalPrefs(); repaintAlt(); try{ repaintGTC(); }catch(_){ } if(window.__updateLocalUI) window.__updateLocalUI(); flash($('#altFt')); };
 $('#altM').onclick=()=>{ st.altUnit='m'; if(window.__saveLocalPrefs) window.__saveLocalPrefs(); repaintAlt(); try{ repaintGTC(); }catch(_){ } if(window.__updateLocalUI) window.__updateLocalUI(); flash($('#altM')); };
@@ -5069,17 +5284,24 @@ $('#doPair').onclick=()=>{
   const a=$('#pairA').value,b=$('#pairB').value;
   if(a&&b&&a!==b){
     const ex=st.pairs.find(pr=>(pr.a===a&&pr.b===b)||(pr.a===b&&pr.b===a));
-    if(!ex){st.pairs.push({a,b}); repaintPairList();} else alert('Ya emparejados.');
+    if(!ex){
+      st.pairs.push({a,b});
+      repaintPairList();
+      if(typeof flushSync==='function') flushSync();
+      else if(typeof scheduleSync==='function') scheduleSync(0);
+    } else alert('Ya emparejados.');
   } else alert('Seleccione dos distintos.');
 };
-$('#unPair').onclick=()=>{ st.pairs=[]; repaintPairList(); };
+$('#unPair').onclick=()=>{
+  st.pairs=[];
+  repaintPairList();
+  if(typeof flushSync==='function') flushSync();
+  else if(typeof scheduleSync==='function') scheduleSync(0);
+};
 /* Online (beta) code removed per user request */
 /* ===== Inicialización ===== */
 function initUI(){
   repaintPlanesList(); repaintNav(); repaintStudent(); repaintPairs(); repaintAlt(); repaintVuelos();
-  const swbtn = $('#toggleSweep'); if(swbtn) swbtn.classList.toggle('hi', !!st.sweep);
-  const frbtn = $('#failRadar'); if(frbtn) frbtn.classList.toggle('hi', !!st.radarFail);
-  const hbtn = $('#toggleHalos'); if(hbtn) hbtn.classList.toggle('hi', st.showHalos!==false);
   const apbtn = $('#toggleAirports'); if(apbtn) apbtn.classList.toggle('hi', !!window.__uiShowAirports);
 }
 initUI(); try{fitToPlanes && fitToPlanes();}catch(e){}
@@ -5090,7 +5312,7 @@ requestAnimationFrame(()=>{ repaintPlanesList(); repaintNav(); repaintStudent();
   let __syncTimer = null;
   let __syncPending = false;
 
-  function scheduleSync(delay=60){
+  function scheduleSync(delay=24){
     __syncPending = true;
     if(__syncTimer) return;
     __syncTimer = setTimeout(()=>{
@@ -5170,7 +5392,7 @@ requestAnimationFrame(()=>{ repaintPlanesList(); repaintNav(); repaintStudent();
     const t = e.target;
     if(!__setcaAffectsSharedState(t)) return;
     // Esperar al final del tick por si otro handler actualiza el estado primero
-    setTimeout(()=>scheduleSync(65), 0);
+    setTimeout(()=>scheduleSync(40), 0);
   }, true);
 
   // CHANGE: casi inmediato (al terminar edición o seleccionar)
@@ -5193,14 +5415,8 @@ requestAnimationFrame(()=>{ repaintPlanesList(); repaintNav(); repaintStudent();
 // Enviar un primer estado al cargar
   setTimeout(()=>scheduleSync(0),1200);
 </script>
-<!-- === SETCA Enhancements Patch (Alumno + Emparejamientos + Falla Radar + Pinch Zoom + Título) === -->
+<!-- === SETCA Enhancements Patch (Alumno + Emparejamientos + Pinch Zoom + Título) === -->
 <style>
-  #radarFailOverlay{
-    position:absolute; inset:0; display:none; align-items:center; justify-content:center;
-    background: rgba(0,0,0,0.6); color:#ff4d4d; font: 700 24px monospace; z-index: 50;
-    border: 1px solid rgba(255,77,77,0.6);
-    pointer-events:none;
-  }
   header .setca-subtitle{ font-size:12px; color:#b6f3b6; margin-top:2px; }
 
   /* === Modos de vista táctica === */
@@ -5234,9 +5450,9 @@ requestAnimationFrame(()=>{ repaintPlanesList(); repaintNav(); repaintStudent();
   body.observer-mode header button{
     display:none !important;
   }
-  body.observer-mode header #salasBtn,
   body.observer-mode header #offBtn,
-  body.observer-mode header #observerBtn{
+  body.observer-mode header #observerBtn,
+  body.observer-mode header #exitBtn{
     display:inline-block !important;
   }
 
@@ -5454,6 +5670,71 @@ requestAnimationFrame(()=>{ repaintPlanesList(); repaintNav(); repaintStudent();
       });
     }
 
+    // --- REFRESCO ---
+    let refreshBtn = document.getElementById('refreshBtn');
+    if(!refreshBtn){
+      refreshBtn = document.createElement('button');
+      refreshBtn.id = 'refreshBtn';
+      refreshBtn.textContent = '⟳';
+      refreshBtn.title = 'Actualizar datos en tiempo real sin salir ni mover tu vista';
+      refreshBtn.style.marginLeft = '6px';
+      refreshBtn.style.minWidth = '38px';
+      refreshBtn.style.padding = '8px 10px';
+      refreshBtn.style.fontWeight = '700';
+      refreshBtn.style.borderColor = '#7d6a1f';
+      refreshBtn.style.color = '#fff6b0';
+      refreshBtn.style.background = '#2b240c';
+      hdr.appendChild(refreshBtn);
+    }
+    if(!refreshBtn.__setcaWired){
+      refreshBtn.__setcaWired = true;
+      refreshBtn.addEventListener('click', async ()=>{
+        const keep = {
+          zoom: (typeof window.zoom === 'number') ? window.zoom : null,
+          offX: (typeof window.offX === 'number') ? window.offX : null,
+          offY: (typeof window.offY === 'number') ? window.offY : null
+        };
+        const restoreView = ()=>{
+          if(keep.zoom != null) window.zoom = keep.zoom;
+          if(keep.offX != null) window.offX = keep.offX;
+          if(keep.offY != null) window.offY = keep.offY;
+        };
+        const repaintEverything = ()=>{
+          try{ if(typeof repaintAll==='function') repaintAll(); }catch(_){}
+          try{ if(typeof repaintPairList==='function') repaintPairList(); }catch(_){}
+          try{ if(typeof repaintPlanesList==='function') repaintPlanesList(); }catch(_){}
+          try{ if(typeof repaintNav==='function') repaintNav(); }catch(_){}
+          try{ if(typeof repaintAlt==='function') repaintAlt(); }catch(_){}
+          try{ if(typeof repaintPairs==='function') repaintPairs(); }catch(_){}
+          try{ if(typeof repaintStudent==='function') repaintStudent(); }catch(_){}
+          try{ if(typeof repaintGTC==='function') repaintGTC(); }catch(_){}
+          try{ if(typeof paintAlerts==='function') paintAlerts(); }catch(_){}
+          try{ if(typeof draw==='function') draw(); }catch(_){}
+        };
+        try{
+          refreshBtn.disabled = true;
+          let ok = false;
+          if(window._SETCA_SYNC && typeof window._SETCA_SYNC.pull === 'function'){
+            ok = !!(await window._SETCA_SYNC.pull());
+          }
+          restoreView();
+          repaintEverything();
+          try{ if(typeof window.fetchRooms==='function') window.fetchRooms(); }catch(_){}
+          try{ if(window.setcaRooms && typeof window.setcaRooms.refresh==='function') window.setcaRooms.refresh(); }catch(_){}
+          try{ if(typeof flash==='function') flash(refreshBtn); }catch(_){}
+          if(!ok){
+            console.warn('REFRESCO: no llegó un estado remoto nuevo; se forzó repintado y resincronización local.');
+          }
+        }catch(err){
+          console.warn('REFRESCO error:', err);
+        }finally{
+          restoreView();
+          repaintEverything();
+          refreshBtn.disabled = false;
+        }
+      });
+    }
+
     // --- OFF ---
     let offBtn = document.getElementById('offBtn');
     if(!offBtn){
@@ -5465,7 +5746,8 @@ requestAnimationFrame(()=>{ repaintPlanesList(); repaintNav(); repaintStudent();
       offBtn.style.borderColor = '#b33';
       offBtn.style.color = '#fff';
       offBtn.style.background = '#3a1111';
-      hdr.appendChild(offBtn);
+      try{ refreshBtn.insertAdjacentElement('afterend', offBtn); }
+      catch(_){ hdr.appendChild(offBtn); }
     }
     if(!offBtn.__setcaWired){
       offBtn.__setcaWired = true;
@@ -5483,6 +5765,36 @@ requestAnimationFrame(()=>{ repaintPlanesList(); repaintNav(); repaintStudent();
           alert('Tiempo conectado: ' + hh + ':' + mm + ':' + ss + '\n(Salas aun no inicializadas)');
           try{ window.close(); }catch(_){ }
           location.href = 'about:blank';
+        }
+      });
+    }
+
+
+    // --- Salir a pantalla principal ---
+    let exitBtn = document.getElementById('exitBtn');
+    if(!exitBtn){
+      exitBtn = document.createElement('button');
+      exitBtn.id = 'exitBtn';
+      exitBtn.textContent = '↩ Salir';
+      exitBtn.title = 'Volver a la pantalla principal';
+      exitBtn.style.marginLeft = '6px';
+      exitBtn.style.borderColor = '#2f6bb3';
+      exitBtn.style.color = '#fff';
+      exitBtn.style.background = '#0f2238';
+      try{ offBtn.insertAdjacentElement('afterend', exitBtn); }
+      catch(_){ hdr.appendChild(exitBtn); }
+    }
+    if(!exitBtn.__setcaWired){
+      exitBtn.__setcaWired = true;
+      exitBtn.addEventListener('click', ()=>{
+        if(typeof window.setcaLeaveToMain === 'function'){
+          window.setcaLeaveToMain();
+        }else if(typeof window.__SETCA_leaveToMain === 'function'){
+          window.__SETCA_leaveToMain();
+        }else{
+          try{ sessionStorage.removeItem('setca_access_gate_v2'); }catch(_){ }
+          try{ sessionStorage.removeItem('setca_session_start'); }catch(_){ }
+          location.href = String(location.pathname || '') + String(location.search || '');
         }
       });
     }
@@ -5553,6 +5865,27 @@ requestAnimationFrame(()=>{ repaintPlanesList(); repaintNav(); repaintStudent();
       observerBtn.classList.remove('hi');
     }
 
+    window.__SETCA_applyRoleMode = function(mode){
+      exitObserverMode();
+      st.modoAlumno = false;
+      st.modoODT = false;
+      if(mode === 'odi'){
+        st.modoAlumno = true;
+        applyPanelMode('odi');
+      }else if(mode === 'odt'){
+        st.modoODT = true;
+        applyPanelMode('odt');
+      }else if(mode === 'observer'){
+        applyPanelMode('normal');
+        st.modoObservador = true;
+        document.body.classList.add('observer-mode');
+        observerBtn.classList.add('hi');
+        setTimeout(()=>{ try{ window.dispatchEvent(new Event('resize')); }catch(_){ } }, 60);
+      }else{
+        applyPanelMode('normal');
+      }
+    };
+
     // Toggle ODI-CO (solo paneles solicitados)
     if(!alumnoBtn.__setcaWired){
       alumnoBtn.__setcaWired = true;
@@ -5595,6 +5928,74 @@ requestAnimationFrame(()=>{ repaintPlanesList(); repaintNav(); repaintStudent();
 
   }catch(e){ console.warn('Alumno button patch:', e); }
 
+  function getObserverConnectedCount(){
+    try{
+      const room = String(window.__setcaCurrentRoom || (typeof getRoomId === 'function' ? getRoomId() : 'sala-default') || 'sala-default');
+      const names = window.__setcaPresence && Array.isArray(window.__setcaPresence[room]) ? window.__setcaPresence[room] : [];
+      return names.length;
+    }catch(_){ return 0; }
+  }
+  function normalizeObserverPlaneType(tipo){
+    const raw = String(tipo || '').trim();
+    if(!raw) return 'Sin tipo';
+    const v = raw.toLowerCase();
+    if(v.includes('caza') || v.includes('fighter')) return 'Caza';
+    if(v.includes('awacs')) return 'AWACS';
+    if(v.includes('tanker')) return 'Tanker';
+    if(v.includes('comercial')) return 'Comercial';
+    if(v.includes('transporte')) return 'Transporte';
+    if(v.includes('helic')) return 'Helicóptero';
+    return raw;
+  }
+  function buildObserverStats(){
+    const planes = Array.isArray(st.planes) ? st.planes.filter(Boolean) : [];
+    const impacts = Array.isArray(st.impactMarks) ? st.impactMarks.filter(Boolean) : [];
+    const missiles = Array.isArray(st.missiles) ? st.missiles.filter(Boolean) : [];
+    const missileStats = (typeof __normalizeMissileStats === 'function') ? __normalizeMissileStats(st.missileStats) : { aircraft:0, dart:0 };
+    const fallbackAir = missiles.filter(m=> String(m && m.launcherType || '').toLowerCase() !== 'gtc').length;
+    const fallbackDart = missiles.filter(m=> String(m && m.launcherType || '').toLowerCase() === 'gtc').length;
+    const typeCounts = {};
+    planes.forEach(p=>{
+      const key = normalizeObserverPlaneType(p.tipo || p.type || 'Sin tipo');
+      typeCounts[key] = (typeCounts[key] || 0) + 1;
+    });
+    const destroyedIds = new Set();
+    impacts.forEach(mark=>{
+      const key = String(mark && (mark.targetId || mark.id || ''));
+      if(key) destroyedIds.add(key);
+    });
+    return {
+      connected: getObserverConnectedCount(),
+      activeAircraft: planes.length,
+      destroyed: destroyedIds.size || impacts.length,
+      aircraftMissiles: Math.max(missileStats.aircraft, fallbackAir),
+      dartMissiles: Math.max(missileStats.dart, fallbackDart),
+      typeCounts
+    };
+  }
+  function renderObserverStats(){
+    const panel = document.getElementById('observerStatsPanel');
+    const body = document.getElementById('observerStatsBody');
+    if(!panel || !body) return;
+    const stats = buildObserverStats();
+    const typeEntries = Object.entries(stats.typeCounts).sort((a,b)=> a[0].localeCompare(b[0], 'es', {sensitivity:'base'}));
+    body.innerHTML = `
+      <div class="observerStatsGrid">
+        <div class="observerStatCard"><span class="observerStatK">Conectados</span><span class="observerStatV">${stats.connected}</span></div>
+        <div class="observerStatCard"><span class="observerStatK">Aeronaves activas</span><span class="observerStatV">${stats.activeAircraft}</span></div>
+        <div class="observerStatCard"><span class="observerStatK">Aeronaves destruidas</span><span class="observerStatV">${stats.destroyed}</span></div>
+        <div class="observerStatCard"><span class="observerStatK">Misiles de avión</span><span class="observerStatV">${stats.aircraftMissiles}</span></div>
+        <div class="observerStatCard" style="grid-column:1 / -1"><span class="observerStatK">DART lanzados</span><span class="observerStatV">${stats.dartMissiles}</span></div>
+      </div>
+      <div class="observerStatsSub">Aviones por tipo</div>
+      <div class="observerTypeList">
+        ${typeEntries.length ? typeEntries.map(([name,val])=>`<div class="observerTypeRow"><span>${name}</span><strong>${val}</strong></div>`).join('') : '<div class="observerTypeRow"><span>Sin aeronaves</span><strong>0</strong></div>'}
+      </div>`;
+  }
+  window.renderObserverStats = renderObserverStats;
+  setInterval(renderObserverStats, 700);
+  setTimeout(renderObserverStats, 250);
+
   // Names -> pairs
   try{
     document.addEventListener('change', (e)=>{
@@ -5613,27 +6014,6 @@ requestAnimationFrame(()=>{ repaintPlanesList(); repaintNav(); repaintStudent();
       }
     }, true);
   }catch(e){ console.warn('Name->Pairs patch:', e); }
-
-  // Radar fail (sync) + overlay
-  try{
-    const failBtn = document.getElementById('failRadar');
-    if(failBtn){
-      failBtn.addEventListener('click', ()=>{
-        st.radarFailNet = !st.radarFailNet;
-        (window.scheduleSync||function(){})();
-      });
-    }
-    let center = document.getElementById('center') || document.querySelector('main') || document.body;
-    let overlay = document.getElementById('radarFailOverlay');
-    if(!overlay){
-      overlay = document.createElement('div');
-      overlay.id = 'radarFailOverlay';
-      overlay.textContent = 'FALLA DE RADAR (ALUMNO)';
-      center.style.position = center.style.position || 'relative';
-      center.appendChild(overlay);
-    }
-    setInterval(()=>{ overlay.style.display = (st.modoAlumno && st.radarFailNet) ? 'flex' : 'none'; }, 200);
-  }catch(e){ console.warn('Falla Radar overlay patch:', e); }
 
   // ===== Pinch-zoom táctil nativo centrado en el punto medio =====
 (function(){
@@ -5781,10 +6161,10 @@ requestAnimationFrame(()=>{ repaintPlanesList(); repaintNav(); repaintStudent();
         });
 
         st.missiles.forEach(m=>{
-          const L = st.planes.find(x=>x.id===m.launcher);
+          const L = st.planes.find(x=>x.id===m.launcher) || (st.gtc||[]).find(x=>String(x && x.id || '')===String(m.launcher||''));
           const T = st.planes.find(x=>x.id===m.tgt);
           if(L && T){
-            diagnostics.push({type:'launch', text:`LANZAMIENTO: ${L.name} -> ${T.name} (${m.name}). Posición lanz.: X:${L.x.toFixed(1)} Y:${L.y.toFixed(1)} NM`});
+            diagnostics.push({type:'launch', text:`LANZAMIENTO: ${m.name || 'MISIL'} salió de ${m.launcherName || L.name} -> ${T.name}. Posición lanz.: X:${(+L.x||0).toFixed(1)} Y:${(+L.y||0).toFixed(1)} NM`});
           }
         });
 
@@ -5910,21 +6290,26 @@ requestAnimationFrame(()=>{ repaintPlanesList(); repaintNav(); repaintStudent();
     }
     missiles.forEach(m=>{
       if(m.status && m.status!=='fly') return;
-      const L = (st.planes||[]).find(p=>p.id===m.launcher) || {name: m.launcher, x:m.x, y:m.y};
-      const T = (st.planes||[]).find(p=>p.id===m.tgt) || {name: m.tgt, x:m.tx||m.x, y:m.ty||m.y};
+      const L = (st.planes||[]).find(p=>p.id===m.launcher)
+            || (st.gtc||[]).find(g=>g && String(g.id||'')===String(m.launcher||''))
+            || {name: m.launcherName || m.launcher, x:m.x, y:m.y};
+      const T = (st.planes||[]).find(p=>p.id===m.tgt) || {name: m.targetName || m.tgt, x:m.tx||m.x, y:m.ty||m.y};
+      const launchName = String(m.launcherName || L.name || m.launcher || 'N/A');
+      const targetName = String(m.targetName || T.name || m.tgt || 'N/A');
       const distNM = Math.hypot((T.x||0)-(m.x||0), (T.y||0)-(m.y||0));
       const distKM = distNM * NM2KM;
       const nmInt = Math.max(0, Math.round(distNM));
       const kmInt = Math.max(0, Math.round(distKM));
       const distTxt = `${String(nmInt).padStart(3,'0')} NM (${String(kmInt).padStart(3,'0')} KM)`;
+      const dartName = String(m.name || m.type || 'N/A');
       const card=document.createElement('div');
       card.className='card';
       card.style.background='rgba(20,0,0,0.6)';
       card.style.borderColor='#b00';
       card.style.color='#ffe066';
       card.innerHTML = `<strong>!! MISIL ENTRANTE !!</strong><br>
-        Origen: <strong>${L.name}</strong> → Destino: <strong>${T.name}</strong><br>
-        Tipo: ${m.name || m.type || 'N/A'} • DISTANCIA RESTANTE: <strong>${distTxt}</strong>`;
+        <strong>${dartName}</strong> salió de <strong>${launchName}</strong> → se dirige a <strong>${targetName}</strong><br>
+        DISTANCIA RESTANTE: <strong>${distTxt}</strong>`;
       panel.appendChild(card);
     });
   }
@@ -5991,30 +6376,25 @@ requestAnimationFrame(()=>{ repaintPlanesList(); repaintNav(); repaintStudent();
     };
   }
 
-  // --- Update missiles, radarFail, jammers into state every 0.3s ---
+  // --- Update missiles y jammers into state every 0.3s ---
   setInterval(()=>{
     try{
       const s = window.st || {};
       const payload = {
         missiles: s.missiles || [],
-        radarFail: s.radarFail || false,
         jammers: s.planes ? s.planes.filter(p=>p.jamming).map(p=>p.id) : [],
         by: currentUID,
         ts: Date.now()
       };
       set(ref(db, `rooms/${ROOM_ID}/dynamic`), payload);
     }catch(e){}
-  }, 300);
+  }, 180);
 
   // --- Listen for remote missiles and recreate them if not present ---
   onValue(ref(db, `rooms/${ROOM_ID}/dynamic`), (snap)=>{
     const v = snap.val();
     if(!v || v.by===currentUID) return;
     try{
-      // Radar fail sync
-      if(typeof v.radarFail!=='undefined'){
-        window.st.radarFail = v.radarFail;
-      }
       // Jammers sync
       (window.st.planes||[]).forEach(p=>{ p.jamming = Array.isArray(v.jammers) && v.jammers.includes(p.id); });
 
@@ -6410,7 +6790,8 @@ function ensureDrawingName(d){
       (Array.isArray(st.planes) && st.planes.length) ||
       (Array.isArray(st.drawings) && st.drawings.length) ||
       (Array.isArray(st.gtc) && st.gtc.length) ||
-      (Array.isArray(st.missiles) && st.missiles.length)
+      (Array.isArray(st.missiles) && st.missiles.length) ||
+      (Array.isArray(st.impactMarks) && st.impactMarks.length)
     ));
     if(!hasScenario){
       alert('No hay escenario para exportar.');
@@ -6426,6 +6807,8 @@ function ensureDrawingName(d){
         drawings: Array.isArray(st.drawings) ? st.drawings : [],
         gtc: Array.isArray(st.gtc) ? st.gtc : [],
         missiles: Array.isArray(st.missiles) ? st.missiles : [],
+        impactMarks: Array.isArray(st.impactMarks) ? st.impactMarks : [],
+        missileStats: __normalizeMissileStats(st.missileStats),
         pairs: Array.isArray(st.pairs) ? st.pairs : [],
         windKmh: Number.isFinite(+st.windKmh) ? +st.windKmh : 0,
         windDir: Number.isFinite(+st.windDir) ? +st.windDir : 0,
@@ -6461,6 +6844,8 @@ function ensureDrawingName(d){
         st.drawings = Array.isArray(scene.drawings) ? scene.drawings : [];
         st.gtc = Array.isArray(scene.gtc) ? scene.gtc : [];
         st.missiles = Array.isArray(scene.missiles) ? scene.missiles : [];
+        st.impactMarks = Array.isArray(scene.impactMarks) ? scene.impactMarks : [];
+        st.missileStats = __normalizeMissileStats(scene.missileStats || st.missileStats);
         st.pairs = Array.isArray(scene.pairs) ? scene.pairs : [];
         st.windKmh = Number.isFinite(+scene.windKmh) ? +scene.windKmh : 0;
         st.windDir = Number.isFinite(+scene.windDir) ? +scene.windDir : 0;
@@ -6619,6 +7004,83 @@ function ensureDrawingName(d){
 
 
 <!-- ROOMS MODAL -->
+
+<div id="setcaAccessGate" class="setca-gate" aria-hidden="false">
+  <div class="setca-gate-backdrop"></div>
+  <div class="setca-gate-dialog">
+    <div class="setca-gate-head">
+      <div>
+        <div class="setca-gate-kicker">Acceso inicial obligatorio</div>
+        <h2>Ingreso a SETCA</h2>
+        <p>Completa los 3 pasos en orden antes de entrar a la plataforma.</p>
+      </div>
+      <div id="setcaGateRoomBadge" class="setca-gate-badge">SIN SALA</div>
+    </div>
+
+    <div class="setca-gate-grid">
+      <section class="setca-step" id="gateStep2">
+        <div class="setca-step-num">1</div>
+        <div class="setca-step-body">
+          <h3>Elegir rol</h3>
+          <p>El rol define el modo de trabajo que se abre al ingresar.</p>
+          <select id="gateRole" class="ghost focusable">
+            <option value="">Seleccionar rol...</option>
+            <option value="odi">ODI-CO</option>
+            <option value="odt">ODT</option>
+            <option value="observer">OBSERVADOR</option>
+            <option value="default">INSTRUCTOR</option>
+          </select>
+          <div id="gateRoleHint" class="setca-step-hint">Selecciona un rol para continuar.</div>
+        </div>
+      </section>
+
+      <section class="setca-step" id="gateStep3">
+        <div class="setca-step-num">2</div>
+        <div class="setca-step-body">
+          <h3>Elegir callsign</h3>
+          <p>Este indicativo identifica a la persona dentro de la sala.</p>
+          <input id="gateCallsign" class="ghost focusable" type="text" maxlength="24" placeholder="Ej: Oso-21">
+          <div id="gateCallsignHint" class="setca-step-hint">Primero elige el rol.</div>
+        </div>
+      </section>
+
+      <section class="setca-step" id="gateStep4">
+        <div class="setca-step-num">3</div>
+        <div class="setca-step-body">
+          <h3>Elegir o crear sala</h3>
+          <p>Puedes entrar a una sala existente o crear una privada con clave.</p>
+
+          <div class="setca-room-tabs">
+            <button type="button" id="gateJoinTab" class="setca-room-tab active">Entrar a sala</button>
+            <button type="button" id="gateCreateTab" class="setca-room-tab">Crear sala privada</button>
+          </div>
+
+          <div id="gateJoinPane" class="setca-room-pane active">
+            <div id="gateRoomsList" class="setca-room-list"></div>
+            <input id="gateJoinPassword" class="ghost focusable" type="password" placeholder="Clave de sala (si aplica)">
+            <div id="gateJoinHint" class="setca-step-hint">Primero define callsign.</div>
+          </div>
+
+          <div id="gateCreatePane" class="setca-room-pane">
+            <input id="gateCreateRoom" class="ghost focusable" type="text" maxlength="28" placeholder="Nombre de sala (ej: jaguar)" />
+            <input id="gateCreatePassword" class="ghost focusable" type="password" maxlength="32" placeholder="Clave obligatoria" />
+            <div id="gateCreateHint" class="setca-step-hint">Primero define callsign.</div>
+          </div>
+        </div>
+      </section>
+    </div>
+
+    <div id="gateError" class="setca-gate-error" role="alert"></div>
+
+    <div class="setca-gate-actions">
+      <button type="button" id="gateRefreshRooms" class="btn mini focusable">⟳ Actualizar salas</button>
+      <div class="setca-gate-spacer"></div>
+      <button type="button" id="gateCancelEdit" class="btn mini focusable" style="display:none;">Cancelar</button>
+      <button type="button" id="gateEnterBtn" class="btn focusable">Ingresar</button>
+    </div>
+  </div>
+</div>
+
 <div id="roomsModal" class="rooms-hidden">
   <div class="rooms-backdrop"></div>
   <div class="rooms-dialog">
@@ -6710,6 +7172,243 @@ function ensureDrawingName(d){
   #drawingCtxMenu .ctxItem:hover{
     background:rgba(255,224,102,0.12);
   }
+
+
+
+/* === Acceso inicial obligatorio === */
+body.setca-access-locked .app{
+  filter: blur(3px);
+  pointer-events: none;
+  user-select: none;
+}
+#roomsModal{ z-index: 1900; }
+.setca-gate{
+  position: fixed;
+  inset: 0;
+  z-index: 2000;
+  display: none;
+  align-items: center;
+  justify-content: center;
+  padding: 10px;
+}
+.setca-gate.open{ display:flex; }
+.setca-gate-backdrop{
+  position:absolute;
+  inset:0;
+  background: rgba(0,0,0,0.72);
+  backdrop-filter: blur(4px);
+}
+.setca-gate-dialog{
+  position: relative;
+  width: min(860px, calc(100vw - 16px));
+  max-width: 860px;
+  max-height: min(95vh, 760px);
+  overflow: hidden;
+  display:flex;
+  flex-direction:column;
+  border:1px solid #24552d;
+  border-radius: 16px;
+  background: linear-gradient(180deg, #07110a 0%, #09150c 100%);
+  box-shadow: 0 18px 60px rgba(0,0,0,0.48);
+  padding: 12px;
+}
+.setca-gate-head{
+  display:flex;
+  align-items:flex-start;
+  justify-content:space-between;
+  gap:10px;
+  margin-bottom: 10px;
+  padding-bottom: 10px;
+  border-bottom:1px solid rgba(90,180,110,0.25);
+}
+.setca-gate-kicker{
+  color:#8de7a0;
+  font-size:11px;
+  letter-spacing:.12em;
+  text-transform: uppercase;
+  margin-bottom: 3px;
+}
+.setca-gate-head h2{ margin:0 0 4px 0; color:#eaffea; font-size:20px; line-height:1.1; }
+.setca-gate-head p{ margin:0; color:#b8e5bf; font-size:12px; line-height:1.35; }
+.setca-gate-badge{
+  white-space: nowrap;
+  align-self: center;
+  border:1px solid #2f6e3b;
+  color:#d9ffe0;
+  background:#102415;
+  border-radius:999px;
+  padding:6px 10px;
+  font-size:11px;
+  font-weight:700;
+}
+.setca-gate-grid{
+  flex:1 1 auto;
+  min-height:0;
+  overflow:auto;
+  padding-right:2px;
+  display:grid;
+  grid-template-columns: repeat(2, minmax(0,1fr));
+  gap: 8px;
+  align-content:start;
+}
+.setca-step{
+  display:flex;
+  gap: 10px;
+  border:1px solid rgba(56,112,66,0.6);
+  border-radius: 14px;
+  padding: 10px;
+  background: rgba(7,18,10,0.92);
+  min-height: 0;
+  opacity: .64;
+  transition: .18s ease;
+}
+.setca-step.active,
+.setca-step.done{ opacity:1; }
+.setca-step.active{ box-shadow: inset 0 0 0 1px rgba(88,216,116,0.45); }
+.setca-step.done{ border-color:#3d8d4a; }
+.setca-step-num{
+  width:28px;height:28px;border-radius:999px;display:grid;place-items:center;
+  border:1px solid #2f6e3b;background:#0d1d11;color:#dbffe2;font-weight:700;flex:0 0 auto;
+  font-size:13px;
+}
+.setca-step-body{ flex:1; display:flex; flex-direction:column; gap:8px; min-width:0; }
+.setca-step-body h3{ margin:0; font-size:15px; color:#eaffea; line-height:1.15; }
+.setca-step-body p{ margin:0; font-size:11px; color:#aed8b5; line-height:1.35; }
+.setca-step-hint{ font-size:11px; color:#ffe082; min-height: 14px; line-height:1.3; }
+#gateStep4{ grid-column:1 / -1; }
+.setca-choice-row{ display:grid; grid-template-columns: repeat(3, minmax(0,1fr)); gap:6px; }
+.setca-choice{
+  border:1px solid #2e6637;
+  background:#0f2113;
+  color:#eaffea;
+  border-radius: 10px;
+  padding: 10px 8px;
+  font-weight:700;
+  cursor:pointer;
+  font-size:12px;
+}
+.setca-choice.active{ background:#163d20; box-shadow: inset 0 0 0 1px rgba(110,255,145,0.35); }
+.setca-choice:disabled,
+#setcaAccessGate input:disabled,
+#setcaAccessGate select:disabled,
+#setcaAccessGate button:disabled{ opacity:.55; cursor:not-allowed; }
+.setca-room-tabs{ display:flex; gap:6px; }
+.setca-room-tab{
+  flex:1;
+  border:1px solid #2f6e3b;
+  background:#0e1e12;
+  color:#dfffe5;
+  border-radius:10px;
+  padding:8px 10px;
+  cursor:pointer;
+  font-weight:600;
+  font-size:12px;
+}
+.setca-room-tab.active{ background:#163b1f; }
+.setca-room-pane{ display:none; flex-direction:column; gap:8px; }
+.setca-room-pane.active{ display:flex; }
+.setca-room-list{
+  display:flex;
+  flex-direction:column;
+  gap:6px;
+  max-height: min(18vh, 170px);
+  overflow:auto;
+  padding-right:2px;
+}
+.setca-room-item{
+  border:1px solid rgba(58,122,70,0.7);
+  background:#0c1a10;
+  border-radius:10px;
+  padding:8px 10px;
+  cursor:pointer;
+  display:flex;
+  align-items:center;
+  justify-content:space-between;
+  gap:8px;
+  font-size:12px;
+}
+.setca-room-item.active{ box-shadow: inset 0 0 0 1px rgba(110,255,145,0.36); background:#112918; }
+.setca-room-item small{ display:block; color:#a8d8b0; margin-top:3px; }
+.setca-room-flag{
+  border:1px solid #3a7a46;
+  border-radius:999px;
+  padding:4px 7px;
+  font-size:10px;
+  white-space:nowrap;
+}
+.setca-gate-error{
+  min-height: 16px;
+  color:#ff8d8d;
+  font-size:12px;
+  margin-top: 10px;
+}
+.setca-gate-actions{
+  display:flex;
+  align-items:center;
+  gap:8px;
+  margin-top: 10px;
+  padding-top: 10px;
+  border-top:1px solid rgba(90,180,110,0.2);
+}
+.setca-gate-spacer{ flex:1; }
+#setcaAccessGate .ghost,
+#setcaAccessGate select,
+#setcaAccessGate input{
+  width:100%;
+  background:#08100b;
+  border:1px solid #2a5d34;
+  color:#effff1;
+  border-radius:10px;
+  padding:9px 11px;
+  font-size:12px;
+}
+#setcaAccessGate .btn{ min-width:112px; }
+#gateEnterBtn.ready{
+  background:rgba(255,209,102,.22)!important;
+  border-color:#ffd166!important;
+  color:#ffe08a!important;
+  box-shadow:0 0 10px rgba(255,209,102,.18);
+  font-weight:700;
+}
+#setcaAccessChip{
+  display:inline-flex;
+  align-items:center;
+  gap:8px;
+  border:1px solid #2f6e3b;
+  background:#0d1d11;
+  color:#eaffea;
+  border-radius:999px;
+  padding:5px 10px;
+  font-size:12px;
+  white-space:nowrap;
+}
+#setcaAccessChip strong{ color:#9cf0ad; font-weight:700; }
+body.setca-role-locked #alumnoBtn,
+body.setca-role-locked #odtBtn,
+body.setca-role-locked #observerBtn{
+  display:none !important;
+}
+@media (max-width: 880px){
+  .setca-gate{ padding:8px; }
+  .setca-gate-dialog{
+    width: calc(100vw - 12px);
+    max-height: calc(100vh - 12px);
+    padding:12px;
+    border-radius:14px;
+  }
+  .setca-gate-grid{ grid-template-columns: 1fr; gap:8px; }
+  .setca-gate-head{ flex-direction:column; }
+  .setca-room-list{ max-height: min(22vh, 160px); }
+  #setcaAccessChip{ white-space:normal; border-radius:12px; }
+}
+@media (max-width: 620px){
+  .setca-choice-row{ grid-template-columns: 1fr; }
+  .setca-room-tabs{ flex-direction:column; }
+  .setca-gate-badge{ align-self:flex-start; }
+  .setca-gate-actions{ flex-wrap:wrap; }
+  .setca-gate-spacer{ display:none; }
+  #setcaAccessGate .btn{ flex:1 1 100%; min-width:0; }
+}
 
 </style>
 
@@ -6930,6 +7629,32 @@ window.setcaOff = async function(){
     console.error('OFF handler error:', err);
     alert('No se pudo cerrar correctamente. Puedes cerrar la pestana manualmente.');
     try{ location.href = 'about:blank'; }catch(_){ }
+  }
+};
+
+window.setcaLeaveToMain = async function(){
+  try{
+    const room = String(currentRoom || 'sala-default');
+    try{
+      if(uid){
+        await set(ref(db, `rooms/${room}/users/${uid}`), null);
+      }
+    }catch(e){
+      console.warn('SALIR: no se pudo limpiar presencia', e);
+    }
+    try{ sessionStorage.removeItem('setca_access_gate_v2'); }catch(_){ }
+    try{ sessionStorage.removeItem('setca_session_start'); }catch(_){ }
+    try{ location.hash = ''; }catch(_){ }
+    const cleanUrl = String(location.pathname || '') + String(location.search || '');
+    location.href = cleanUrl || location.href.split('#')[0];
+  }catch(err){
+    console.error('SALIR handler error:', err);
+    try{
+      const cleanUrl = String(location.pathname || '') + String(location.search || '');
+      location.href = cleanUrl || location.href.split('#')[0];
+    }catch(_){
+      location.reload();
+    }
   }
 };
 
@@ -9062,8 +9787,9 @@ document.querySelectorAll('#pCmdBody .btn').forEach(btn=>{
 
   function pushSync(){
     try{
-      if(window._SETCA_SYNC && typeof window._SETCA_SYNC.push === 'function') window._SETCA_SYNC.push();
-      else if(typeof scheduleSync === 'function') scheduleSync();
+      if(typeof flushSync === 'function') flushSync();
+      else if(window._SETCA_SYNC && typeof window._SETCA_SYNC.push === 'function') window._SETCA_SYNC.push();
+      else if(typeof scheduleSync === 'function') scheduleSync(0);
     }catch(_){}
   }
   function repaintAll(){
@@ -9385,6 +10111,18 @@ function gtcRefreshIndicators(){
 
 
 let gtcMissileSeq = 0;
+function gtcNextDartName(){
+  let max = Number.isFinite(+gtcMissileSeq) ? +gtcMissileSeq : 0;
+  (Array.isArray(st.missiles) ? st.missiles : []).forEach(m=>{
+    const mm = /^DART\s*(\d+)$/i.exec(String(m && m.name || '').trim());
+    if(mm){
+      const n = parseInt(mm[1], 10);
+      if(Number.isFinite(n)) max = Math.max(max, n);
+    }
+  });
+  gtcMissileSeq = max;
+  return `DART${++gtcMissileSeq}`;
+}
 function gtcLaunchMissile(u){
   try{
     if(!u || !u.id) return;
@@ -9424,8 +10162,10 @@ function gtcLaunchMissile(u){
     }
 
     st.missiles = Array.isArray(st.missiles) ? st.missiles : [];
+    st.missileStats = __normalizeMissileStats(st.missileStats);
+    st.missileStats.dart += 1;
     const id = 'gtcm_' + Date.now().toString(36) + '_' + Math.random().toString(36).slice(2,6);
-    const name = `MIS${++gtcMissileSeq}`;
+    const name = gtcNextDartName();
 
     st.missiles.push({
       id,
@@ -9433,6 +10173,7 @@ function gtcLaunchMissile(u){
       launcher: u.id,
       launcherType: 'gtc',
       launcherName: (u.name || 'LANZA'),
+      targetName: (T.name || T.id || ''),
       tgt: T.id,
       x: +u.x||0,
       y: +u.y||0,
@@ -10456,6 +11197,756 @@ addEventListener('scroll', ()=>{ try{ hideGtcMenu(); }catch(_){} }, true);
 </script>
 
 
+
+<script type="module">
+import { getDatabase, ref, get, set } from "https://www.gstatic.com/firebasejs/10.12.3/firebase-database.js";
+
+(function(){
+  const db = getDatabase();
+  const PRESET_ROOMS = ['sala-default','alfa','bravo','charlie','delta','eco','foxtrot','golf','hotel','india','juliet'];
+  const GATE_KEY = 'setca_access_gate_v3';
+  const body = document.body;
+  const gate = document.getElementById('setcaAccessGate');
+  const roomBadge = document.getElementById('setcaGateRoomBadge');
+  const errorBox = document.getElementById('gateError');
+  const enterBtn = document.getElementById('gateEnterBtn');
+  const refreshRoomsBtn = document.getElementById('gateRefreshRooms');
+  const cancelEditBtn = document.getElementById('gateCancelEdit');
+
+  const roleSelect = document.getElementById('gateRole');
+  const callsignInput = document.getElementById('gateCallsign');
+  const joinTab = document.getElementById('gateJoinTab');
+  const createTab = document.getElementById('gateCreateTab');
+  const joinPane = document.getElementById('gateJoinPane');
+  const createPane = document.getElementById('gateCreatePane');
+  const roomsList = document.getElementById('gateRoomsList');
+  const joinPasswordInput = document.getElementById('gateJoinPassword');
+  const createRoomInput = document.getElementById('gateCreateRoom');
+  const createPasswordInput = document.getElementById('gateCreatePassword');
+
+  const stepEls = {
+    role: document.getElementById('gateStep2'),
+    callsign: document.getElementById('gateStep3'),
+    room: document.getElementById('gateStep4')
+  };
+  const hints = {
+    role: document.getElementById('gateRoleHint'),
+    callsign: document.getElementById('gateCallsignHint'),
+    join: document.getElementById('gateJoinHint'),
+    create: document.getElementById('gateCreateHint')
+  };
+
+  let roomsCache = [];
+  let gateMode = 'join';
+  let editMode = false;
+  let gateState = {
+    side: 'neutral',
+    role: '',
+    callsign: '',
+    room: '',
+    joinPassword: '',
+    createRoom: '',
+    createPassword: ''
+  };
+
+  function currentHashRoom(){
+    const h = String((location.hash || '').replace(/^#/, '').trim() || 'sala-default');
+    return h || 'sala-default';
+  }
+  function normalizeSide(v){
+    const s = String(v || '').toLowerCase();
+    if(s === 'ally' || s === 'aliado') return 'ally';
+    if(s === 'enemy' || s === 'enemigo') return 'enemy';
+    return 'neutral';
+  }
+  function roleToLabel(v){
+    return ({odi:'ODI-CO', odt:'ODT', observer:'OBSERVADOR', default:'INSTRUCTOR'})[v] || 'INSTRUCTOR';
+  }
+  function sideToLabel(v){
+    return ({ally:'ALIADO', enemy:'ENEMIGO', neutral:'NEUTRAL'})[normalizeSide(v)] || 'NEUTRAL';
+  }
+  function planeRoleToSide(role){
+    if(role === 'Friend') return 'ally';
+    if(role === 'Bandit') return 'enemy';
+    return 'neutral';
+  }
+  function entityOwnerSide(entity){
+    const raw = entity && entity.ownerSide ? normalizeSide(entity.ownerSide) : 'neutral';
+    return raw;
+  }
+  function getAccess(){
+    const a = window.__setcaAccess || {};
+    return {
+      side: 'neutral',
+      role: String(a.role || 'default'),
+      callsign: String(a.callsign || '').trim(),
+      room: String(a.room || currentHashRoom()).trim() || currentHashRoom()
+    };
+  }
+  window.__SETCA_getCurrentSide = function(){ return 'neutral'; };
+  window.__SETCA_resolveSpawnRole = function(base){
+    const raw = String(base || '').trim();
+    if(raw === 'Civilian') return 'Civilian';
+    if(raw === 'Neutral') return 'Neutral';
+    if(raw === 'Bandit' || raw === 'Friend') return raw;
+    return 'Friend';
+  };
+  function baseCanSeePlane(){
+    return true;
+  }
+  function awacsCoveragePlanes(){
+    const planes = (window.st && Array.isArray(window.st.planes)) ? window.st.planes : [];
+    return planes.filter(aw=> aw && isAwacsPlane(aw) && st.showAwacsCoverage && aw.awacsCoverage !== false);
+  }
+  function insideAwacsCoverage(p){
+    if(!p) return false;
+    const awacsList = awacsCoveragePlanes();
+    if(!awacsList.length) return false;
+    const px = Number(p.x || 0), py = Number(p.y || 0);
+    return awacsList.some(aw=>{
+      const dx = px - Number(aw.x || 0);
+      const dy = py - Number(aw.y || 0);
+      return Math.hypot(dx, dy) <= AWACS_COVERAGE_NM;
+    });
+  }
+  window.__SETCA_canSeePlane = function(p){
+    return baseCanSeePlane(p);
+  };
+  window.__SETCA_canRenderPlane = function(p){
+    if(!p) return false;
+    const awacsList = awacsCoveragePlanes();
+    if(isAwacsPlane(p)){
+      if(baseCanSeePlane(p)) return true;
+      return awacsList.length ? insideAwacsCoverage(p) : false;
+    }
+    if(awacsList.length){
+      return insideAwacsCoverage(p);
+    }
+    return baseCanSeePlane(p);
+  };
+  window.__SETCA_canSeeOwnedEntity = function(){
+    return true;
+  };
+
+  function sanitizeRoomId(v){
+    return String(v || '')
+      .trim()
+      .toLowerCase()
+      .replace(/\s+/g, '-')
+      .replace(/[^a-z0-9_-]/g, '-')
+      .replace(/-+/g, '-')
+      .replace(/^-|-$/g, '')
+      .slice(0, 28);
+  }
+  function roomLabel(id){
+    return String(id || 'sala-default').toUpperCase();
+  }
+  function safeSetGateState(patch){
+    gateState = Object.assign({}, gateState, patch || {});
+  }
+  function saveSession(access){
+    try{ sessionStorage.setItem(GATE_KEY, JSON.stringify(access)); }catch(_){ }
+  }
+  function loadSession(){
+    try{
+      const raw = sessionStorage.getItem(GATE_KEY);
+      if(!raw) return null;
+      const parsed = JSON.parse(raw);
+      if(!parsed || typeof parsed !== 'object') return null;
+      return parsed;
+    }catch(_){ return null; }
+  }
+  function clearSession(){
+    try{ sessionStorage.removeItem(GATE_KEY); }catch(_){ }
+  }
+
+  function setError(msg){
+    if(errorBox) errorBox.textContent = msg || '';
+  }
+  function setRoomBadge(room){
+    if(roomBadge) roomBadge.textContent = room ? ('SALA ' + roomLabel(room)) : 'SIN SALA';
+  }
+  function setStepState(el, status){
+    if(!el) return;
+    el.classList.remove('active','done');
+    if(status === 'active') el.classList.add('active');
+    if(status === 'done') el.classList.add('done');
+  }
+  function roomModeValid(){
+    const callsignReady = gateState.callsign.trim().length >= 2;
+    if(!callsignReady) return false;
+    if(gateMode === 'join') return !!gateState.room;
+    return sanitizeRoomId(gateState.createRoom) && gateState.createPassword.trim().length >= 1;
+  }
+  function updateGateUI(){
+    const roleReady = !!gateState.role;
+    const callsignReady = roleReady && gateState.callsign.trim().length >= 2;
+    const roomReady = roomModeValid();
+
+    setStepState(stepEls.role, roleReady ? 'done' : 'active');
+    setStepState(stepEls.callsign, !roleReady ? '' : (callsignReady ? 'done' : 'active'));
+    setStepState(stepEls.room, !callsignReady ? '' : (roomReady ? 'done' : 'active'));
+
+    roleSelect.disabled = false;
+    callsignInput.disabled = !roleReady;
+    joinTab.disabled = !callsignReady;
+    createTab.disabled = !callsignReady;
+    joinPasswordInput.disabled = !callsignReady || !gateState.room || gateMode !== 'join';
+    createRoomInput.disabled = !callsignReady || gateMode !== 'create';
+    createPasswordInput.disabled = !callsignReady || gateMode !== 'create';
+    refreshRoomsBtn.disabled = !callsignReady;
+    enterBtn.disabled = !roomReady;
+    enterBtn.classList.toggle('ready', roomReady);
+
+    hints.role.textContent = roleReady ? ('Rol elegido: ' + roleToLabel(gateState.role)) : 'Selecciona un rol para continuar.';
+    hints.callsign.textContent = roleReady ? (callsignReady ? ('Callsign listo: ' + gateState.callsign.trim()) : 'Ingresa un callsign de al menos 2 caracteres.') : 'Primero elige el rol.';
+    hints.join.textContent = callsignReady ? (gateState.room ? ('Sala elegida: ' + roomLabel(gateState.room)) : 'Selecciona una sala existente.') : 'Primero define callsign.';
+    hints.create.textContent = callsignReady ? 'Escribe nombre de sala y una clave obligatoria.' : 'Primero define callsign.';
+
+    joinTab.classList.toggle('active', gateMode === 'join');
+    createTab.classList.toggle('active', gateMode === 'create');
+    joinPane.classList.toggle('active', gateMode === 'join');
+    createPane.classList.toggle('active', gateMode === 'create');
+    setRoomBadge(gateMode === 'join' ? gateState.room : sanitizeRoomId(gateState.createRoom));
+  }
+
+  async function fetchRooms(){
+    const byId = new Map();
+    PRESET_ROOMS.forEach(id=> byId.set(id, { id, private:false, source:'preset', label:roomLabel(id) }));
+    try{
+      const snap = await get(ref(db, 'rooms_meta'));
+      const meta = snap.exists() ? (snap.val() || {}) : {};
+      Object.keys(meta).forEach(id=>{
+        const item = meta[id] || {};
+        byId.set(id, {
+          id,
+          private: !!item.private,
+          source:'custom',
+          label: String(item.name || roomLabel(id)),
+          createdAt: Number(item.createdAt || 0)
+        });
+      });
+    }catch(err){
+      console.warn('SETCA access gate: no se pudieron cargar salas', err);
+    }
+    roomsCache = Array.from(byId.values()).sort((a,b)=>{
+      const ap = PRESET_ROOMS.includes(a.id) ? 0 : 1;
+      const bp = PRESET_ROOMS.includes(b.id) ? 0 : 1;
+      if(ap !== bp) return ap - bp;
+      return String(a.id).localeCompare(String(b.id));
+    });
+    renderRooms();
+  }
+  window.fetchRooms = fetchRooms;
+
+  function renderRooms(){
+    if(!roomsList) return;
+    roomsList.innerHTML = '';
+    if(!roomsCache.length){
+      roomsList.innerHTML = '<div class="mini" style="opacity:.8">No hay salas disponibles.</div>';
+      return;
+    }
+    roomsCache.forEach(room=>{
+      const row = document.createElement('button');
+      row.type = 'button';
+      row.className = 'setca-room-item';
+      if(room.id === gateState.room) row.classList.add('active');
+      row.innerHTML = `
+        <div style="text-align:left; min-width:0;">
+          <strong>${String(room.label || roomLabel(room.id)).toUpperCase()}</strong>
+          <small>${room.private ? 'Sala privada · requiere clave' : 'Sala abierta'}</small>
+        </div>
+        <span class="setca-room-flag">${room.private ? '🔐 PRIVADA' : 'ABIERTA'}</span>
+      `;
+      row.addEventListener('click', ()=>{
+        safeSetGateState({ room: room.id });
+        setError('');
+        updateGateUI();
+        renderRooms();
+      });
+      roomsList.appendChild(row);
+    });
+  }
+
+  function buildHeaderChip(access){
+    const hdr = document.querySelector('header');
+    if(!hdr) return;
+    let chip = document.getElementById('setcaAccessChip');
+    if(!chip){
+      chip = document.createElement('div');
+      chip.id = 'setcaAccessChip';
+      hdr.appendChild(chip);
+    }
+    chip.innerHTML = `<strong>${roleToLabel(access.role)}</strong> · ${access.callsign} · ${roomLabel(access.room)}`;
+  }
+
+  function applyRoleAccess(access){
+    const mode = access.role === 'odi' ? 'odi' : access.role === 'odt' ? 'odt' : access.role === 'observer' ? 'observer' : 'default';
+    if(typeof window.__SETCA_applyRoleMode === 'function'){
+      window.__SETCA_applyRoleMode(mode);
+    }
+    const isInstructor = String(access.role || 'default') === 'default';
+    body.classList.add('setca-role-locked');
+    body.setAttribute('data-setca-role', String(access.role || 'default'));
+    const ids = ['alumnoBtn','odtBtn','observerBtn'];
+    ids.forEach(id=>{
+      const btn = document.getElementById(id);
+      if(!btn) return;
+      if(!btn.dataset.setcaTitle) btn.dataset.setcaTitle = btn.title || btn.textContent || '';
+      btn.disabled = true;
+      btn.style.opacity = '0';
+      btn.style.pointerEvents = 'none';
+      btn.style.display = 'none';
+      btn.title = 'Rol fijado al ingresar: ' + roleToLabel(access.role);
+    });
+    const salasBtn = document.getElementById('salasBtn');
+    if(salasBtn){
+      if(!salasBtn.dataset.setcaTitle) salasBtn.dataset.setcaTitle = salasBtn.title || salasBtn.textContent || '';
+      const showAccessBtn = false;
+      salasBtn.disabled = !showAccessBtn;
+      salasBtn.style.opacity = showAccessBtn ? '' : '0';
+      salasBtn.style.pointerEvents = showAccessBtn ? '' : 'none';
+      salasBtn.style.display = showAccessBtn ? '' : 'none';
+      salasBtn.title = showAccessBtn ? (salasBtn.dataset.setcaTitle || 'Cambiar acceso / sala') : 'Acceso oculto para Instructor';
+    }
+    const unitMgr = document.getElementById('pUnitMgr');
+    if(unitMgr){
+      const showUnitMgr = isInstructor;
+      unitMgr.style.display = showUnitMgr ? '' : 'none';
+    }
+  }
+
+  function visiblePlanes(basePlanes){
+    const arr = Array.isArray(basePlanes) ? basePlanes : [];
+    return arr.filter(p=> p && window.__SETCA_canRenderPlane(p));
+  }
+  function visiblePairs(basePairs, basePlanes){
+    const arr = Array.isArray(basePairs) ? basePairs : [];
+    const planeMap = new Map((Array.isArray(basePlanes) ? basePlanes : []).map(p=>[String(p.id||''), p]));
+    return arr.filter(pr=>{
+      const a = planeMap.get(String(pr && pr.a || ''));
+      const b = planeMap.get(String(pr && pr.b || ''));
+      return !!(a && b && window.__SETCA_canRenderPlane(a) && window.__SETCA_canRenderPlane(b));
+    });
+  }
+  function visibleMissiles(baseMissiles, basePlanes){
+    const arr = Array.isArray(baseMissiles) ? baseMissiles : [];
+    const planeMap = new Map((Array.isArray(basePlanes) ? basePlanes : []).map(p=>[String(p.id||''), p]));
+    return arr.filter(m=>{
+      const lp = planeMap.get(String(m && m.launcher || ''));
+      const tp = planeMap.get(String(m && m.tgt || ''));
+      const launcherVisible = !lp || window.__SETCA_canRenderPlane(lp);
+      const targetVisible = !tp || window.__SETCA_canRenderPlane(tp);
+      return launcherVisible && targetVisible;
+    });
+  }
+  function visibleOwned(arr){
+    return (Array.isArray(arr) ? arr : []).filter(x=> x && window.__SETCA_canSeeOwnedEntity(x));
+  }
+  function pruneSelection(){
+    if(!window.st) return;
+    const visible = new Set(visiblePlanes(window.st.planes).map(p=>String(p.id||'')));
+    if(Array.isArray(window.st.sel)){
+      window.st.sel = window.st.sel.filter(id=>visible.has(String(id||'')));
+    }
+  }
+  function wrapWithVisibleState(fnName){
+    const fn = window[fnName];
+    if(typeof fn !== 'function' || fn.__setcaWrapped) return;
+    const wrapped = function(){
+      if(!window.st) return fn.apply(this, arguments);
+      pruneSelection();
+      const bak = {
+        planes: window.st.planes,
+        sel: window.st.sel,
+        pairs: window.st.pairs,
+        missiles: window.st.missiles,
+        gtc: window.st.gtc
+      };
+      try{
+        window.st.planes = visiblePlanes(bak.planes);
+        window.st.sel = Array.isArray(bak.sel) ? bak.sel.filter(id=>window.st.planes.some(p=>String(p.id||'')===String(id||''))) : [];
+        window.st.pairs = visiblePairs(bak.pairs, bak.planes);
+        window.st.missiles = visibleMissiles(bak.missiles, bak.planes);
+        window.st.gtc = visibleOwned(bak.gtc);
+        return fn.apply(this, arguments);
+      } finally {
+        window.st.planes = bak.planes;
+        window.st.sel = bak.sel;
+        window.st.pairs = bak.pairs;
+        window.st.missiles = bak.missiles;
+        window.st.gtc = bak.gtc;
+      }
+    };
+    wrapped.__setcaWrapped = true;
+    window[fnName] = wrapped;
+  }
+  ['repaintPlanesList','repaintVuelos','repaintNav','repaintPairs','repaintAlt','paintAlerts','repaintGTC','repaintPairList','repaintStudent'].forEach(wrapWithVisibleState);
+
+  if(typeof window.drawPlane === 'function' && !window.drawPlane.__setcaWrapped){
+    const orig = window.drawPlane;
+    window.drawPlane = function(p){
+      if(!p || !window.__SETCA_canRenderPlane(p)) return;
+      return orig.apply(this, arguments);
+    };
+    window.drawPlane.__setcaWrapped = true;
+  }
+  if(typeof window.drawMissiles === 'function' && !window.drawMissiles.__setcaWrapped){
+    const orig = window.drawMissiles;
+    window.drawMissiles = function(){
+      if(!window.st) return orig.apply(this, arguments);
+      const bak = window.st.missiles;
+      try{
+        window.st.missiles = visibleMissiles(bak, window.st.planes);
+        return orig.apply(this, arguments);
+      } finally { window.st.missiles = bak; }
+    };
+    window.drawMissiles.__setcaWrapped = true;
+  }
+  if(typeof window.drawPairs === 'function' && !window.drawPairs.__setcaWrapped){
+    const orig = window.drawPairs;
+    window.drawPairs = function(){
+      if(!window.st) return orig.apply(this, arguments);
+      const bak = window.st.pairs;
+      try{
+        window.st.pairs = visiblePairs(bak, window.st.planes);
+        return orig.apply(this, arguments);
+      } finally { window.st.pairs = bak; }
+    };
+    window.drawPairs.__setcaWrapped = true;
+  }
+  if(typeof window.drawGTC === 'function' && !window.drawGTC.__setcaWrapped){
+    const orig = window.drawGTC;
+    window.drawGTC = function(){
+      if(!window.st) return orig.apply(this, arguments);
+      const bak = window.st.gtc;
+      try{
+        window.st.gtc = visibleOwned(bak);
+        return orig.apply(this, arguments);
+      } finally { window.st.gtc = bak; }
+    };
+    window.drawGTC.__setcaWrapped = true;
+  }
+  if(typeof window.drawShapes === 'function' && !window.drawShapes.__setcaWrapped){
+    const orig = window.drawShapes;
+    window.drawShapes = function(){
+      if(!window.st) return orig.apply(this, arguments);
+      const bak = window.st.drawings;
+      try{
+        window.st.drawings = visibleOwned(bak);
+        return orig.apply(this, arguments);
+      } finally { window.st.drawings = bak; }
+    };
+    window.drawShapes.__setcaWrapped = true;
+  }
+  if(typeof window.gtcActivePlanes === 'function' && !window.gtcActivePlanes.__setcaWrapped){
+    const orig = window.gtcActivePlanes;
+    window.gtcActivePlanes = function(){
+      const arr = orig.apply(this, arguments);
+      return visiblePlanes(arr);
+    };
+    window.gtcActivePlanes.__setcaWrapped = true;
+  }
+  if(typeof window.gtcFillPlaneSelect === 'function' && !window.gtcFillPlaneSelect.__setcaWrapped){
+    const orig = window.gtcFillPlaneSelect;
+    window.gtcFillPlaneSelect = function(sel, selectedId){
+      if(!window.st) return orig.apply(this, arguments);
+      const bak = window.st.planes;
+      try{
+        window.st.planes = visiblePlanes(bak);
+        return orig.apply(this, arguments);
+      } finally { window.st.planes = bak; }
+    };
+    window.gtcFillPlaneSelect.__setcaWrapped = true;
+  }
+  if(typeof window.findGtcAtClient === 'function' && !window.findGtcAtClient.__setcaWrapped){
+    const orig = window.findGtcAtClient;
+    window.findGtcAtClient = function(){
+      if(!window.st) return orig.apply(this, arguments);
+      const bak = window.st.gtc;
+      try{
+        window.st.gtc = visibleOwned(bak);
+        return orig.apply(this, arguments);
+      } finally { window.st.gtc = bak; }
+    };
+    window.findGtcAtClient.__setcaWrapped = true;
+  }
+
+  function refreshAfterAccess(){
+    pruneSelection();
+    try{ if(typeof window.repaintPlanesList === 'function') window.repaintPlanesList(); }catch(_){ }
+    try{ if(typeof window.repaintNav === 'function') window.repaintNav(); }catch(_){ }
+    try{ if(typeof window.repaintPairs === 'function') window.repaintPairs(); }catch(_){ }
+    try{ if(typeof window.repaintAlt === 'function') window.repaintAlt(); }catch(_){ }
+    try{ if(typeof window.repaintGTC === 'function') window.repaintGTC(); }catch(_){ }
+    try{ if(typeof window.paintAlerts === 'function') window.paintAlerts(); }catch(_){ }
+    try{ if(typeof window.repaintAll === 'function') window.repaintAll(); }catch(_){ }
+  }
+  window.__SETCA_applyAccessFilters = refreshAfterAccess;
+
+  function unlockWithAccess(access){
+    window.__setcaAccess = {
+      side: 'neutral',
+      role: String(access.role || 'default'),
+      callsign: String(access.callsign || '').trim(),
+      room: String(access.room || currentHashRoom()).trim() || currentHashRoom()
+    };
+    try{ localStorage.setItem('setca_username', window.__setcaAccess.callsign); }catch(_){ }
+    try{ window.__setcaUsername = window.__setcaAccess.callsign; }catch(_){ }
+    buildHeaderChip(window.__setcaAccess);
+    applyRoleAccess(window.__setcaAccess);
+    body.classList.remove('setca-access-locked');
+    gate.classList.remove('open');
+    gate.setAttribute('aria-hidden', 'true');
+    setError('');
+    refreshAfterAccess();
+
+    const salasBtn = document.getElementById('salasBtn');
+    if(salasBtn){
+      salasBtn.textContent = '🔐 Acceso';
+      salasBtn.title = 'Cambiar acceso / sala';
+      salasBtn.onclick = (ev)=>{ ev.preventDefault(); openGate(true, true); };
+    }
+    if(window.setcaRooms){
+      window.setcaRooms.open = ()=>openGate(true, true);
+    }
+  }
+
+  async function verifyJoinRoom(roomId, password){
+    const metaSnap = await get(ref(db, `rooms_meta/${roomId}`));
+    if(!metaSnap.exists()) return { ok:true, private:false };
+    const meta = metaSnap.val() || {};
+    if(!meta.private) return { ok:true, private:false };
+    if(String(meta.password || '') === String(password || '')) return { ok:true, private:true };
+    return { ok:false, message:'Clave incorrecta para la sala seleccionada.' };
+  }
+
+  async function createPrivateRoom(roomId, password){
+    const safeId = sanitizeRoomId(roomId);
+    if(!safeId) return { ok:false, message:'Escribe un nombre válido para la sala.' };
+    if(PRESET_ROOMS.includes(safeId)) return { ok:false, message:'Ese nombre ya está reservado. Elige otro.' };
+    const [metaSnap, roomSnap] = await Promise.all([
+      get(ref(db, `rooms_meta/${safeId}`)),
+      get(ref(db, `rooms/${safeId}`))
+    ]);
+    if(metaSnap.exists() || roomSnap.exists()) return { ok:false, message:'La sala ya existe. Elige otro nombre.' };
+    await set(ref(db, `rooms_meta/${safeId}`), {
+      name: safeId,
+      private: true,
+      password: String(password || ''),
+      createdAt: Date.now()
+    });
+    return { ok:true, room:safeId };
+  }
+
+  async function handleEnter(){
+    setError('');
+    safeSetGateState({
+      callsign: callsignInput.value.trim(),
+      joinPassword: joinPasswordInput.value,
+      createRoom: createRoomInput.value,
+      createPassword: createPasswordInput.value
+    });
+    updateGateUI();
+
+    if(!gateState.role){ setError('Debes elegir un rol.'); return; }
+    if(gateState.callsign.trim().length < 2){ setError('Debes ingresar un callsign válido.'); return; }
+
+    let chosenRoom = '';
+    if(gateMode === 'join'){
+      if(!gateState.room){ setError('Debes elegir una sala para entrar.'); return; }
+      const check = await verifyJoinRoom(gateState.room, gateState.joinPassword);
+      if(!check.ok){ setError(check.message || 'No se pudo validar la sala.'); return; }
+      chosenRoom = gateState.room;
+    }else{
+      if(!sanitizeRoomId(gateState.createRoom)){ setError('Debes escribir un nombre válido para la nueva sala.'); return; }
+      if(!gateState.createPassword.trim()){ setError('Debes definir una clave para la sala privada.'); return; }
+      const created = await createPrivateRoom(gateState.createRoom, gateState.createPassword);
+      if(!created.ok){ setError(created.message || 'No se pudo crear la sala.'); return; }
+      chosenRoom = created.room;
+    }
+
+    const access = {
+      side: 'neutral',
+      role: String(gateState.role || 'default'),
+      callsign: gateState.callsign.trim(),
+      room: chosenRoom,
+      ts: Date.now()
+    };
+    saveSession(access);
+    try{ localStorage.setItem('setca_username', access.callsign); }catch(_){ }
+    const targetHash = '#' + chosenRoom;
+    if(location.hash !== targetHash) location.hash = targetHash;
+    location.reload();
+  }
+
+  function openGate(isEdit, focusRoom){
+    editMode = !!isEdit;
+    cancelEditBtn.style.display = editMode ? '' : 'none';
+    gate.classList.add('open');
+    gate.setAttribute('aria-hidden', 'false');
+    body.classList.add('setca-access-locked');
+    if(editMode){
+      const a = getAccess();
+      safeSetGateState({
+        side: 'neutral',
+        role: a.role,
+        callsign: a.callsign,
+        room: a.room,
+        joinPassword: '',
+        createRoom: a.room,
+        createPassword: ''
+      });
+    }
+    updateGateUI();
+    if(focusRoom){
+      setTimeout(()=>{ try{ (gateMode === 'create' ? createRoomInput : joinPasswordInput).focus(); }catch(_){ } }, 60);
+    }
+  }
+  function closeGateFromEdit(){
+    if(!editMode) return;
+    gate.classList.remove('open');
+    gate.setAttribute('aria-hidden', 'true');
+    body.classList.remove('setca-access-locked');
+    setError('');
+  }
+  window.__SETCA_openAccessGate = openGate;
+
+  roleSelect.addEventListener('change', ()=>{ safeSetGateState({ role: roleSelect.value || '' }); setError(''); updateGateUI(); });
+  callsignInput.addEventListener('input', ()=>{ safeSetGateState({ callsign: callsignInput.value || '' }); updateGateUI(); });
+  joinPasswordInput.addEventListener('input', ()=>{ safeSetGateState({ joinPassword: joinPasswordInput.value || '' }); updateGateUI(); });
+  createRoomInput.addEventListener('input', ()=>{ safeSetGateState({ createRoom: createRoomInput.value || '' }); updateGateUI(); });
+  createPasswordInput.addEventListener('input', ()=>{ safeSetGateState({ createPassword: createPasswordInput.value || '' }); updateGateUI(); });
+  joinTab.addEventListener('click', ()=>{ if(joinTab.disabled) return; gateMode='join'; setError(''); updateGateUI(); });
+  createTab.addEventListener('click', ()=>{ if(createTab.disabled) return; gateMode='create'; setError(''); updateGateUI(); });
+  refreshRoomsBtn.addEventListener('click', ()=>{ fetchRooms(); });
+  enterBtn.addEventListener('click', ()=>{ handleEnter().catch(err=>{ console.error(err); setError('No se pudo completar el ingreso.'); }); });
+  cancelEditBtn.addEventListener('click', ()=>{ closeGateFromEdit(); });
+
+  addEventListener('keydown', (e)=>{
+    if(e.key !== 'Escape') return;
+    if(gate.classList.contains('open') && editMode){
+      e.preventDefault();
+      closeGateFromEdit();
+    }
+  }, true);
+
+  const saved = loadSession();
+  if(saved && String(saved.room || '') === currentHashRoom()){
+    unlockWithAccess(saved);
+  }else{
+    clearSession();
+    safeSetGateState({ side:'neutral', room: '' });
+    gate.classList.add('open');
+    gate.setAttribute('aria-hidden', 'false');
+    body.classList.add('setca-access-locked');
+  }
+
+  fetchRooms();
+  updateGateUI();
+
+  if(typeof window.setcaOff === 'function' && !window.setcaOff.__setcaWrapped){
+    const origOff = window.setcaOff;
+    window.setcaOff = async function(){
+      clearSession();
+      return origOff.apply(this, arguments);
+    };
+    window.setcaOff.__setcaWrapped = true;
+  }
+
+  window.__SETCA_leaveToMain = function(){
+    try{ clearSession(); }catch(_){ }
+    try{ sessionStorage.removeItem('setca_session_start'); }catch(_){ }
+    const cleanUrl = String(location.pathname || '') + String(location.search || '');
+    location.href = cleanUrl || location.href.split('#')[0];
+  };
+
+  setInterval(()=>{ pruneSelection(); }, 400);
+})();
+</script>
+
+<script>
+(function(){
+  const labelsBtn = document.getElementById('toggleLabels');
+  const cmdBody = document.getElementById('pCmdBody');
+  if(!labelsBtn || !cmdBody) return;
+
+  let group = document.getElementById('pCmdLabelsGroup');
+  if(!group){
+    group = document.createElement('div');
+    group.className = 'group';
+    group.id = 'pCmdLabelsGroup';
+    group.innerHTML = '<div class="group-title">Etiquetas</div><div id="pCmdLabelsWrap" class="btn-grid small"></div>';
+    cmdBody.appendChild(group);
+  }
+
+  const wrap = document.getElementById('pCmdLabelsWrap');
+  if(!wrap) return;
+  labelsBtn.classList.add('mini');
+  labelsBtn.style.marginLeft = '0';
+  labelsBtn.style.width = '100%';
+  wrap.appendChild(labelsBtn);
+})();
+</script>
+
+
+<script>
+/* === PATCH: conectividad mas fluida durante arrastre === */
+(function(){
+  if(window.__SETCA_DRAG_SYNC_PATCH__) return;
+  window.__SETCA_DRAG_SYNC_PATCH__ = true;
+  const cvs = document.getElementById('radar');
+  if(!cvs) return;
+
+  let maybeSharedDrag = false;
+  let lastSync = 0;
+
+  function canArmDrag(e){
+    return !!(e && e.button === 0 && e.altKey);
+  }
+
+  cvs.addEventListener('mousedown', (e)=>{
+    if(canArmDrag(e)) maybeSharedDrag = true;
+  }, true);
+
+  addEventListener('mousemove', ()=>{
+    if(!maybeSharedDrag) return;
+    const now = Date.now();
+    if(now - lastSync < 120) return;
+    lastSync = now;
+    try{
+      if(typeof window.scheduleSync === 'function') window.scheduleSync(0);
+      else if(window._SETCA_SYNC && typeof window._SETCA_SYNC.push === 'function') window._SETCA_SYNC.push();
+    }catch(_){}
+  }, true);
+
+  addEventListener('mouseup', ()=>{
+    if(!maybeSharedDrag) return;
+    maybeSharedDrag = false;
+    try{
+      if(typeof window.scheduleSync === 'function') window.scheduleSync(0);
+      else if(window._SETCA_SYNC && typeof window._SETCA_SYNC.push === 'function') window._SETCA_SYNC.push();
+    }catch(_){}
+  }, true);
+
+  addEventListener('blur', ()=>{ maybeSharedDrag = false; }, true);
+})();
+</script>
+
+
+<script>
+(function(){
+  try{
+    if(window.setcaRooms && typeof window.setcaRooms.refresh !== 'function'){
+      window.setcaRooms.refresh = function(){
+        try{ if(typeof window.fetchRooms === 'function') window.fetchRooms(); }catch(_){ }
+        try{ if(typeof window.repaintStudent === 'function') window.repaintStudent(); }catch(_){ }
+        return true;
+      };
+    }
+  }catch(_){ }
+})();
+</script>
 
 </body>
 </html>
