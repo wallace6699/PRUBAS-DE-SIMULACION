@@ -1,4 +1,4 @@
-ESTE SIMULADOR SE ENCUENTRA EN FASE DE PRUEBA - PUEDEN OCURRIR ERRORES DURANTE EL FUNCIONAMIENTO 2.5.2 040326
+ESTE SIMULADOR SE ENCUENTRA EN FASE DE PRUEBA - PUEDEN OCURRIR ERRORES DURANTE EL FUNCIONAMIENTO 2.3 / KEEP TRAINING
 <!DOCTYPE html>
 <html lang="es">
 <head>
@@ -26,6 +26,26 @@ document.getElementById('cancelDelete').onclick = ()=>{
 };
 
 </script>
+<script>
+(function(){
+  const GATE_KEY = 'setca_access_gate_v3';
+  function readSavedAccess(){
+    try{
+      const raw = sessionStorage.getItem(GATE_KEY);
+      if(!raw) return null;
+      const parsed = JSON.parse(raw);
+      return (parsed && typeof parsed === 'object') ? parsed : null;
+    }catch(_){ return null; }
+  }
+  window.__SETCA_readSavedAccess = readSavedAccess;
+  window.__SETCA_isPlanningMode = function(){
+    const access = readSavedAccess();
+    return !!(access && access.planning);
+  };
+  window.__SETCA_PLANNING_BOOT = !!window.__SETCA_isPlanningMode();
+})();
+</script>
+
 <script type="module">
   import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.3/firebase-app.js";
   import { getAuth, signInAnonymously, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/10.12.3/firebase-auth.js";
@@ -51,17 +71,20 @@ document.getElementById('cancelDelete').onclick = ()=>{
   }
   const ROOM_ID = getRoomId();
   const stateRef = ref(db, `rooms/${ROOM_ID}/state`);
+  const __planningMode = !!(window.__SETCA_PLANNING_BOOT || (window.__SETCA_isPlanningMode && window.__SETCA_isPlanningMode()));
   let currentUID = null;
 
-  signInAnonymously(auth).catch(console.error);
-  onAuthStateChanged(auth, (user) => {
-    if (!user) return;
-    currentUID = user.uid;
-    try{ window.currentUID = currentUID; }catch(_){ }
-    const presRef = ref(db, `rooms/${ROOM_ID}/presence/${currentUID}`);
-    set(presRef, true);
-    onDisconnect(presRef).remove();
-  });
+  if(!__planningMode){
+    signInAnonymously(auth).catch(console.error);
+    onAuthStateChanged(auth, (user) => {
+      if (!user) return;
+      currentUID = user.uid;
+      try{ window.currentUID = currentUID; }catch(_){ }
+      const presRef = ref(db, `rooms/${ROOM_ID}/presence/${currentUID}`);
+      set(presRef, true);
+      onDisconnect(presRef).remove();
+    });
+  }
 
   // Cola de envíos: evita solapar escrituras y siempre manda el último estado
   let __pushInFlight = false;
@@ -76,6 +99,7 @@ document.getElementById('cancelDelete').onclick = ()=>{
   }
 
   async function pushStateToCloud(local) {
+    if (__planningMode) return false;
     if (!local) return;
     __pushLast = local;
 
@@ -163,15 +187,18 @@ function applyCloudState(v) {
     } catch(e){ console.warn("Apply remote state error:", e); return false; }
   }
 
-  onValue(stateRef, (snap) => {
-    const v = snap.val();
-    if (!v || v.lastWriteBy === currentUID) return;
-    applyCloudState(v);
-  });
+  if(!__planningMode){
+    onValue(stateRef, (snap) => {
+      const v = snap.val();
+      if (!v || v.lastWriteBy === currentUID) return;
+      applyCloudState(v);
+    });
+  }
 
   window._SETCA_SYNC = {
-    push: () => pushStateToCloud(st),
+    push: () => __planningMode ? false : pushStateToCloud(st),
     pull: async () => {
+      if(__planningMode) return false;
       try{
         const snap = await get(stateRef);
         const v = snap.val();
@@ -183,6 +210,24 @@ function applyCloudState(v) {
       }
     }
   };
+</script>
+<script>
+(function(){
+  const __setcaNormalizeMissileStatsImpl = function(src){
+    const raw = (src && typeof src === 'object') ? src : {};
+    const aircraft = Number.isFinite(+raw.aircraft) ? Math.max(0, (+raw.aircraft|0)) : 0;
+    const dart = Number.isFinite(+raw.dart) ? Math.max(0, (+raw.dart|0)) : 0;
+    return { aircraft, dart };
+  };
+  window.__normalizeMissileStats = __setcaNormalizeMissileStatsImpl;
+  window.__SETCA_normalizeMissileStats = __setcaNormalizeMissileStatsImpl;
+})();
+function __normalizeMissileStats(src){
+  const raw = (src && typeof src === 'object') ? src : {};
+  const aircraft = Number.isFinite(+raw.aircraft) ? Math.max(0, (+raw.aircraft|0)) : 0;
+  const dart = Number.isFinite(+raw.dart) ? Math.max(0, (+raw.dart|0)) : 0;
+  return { aircraft, dart };
+}
 </script>
 
  <style>
@@ -1442,11 +1487,13 @@ body[data-setca-role="observer"] #pUnitMgr{
           <button id="toggleAwacsCov" class="btn mini focusable">📡 Cobertura AWACS: ON</button>
         </div>
 
-        <div class="btn-grid small" style="margin-top:8px">
-          <button id="exportFormBtn" class="btn mini focusable">💾 Exportar</button>
-          <button id="importFormBtn" class="btn mini focusable">📂 Cargar</button>
+        <div class="btn-grid small setca-export-import-row" style="margin-top:8px">
+          <button type="button" id="exportFormBtn" class="btn mini focusable">💾 Exportar</button>
+          <button type="button" id="loadFormBtn" class="btn mini focusable">📂 Cargar</button>
+          <button type="button" id="importFormBtn" class="btn mini focusable">📥 Importar</button>
         </div>
-        <input type="file" id="formFileInput" accept=".json" style="display:none">
+        <input type="file" id="formLoadFileInput" accept=".json" style="display:none">
+        <input type="file" id="formImportFileInput" accept=".json" style="display:none">
       </div>
     </section>
 
@@ -4791,7 +4838,7 @@ function repaintNav(){
     });
 
     // Cambios manuales en campos
-    c.querySelector('#hdg-'+id).onchange = e => { p.tgtHdg = parseFloat(e.target.value) || 0; };
+    c.querySelector('#hdg-'+id).onchange = e => { p.tgtHdg = ((parseFloat(e.target.value) || 0) % 360 + 360) % 360; repaintNav(); };
     c.querySelector('#spd-'+id).onchange = e => {
       const val = +e.target.value || 0;
       p.tgtSpd = st.metric ? val : val * KTS2KMH;
@@ -4883,10 +4930,20 @@ setInterval(()=>{ try{ repaintAlt(); }catch(e){} }, 900);
 let lastTS=0,accFPS=0,frames=0;
 function loop(ts){
   const dt=Math.max(0,(ts-lastTS)/1000); lastTS=ts;
-  if(!st.paused){ st.elapsed = performance.now() - st.t0; telTick += dt; if(telTick>5){logTel(); telTick=0;} }
+  const planningMode = !!(window.__SETCA_isPlanningMode && window.__SETCA_isPlanningMode());
+  if(!st.paused && !planningMode){ st.elapsed = performance.now() - st.t0; telTick += dt; if(telTick>5){logTel(); telTick=0;} }
   ctx.clearRect(0,0,W,H);
   drawGrid(); drawPeruMap(); drawAirports(); drawGTC();
-  if(!st.paused){ st.planes.forEach(p=>updatePlane(p,dt)); updateMissiles(dt); updatePairs(); sweepDetect(dt); }
+  if(!st.paused && !planningMode){ st.planes.forEach(p=>updatePlane(p,dt)); updateMissiles(dt); updatePairs(); sweepDetect(dt); }
+  else if(planningMode){
+    st.planes.forEach(p=>{
+      if(!p) return;
+      const nextHdg = normDeg(Number.isFinite(p.tgtHdg) ? p.tgtHdg : (p.hdg || 0));
+      p.hdg = nextHdg;
+      if(isAwacsPlane(p) && p.awacsCoverage !== false) p.awacsSweepAng = nextHdg;
+    });
+    updatePairs();
+  }
 
 // Indicador GTC (botón verde/rojo) según contacto dentro de R y H
 try{
@@ -4931,12 +4988,14 @@ requestAnimationFrame(loop);
 
 /* ===== Wire buttons ===== */
 $('#start').onclick=()=>{
+  if(window.__SETCA_isPlanningMode && window.__SETCA_isPlanningMode()) return;
   if(st.paused){
     st.paused=false; simStateEl.textContent='RUN'; stateChip.textContent='En marcha'; stateChip.style.borderColor='#2ee74f'; stateChip.style.color='#2ee74f';
     if(!st.t0) st.t0 = performance.now(); else st.t0 = performance.now() - st.elapsed;
   }
 };
 $('#pause').onclick = ()=>{
+  if(window.__SETCA_isPlanningMode && window.__SETCA_isPlanningMode()) return;
   st.paused = !st.paused; // toggle local
   const chip = document.getElementById('stateChip');
   const simst = document.getElementById('simstate');
@@ -6343,6 +6402,10 @@ requestAnimationFrame(()=>{ repaintPlanesList(); repaintNav(); repaintStudent();
 <script>
 /* === PATCH: Full missile + radar + jammer realtime sync (launch + update via Firebase) === */
 (function(){
+  if(window.__SETCA_isPlanningMode && window.__SETCA_isPlanningMode()){
+    console.log('Planning tool local mode: realtime missile/radar/jammer sync disabled.');
+    return;
+  }
   if(typeof getDatabase!=='function'||typeof ref!=='function'||typeof set!=='function'||typeof onValue!=='function'){
     console.warn('Firebase not loaded, sync patch skipped.');
     return;
@@ -6780,12 +6843,570 @@ function ensureDrawingName(d){
 <script>
 (function(){
   const exportBtn = document.getElementById('exportFormBtn');
+  const loadBtn = document.getElementById('loadFormBtn');
   const importBtn = document.getElementById('importFormBtn');
-  const fileInput = document.getElementById('formFileInput');
-  if(!exportBtn || !importBtn || !fileInput) return;
+  const loadFileInput = document.getElementById('formLoadFileInput');
+  const importFileInput = document.getElementById('formImportFileInput');
+  if(!exportBtn || !loadBtn || !importBtn || !loadFileInput || !importFileInput) return;
+
+  function isPlanningMode(){
+    return !!(window.__SETCA_isPlanningMode && window.__SETCA_isPlanningMode());
+  }
+  function cloneDeep(value){
+    try{
+      if(typeof structuredClone === 'function') return structuredClone(value);
+    }catch(_){ }
+    try{ return JSON.parse(JSON.stringify(value)); }catch(_){ return value; }
+  }
+  function makeUniqueId(used, preferred, prefix){
+    let base = String(preferred || '').trim();
+    if(!base) base = `${prefix}-${Math.random().toString(36).slice(2,8).toUpperCase()}`;
+    if(!used.has(base)){
+      used.add(base);
+      return base;
+    }
+    let n = 2;
+    let candidate = `${base}_${n}`;
+    while(used.has(candidate)){
+      n += 1;
+      candidate = `${base}_${n}`;
+    }
+    used.add(candidate);
+    return candidate;
+  }
+  function pairKey(pr){
+    const a = String(pr && pr.a || '').trim();
+    const b = String(pr && pr.b || '').trim();
+    return [a,b].sort().join('::');
+  }
+  function remapSceneForMerge(scene){
+    const src = (scene && typeof scene === 'object') ? scene : {};
+    const planeIds = new Set((Array.isArray(st.planes) ? st.planes : []).map(p=>String(p && p.id || '').trim()).filter(Boolean));
+    const gtcIds = new Set((Array.isArray(st.gtc) ? st.gtc : []).map(g=>String(g && g.id || '').trim()).filter(Boolean));
+    const drawingIds = new Set((Array.isArray(st.drawings) ? st.drawings : []).map(d=>String(d && d.id || '').trim()).filter(Boolean));
+    const missileIds = new Set((Array.isArray(st.missiles) ? st.missiles : []).map(m=>String(m && m.id || '').trim()).filter(Boolean));
+    const impactIds = new Set((Array.isArray(st.impactMarks) ? st.impactMarks : []).map(m=>String(m && m.id || '').trim()).filter(Boolean));
+    const pairKeys = new Set((Array.isArray(st.pairs) ? st.pairs : []).map(pairKey).filter(Boolean));
+
+    const planeIdMap = new Map();
+    const gtcIdMap = new Map();
+
+    const planes = (Array.isArray(src.planes) ? src.planes : []).map((plane, idx)=>{
+      const p = cloneDeep(plane || {});
+      const oldId = String(p.id || '').trim() || `IMP-PLANE-${idx+1}`;
+      const newId = makeUniqueId(planeIds, oldId, 'IMP-PLANE');
+      planeIdMap.set(oldId, newId);
+      p.id = newId;
+      if(!String(p.name || '').trim()) p.name = newId;
+      return p;
+    });
+
+    const roles = {};
+    if(src.roles && typeof src.roles === 'object'){
+      Object.keys(src.roles).forEach(oldId=>{
+        const mapped = planeIdMap.get(String(oldId)) || String(oldId || '').trim();
+        if(mapped) roles[mapped] = src.roles[oldId];
+      });
+    }
+
+    const gtc = (Array.isArray(src.gtc) ? src.gtc : []).map((unit, idx)=>{
+      const u = cloneDeep(unit || {});
+      const oldId = String(u.id || '').trim() || `GTC-IMP-${idx+1}`;
+      const newId = makeUniqueId(gtcIds, oldId, 'GTC-IMP');
+      gtcIdMap.set(oldId, newId);
+      u.id = newId;
+      if(!String(u.name || '').trim()) u.name = newId;
+      return u;
+    });
+
+    const drawings = (Array.isArray(src.drawings) ? src.drawings : []).map((drawing, idx)=>{
+      const d = cloneDeep(drawing || {});
+      d.id = makeUniqueId(drawingIds, d.id, `D-IMP-${idx+1}`);
+      return d;
+    });
+
+    const missiles = (Array.isArray(src.missiles) ? src.missiles : []).map((missile, idx)=>{
+      const m = cloneDeep(missile || {});
+      m.id = makeUniqueId(missileIds, m.id, `MS-IMP-${idx+1}`);
+      const tgtOld = String(m.tgt || '').trim();
+      const launcherOld = String(m.launcher || '').trim();
+      if(tgtOld && planeIdMap.has(tgtOld)) m.tgt = planeIdMap.get(tgtOld);
+      if(String(m.launcherType || '').toLowerCase() === 'gtc'){
+        if(launcherOld && gtcIdMap.has(launcherOld)) m.launcher = gtcIdMap.get(launcherOld);
+      }else if(launcherOld && planeIdMap.has(launcherOld)){
+        m.launcher = planeIdMap.get(launcherOld);
+      }
+      return m;
+    });
+
+    const impactMarks = (Array.isArray(src.impactMarks) ? src.impactMarks : []).map((mark, idx)=>{
+      const mk = cloneDeep(mark || {});
+      if(mk && typeof mk === 'object' && ('id' in mk || String(mk.id || '').trim())){
+        mk.id = makeUniqueId(impactIds, mk.id, `IMPACT-IMP-${idx+1}`);
+      }
+      return mk;
+    });
+
+    const pairs = [];
+    (Array.isArray(src.pairs) ? src.pairs : []).forEach(pr=>{
+      const next = cloneDeep(pr || {});
+      const aOld = String(next.a || '').trim();
+      const bOld = String(next.b || '').trim();
+      next.a = planeIdMap.get(aOld) || aOld;
+      next.b = planeIdMap.get(bOld) || bOld;
+      if(!next.a || !next.b || next.a === next.b) return;
+      const key = pairKey(next);
+      if(!key || pairKeys.has(key)) return;
+      pairKeys.add(key);
+      pairs.push(next);
+    });
+
+    return {
+      planes,
+      roles,
+      drawings,
+      gtc,
+      missiles,
+      impactMarks,
+      pairs,
+      missileStats: __normalizeMissileStats(src.missileStats || {}),
+      windKmh: Number.isFinite(+src.windKmh) ? +src.windKmh : null,
+      windDir: Number.isFinite(+src.windDir) ? +src.windDir : null,
+      metric: (typeof src.metric === 'boolean') ? src.metric : null,
+      altUnit: (src.altUnit === 'm' || src.altUnit === 'ft') ? src.altUnit : null,
+      predMin: Number.isFinite(+src.predMin) ? Math.max(0, Math.min(60, (+src.predMin|0))) : null,
+      showAwacsCoverage: (typeof src.showAwacsCoverage === 'boolean') ? !!src.showAwacsCoverage : null,
+      showLabels: (typeof src.showLabels === 'boolean') ? !!src.showLabels : null,
+      labelMode: Number.isFinite(+src.labelMode) ? Math.max(0, Math.min(3, (+src.labelMode|0))) : null,
+      mode: (typeof src.mode === 'string' && src.mode.trim()) ? String(src.mode) : null,
+      radarCenter: (src.radarCenter && typeof src.radarCenter === 'object') ? cloneDeep(src.radarCenter) : null
+    };
+  }
+  function mergeSceneIntoCurrent(scene){
+    const merged = remapSceneForMerge(scene);
+    st.planes = (Array.isArray(st.planes) ? st.planes : []).concat(merged.planes);
+    st.roles = Object.assign({}, st.roles || {}, merged.roles || {});
+    st.drawings = (Array.isArray(st.drawings) ? st.drawings : []).concat(merged.drawings);
+    st.gtc = (Array.isArray(st.gtc) ? st.gtc : []).concat(merged.gtc);
+    st.missiles = (Array.isArray(st.missiles) ? st.missiles : []).concat(merged.missiles);
+    st.impactMarks = (Array.isArray(st.impactMarks) ? st.impactMarks : []).concat(merged.impactMarks);
+    st.pairs = (Array.isArray(st.pairs) ? st.pairs : []).concat(merged.pairs);
+
+    const currentStats = __normalizeMissileStats(st.missileStats || {});
+    const importedStats = __normalizeMissileStats(merged.missileStats || {});
+    st.missileStats = __normalizeMissileStats({
+      aircraft: (+currentStats.aircraft || 0) + (+importedStats.aircraft || 0),
+      dart: (+currentStats.dart || 0) + (+importedStats.dart || 0)
+    });
+
+    if((!Number.isFinite(+st.windKmh) || +st.windKmh === 0) && merged.windKmh !== null) st.windKmh = merged.windKmh;
+    if((!Number.isFinite(+st.windDir) || +st.windDir === 0) && merged.windDir !== null) st.windDir = merged.windDir;
+    if(!st.showAwacsCoverage && typeof scene.showAwacsCoverage === 'boolean') st.showAwacsCoverage = !!scene.showAwacsCoverage;
+    if((typeof st.showLabels !== 'boolean' || st.showLabels === false) && typeof merged.showLabels === 'boolean') st.showLabels = !!merged.showLabels;
+    if((!Number.isFinite(+st.labelMode) || +st.labelMode === 0) && merged.labelMode !== null) st.labelMode = merged.labelMode;
+    if((!st.mode || st.mode === 'digital') && merged.mode) st.mode = merged.mode;
+    if((!st.radarCenter || typeof st.radarCenter !== 'object') && merged.radarCenter) st.radarCenter = cloneDeep(merged.radarCenter);
+
+    return merged;
+  }
+  function replaceScene(scene){
+    st.planes = Array.isArray(scene.planes) ? cloneDeep(scene.planes) : [];
+    st.roles = scene.roles ? cloneDeep(scene.roles) : {};
+    st.drawings = Array.isArray(scene.drawings) ? cloneDeep(scene.drawings) : [];
+    st.gtc = Array.isArray(scene.gtc) ? cloneDeep(scene.gtc) : [];
+    st.missiles = Array.isArray(scene.missiles) ? cloneDeep(scene.missiles) : [];
+    st.impactMarks = Array.isArray(scene.impactMarks) ? cloneDeep(scene.impactMarks) : [];
+    st.missileStats = __normalizeMissileStats(scene.missileStats || st.missileStats);
+    st.pairs = Array.isArray(scene.pairs) ? cloneDeep(scene.pairs) : [];
+    st.windKmh = Number.isFinite(+scene.windKmh) ? +scene.windKmh : 0;
+    st.windDir = Number.isFinite(+scene.windDir) ? +scene.windDir : 0;
+    if(typeof scene.metric === 'boolean') st.metric = scene.metric;
+    if(scene.altUnit === 'm' || scene.altUnit === 'ft') st.altUnit = scene.altUnit;
+    if(Number.isFinite(+scene.predMin)) st.predMin = Math.max(0, Math.min(60, (+scene.predMin|0)));
+    if(typeof scene.showAwacsCoverage === 'boolean') st.showAwacsCoverage = !!scene.showAwacsCoverage;
+    if(typeof scene.showLabels === 'boolean') st.showLabels = !!scene.showLabels;
+    if(Number.isFinite(+scene.labelMode)) st.labelMode = Math.max(0, Math.min(3, (+scene.labelMode|0)));
+    else if(typeof scene.showLabels === 'boolean') st.labelMode = scene.showLabels ? 0 : 2;
+    if(typeof scene.mode === 'string' && scene.mode.trim()) st.mode = String(scene.mode);
+    if(scene.radarCenter && typeof scene.radarCenter === 'object') st.radarCenter = cloneDeep(scene.radarCenter);
+  }
+  function refreshImportedScene(){
+    try{
+      const ws = document.getElementById('windSpd');
+      const wd = document.getElementById('windDir');
+      if(ws) ws.value = String(st.windKmh || 0);
+      if(wd) wd.value = String(st.windDir || 0);
+    }catch(_){ }
+
+    repaintPlanesList && repaintPlanesList();
+    repaintNav && repaintNav();
+    repaintAlt && repaintAlt();
+    repaintPairs && repaintPairs();
+    try{ repaintPairList && repaintPairList(); }catch(_){ }
+    try{ repaintVuelos && repaintVuelos(); }catch(_){ }
+    try{ repaintGTC && repaintGTC(); }catch(_){ }
+    try{ paintAlerts && paintAlerts(); }catch(_){ }
+    try{ if(window.__applyLocalTagOffsets) window.__applyLocalTagOffsets(); }catch(_){ }
+    try{ if(window.__saveLocalPrefs) window.__saveLocalPrefs(); }catch(_){ }
+    try{ if(window.__updateLocalUI) window.__updateLocalUI(); }catch(_){ }
+    try{ if(window._SETCA_SYNC && typeof window._SETCA_SYNC.push === 'function') window._SETCA_SYNC.push(); }catch(_){ }
+  }
+
+  loadBtn.title = 'Carga un JSON y reemplaza el escenario actual.';
+  importBtn.title = 'Importa un JSON y lo suma encima del escenario actual.';
+  if(isPlanningMode()){
+    loadBtn.title = 'Carga un JSON y reemplaza el escenario local actual.';
+    importBtn.title = 'Importa un JSON y lo suma al escenario local actual.';
+  }
+
+  function isDomLike(value){
+    try{
+      if(!value || typeof value !== 'object') return false;
+      if(typeof Node !== 'undefined' && value instanceof Node) return true;
+      if(typeof Window !== 'undefined' && value instanceof Window) return true;
+      if(typeof EventTarget !== 'undefined' && value instanceof EventTarget) return true;
+      if(typeof Blob !== 'undefined' && value instanceof Blob) return true;
+      if(typeof File !== 'undefined' && value instanceof File) return true;
+      return false;
+    }catch(_){
+      return false;
+    }
+  }
+  function __isPlainObject(value){
+    if(!value || typeof value !== 'object') return false;
+    try{
+      const proto = Object.getPrototypeOf(value);
+      return proto === Object.prototype || proto === null;
+    }catch(_){
+      return false;
+    }
+  }
+  function __safeExportKeys(value){
+    let keys = [];
+    try{ keys = Object.keys(value); }catch(_){ keys = []; }
+    return keys.filter((key)=>{
+      if(typeof key !== 'string') return false;
+      if(key === 'dataBlock') return false;
+      if(key[0] === '_') return false;
+      return true;
+    });
+  }
+  function __normalizeExportNode(value){
+    if(value === null) return { kind:'primitive', value:null };
+    const t = typeof value;
+    if(t === 'number') return { kind:'primitive', value:Number.isFinite(value) ? value : null };
+    if(t === 'string' || t === 'boolean') return { kind:'primitive', value:value };
+    if(t === 'bigint') return { kind:'primitive', value:String(value) };
+    if(t === 'undefined' || t === 'function' || t === 'symbol') return { kind:'skip' };
+    if(isDomLike(value)) return { kind:'skip' };
+    try{ if(value instanceof Date) return { kind:'primitive', value:value.toISOString() }; }catch(_){ }
+    try{ if(value instanceof RegExp) return { kind:'primitive', value:String(value) }; }catch(_){ }
+    try{ if(typeof ArrayBuffer !== 'undefined' && value instanceof ArrayBuffer) return { kind:'node', value:Array.from(new Uint8Array(value)) }; }catch(_){ }
+    try{ if(typeof ArrayBuffer !== 'undefined' && ArrayBuffer.isView && ArrayBuffer.isView(value)) return { kind:'node', value:Array.from(value) }; }catch(_){ }
+    try{ if(typeof Map !== 'undefined' && value instanceof Map) return { kind:'node', value:Array.from(value.entries()) }; }catch(_){ }
+    try{ if(typeof Set !== 'undefined' && value instanceof Set) return { kind:'node', value:Array.from(value.values()) }; }catch(_){ }
+    try{
+      if(typeof Error !== 'undefined' && value instanceof Error){
+        return { kind:'node', value:{ name: value.name || 'Error', message: value.message || '' } };
+      }
+    }catch(_){ }
+    if(Array.isArray(value)) return { kind:'node', value:value };
+    if(__isPlainObject(value)) return { kind:'node', value:value };
+    return { kind:'skip' };
+  }
+  function __cloneExportSafe(value){
+    const rootMeta = __normalizeExportNode(value);
+    if(rootMeta.kind === 'skip') return undefined;
+    if(rootMeta.kind === 'primitive') return rootMeta.value;
+
+    const rootSrc = rootMeta.value;
+    const rootOut = Array.isArray(rootSrc) ? [] : {};
+    const seen = new WeakSet();
+    if(rootSrc && typeof rootSrc === 'object') seen.add(rootSrc);
+    const stack = [{
+      src: rootSrc,
+      out: rootOut,
+      isArray: Array.isArray(rootSrc),
+      index: 0,
+      depth: 0,
+      keys: Array.isArray(rootSrc) ? null : __safeExportKeys(rootSrc)
+    }];
+    let visited = 0;
+    const MAX_VISITED = 500000;
+    const MAX_DEPTH = 12;
+
+    while(stack.length){
+      const frame = stack[stack.length - 1];
+      visited += 1;
+      if(visited > MAX_VISITED) throw new Error('Escenario demasiado grande para exportar.');
+
+      if(frame.isArray){
+        if(frame.index >= frame.src.length){
+          stack.pop();
+          continue;
+        }
+        let raw;
+        try{ raw = frame.src[frame.index]; }catch(_){ raw = null; }
+        frame.index += 1;
+        const meta = __normalizeExportNode(raw);
+        if(meta.kind === 'skip'){
+          frame.out.push(null);
+          continue;
+        }
+        if(meta.kind === 'primitive'){
+          frame.out.push(meta.value);
+          continue;
+        }
+        const childSrc = meta.value;
+        if(frame.depth + 1 > MAX_DEPTH){
+          frame.out.push(Array.isArray(childSrc) ? [] : {});
+          continue;
+        }
+        if(childSrc && typeof childSrc === 'object' && seen.has(childSrc)){
+          frame.out.push(null);
+          continue;
+        }
+        const childOut = Array.isArray(childSrc) ? [] : {};
+        frame.out.push(childOut);
+        if(childSrc && typeof childSrc === 'object') seen.add(childSrc);
+        stack.push({
+          src: childSrc,
+          out: childOut,
+          isArray: Array.isArray(childSrc),
+          index: 0,
+          depth: frame.depth + 1,
+          keys: Array.isArray(childSrc) ? null : __safeExportKeys(childSrc)
+        });
+        continue;
+      }
+
+      if(frame.index >= frame.keys.length){
+        stack.pop();
+        continue;
+      }
+      const key = frame.keys[frame.index++];
+      let raw;
+      try{ raw = frame.src[key]; }catch(_){ continue; }
+      const meta = __normalizeExportNode(raw);
+      if(meta.kind === 'skip') continue;
+      if(meta.kind === 'primitive'){
+        frame.out[key] = meta.value;
+        continue;
+      }
+      const childSrc = meta.value;
+      if(frame.depth + 1 > MAX_DEPTH){
+        frame.out[key] = Array.isArray(childSrc) ? [] : {};
+        continue;
+      }
+      if(childSrc && typeof childSrc === 'object' && seen.has(childSrc)) continue;
+      const childOut = Array.isArray(childSrc) ? [] : {};
+      frame.out[key] = childOut;
+      if(childSrc && typeof childSrc === 'object') seen.add(childSrc);
+      stack.push({
+        src: childSrc,
+        out: childOut,
+        isArray: Array.isArray(childSrc),
+        index: 0,
+        depth: frame.depth + 1,
+        keys: Array.isArray(childSrc) ? null : __safeExportKeys(childSrc)
+      });
+    }
+    return rootOut;
+  }
+  function __exportList(list){
+    if(!Array.isArray(list) || !list.length) return [];
+    const out = [];
+    for(let i=0;i<list.length;i++){
+      const item = __cloneExportSafe(list[i]);
+      out.push(item == null ? {} : item);
+    }
+    return out;
+  }
+  function buildSceneSnapshot(){
+    const planes = __exportList(Array.isArray(st.planes) ? st.planes : []);
+    for(let i=0;i<planes.length;i++){
+      if(planes[i] && typeof planes[i] === 'object') delete planes[i].dataBlock;
+    }
+    return {
+      planes,
+      roles: __cloneExportSafe(st.roles || {}) || {},
+      drawings: __exportList(Array.isArray(st.drawings) ? st.drawings : []),
+      gtc: __exportList(Array.isArray(st.gtc) ? st.gtc : []),
+      missiles: __exportList(Array.isArray(st.missiles) ? st.missiles : []),
+      impactMarks: __exportList(Array.isArray(st.impactMarks) ? st.impactMarks : []),
+      missileStats: __normalizeMissileStats(st.missileStats),
+      pairs: __exportList(Array.isArray(st.pairs) ? st.pairs : []),
+      windKmh: Number.isFinite(+st.windKmh) ? +st.windKmh : 0,
+      windDir: Number.isFinite(+st.windDir) ? +st.windDir : 0,
+      metric: !!st.metric,
+      altUnit: (st.altUnit === 'm') ? 'm' : 'ft',
+      predMin: Number.isFinite(+st.predMin) ? +st.predMin : 5,
+      showAwacsCoverage: !!st.showAwacsCoverage,
+      showLabels: !!st.showLabels,
+      labelMode: Number.isFinite(+st.labelMode) ? Math.max(0, Math.min(3, (+st.labelMode|0))) : 0,
+      mode: (typeof st.mode === 'string' && st.mode.trim()) ? String(st.mode) : 'digital',
+      radarCenter: __cloneExportSafe(st.radarCenter || null)
+    };
+  }
+  function buildExportPayload(){
+    return {
+      version: 'SETCA-Scenario-2.2',
+      timestamp: new Date().toISOString(),
+      planningMode: !!isPlanningMode(),
+      scene: buildSceneSnapshot()
+    };
+  }
+  function __stringifyExportJson(root){
+    if(root === null || typeof root !== 'object') return JSON.stringify(root);
+    const pieces = [];
+    const stack = [{
+      value: root,
+      isArray: Array.isArray(root),
+      started: false,
+      idx: 0,
+      keys: Array.isArray(root) ? null : Object.keys(root)
+    }];
+    while(stack.length){
+      const frame = stack[stack.length - 1];
+      if(!frame.started){
+        pieces.push(frame.isArray ? '[' : '{');
+        frame.started = true;
+      }
+      if(frame.isArray){
+        if(frame.idx >= frame.value.length){
+          pieces.push(']');
+          stack.pop();
+          continue;
+        }
+        if(frame.idx > 0) pieces.push(',');
+        const item = frame.value[frame.idx++];
+        if(item === null || typeof item !== 'object'){
+          pieces.push(JSON.stringify(item));
+          continue;
+        }
+        stack.push({
+          value: item,
+          isArray: Array.isArray(item),
+          started: false,
+          idx: 0,
+          keys: Array.isArray(item) ? null : Object.keys(item)
+        });
+        continue;
+      }
+      if(frame.idx >= frame.keys.length){
+        pieces.push('}');
+        stack.pop();
+        continue;
+      }
+      if(frame.idx > 0) pieces.push(',');
+      const key = frame.keys[frame.idx++];
+      pieces.push(JSON.stringify(key));
+      pieces.push(':');
+      const item = frame.value[key];
+      if(item === null || typeof item !== 'object'){
+        pieces.push(JSON.stringify(item));
+        continue;
+      }
+      stack.push({
+        value: item,
+        isArray: Array.isArray(item),
+        started: false,
+        idx: 0,
+        keys: Array.isArray(item) ? null : Object.keys(item)
+      });
+    }
+    return pieces.join('');
+  }
+  function buildExportJsonText(){
+    return __stringifyExportJson(buildExportPayload());
+  }
+  function triggerJsonDownload(filename, payloadText){
+    const payload = String(payloadText || '{}');
+    const blob = new Blob([payload], {type:'application/json;charset=utf-8'});
+    const safeName = String(filename || 'setca_mapa.json').replace(/\s+/g,'_').replace(/[^a-zA-Z0-9._-]/g,'_');
+    const finalName = safeName.endsWith('.json') ? safeName : (safeName + '.json');
+
+    if(window.navigator && typeof window.navigator.msSaveOrOpenBlob === 'function'){
+      window.navigator.msSaveOrOpenBlob(blob, finalName);
+      return true;
+    }
+
+    const doAnchorDownload = ()=>{
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = finalName;
+      a.style.display = 'none';
+      document.body.appendChild(a);
+      try{ a.click(); }catch(_){
+        try{ a.dispatchEvent(new MouseEvent('click', {bubbles:true,cancelable:true,view:window})); }catch(__){}
+      }
+      setTimeout(()=>{
+        try{ a.remove(); }catch(_){ }
+        try{ URL.revokeObjectURL(url); }catch(_){ }
+      }, 4000);
+      return true;
+    };
+
+    if(window.showSaveFilePicker){
+      (async()=>{
+        try{
+          const handle = await window.showSaveFilePicker({
+            suggestedName: finalName,
+            types: [{ description: 'Archivo JSON', accept: { 'application/json': ['.json'] } }]
+          });
+          const writable = await handle.createWritable();
+          await writable.write(blob);
+          await writable.close();
+          return;
+        }catch(err){
+          if(err && err.name === 'AbortError') return;
+          try{ console.warn('Fallback descarga JSON:', err); }catch(_){ }
+        }
+        doAnchorDownload();
+      })();
+      return true;
+    }
+
+    return doAnchorDownload();
+  }
+  function loadSceneFromFile(file, mode){
+    if(!file) return;
+    const reader = new FileReader();
+    reader.onload = (ev)=>{
+      try{
+        const data = JSON.parse(ev.target.result);
+        const scene = data && typeof data === 'object' && data.scene ? data.scene : data;
+        if(!scene || !Array.isArray(scene.planes)) throw new Error('Archivo inválido');
+
+        if(mode === 'merge'){
+          const merged = mergeSceneIntoCurrent(scene);
+          if(typeof scene.showAwacsCoverage === 'boolean' && !st.showAwacsCoverage) st.showAwacsCoverage = !!scene.showAwacsCoverage;
+          refreshImportedScene();
+          alert(`Mapa importado correctamente. Añadidos: ${merged.planes.length} aeronaves, ${merged.drawings.length} gráficos, ${merged.gtc.length} GTC, ${merged.pairs.length} emparejamientos y ${merged.missiles.length} misiles.`);
+          return;
+        }
+
+        replaceScene(scene);
+        if(typeof scene.showAwacsCoverage === 'boolean') st.showAwacsCoverage = !!scene.showAwacsCoverage;
+        refreshImportedScene();
+        alert('Mapa cargado correctamente.');
+      }catch(err){
+        alert('Error al cargar el archivo: '+err.message);
+      }finally{
+        try{
+          if(mode === 'merge') importFileInput.value = '';
+          else loadFileInput.value = '';
+        }catch(_){ }
+      }
+    };
+    reader.readAsText(file);
+  }
 
   // === EXPORTAR TODO EL ESCENARIO TÁCTICO ===
-  exportBtn.onclick = ()=>{
+  exportBtn.onclick = (ev)=>{
+    try{ ev && ev.preventDefault && ev.preventDefault(); }catch(_){ }
+    try{ ev && ev.stopPropagation && ev.stopPropagation(); }catch(_){ }
     const hasScenario = !!(window.st && (
       (Array.isArray(st.planes) && st.planes.length) ||
       (Array.isArray(st.drawings) && st.drawings.length) ||
@@ -6795,93 +7416,32 @@ function ensureDrawingName(d){
     ));
     if(!hasScenario){
       alert('No hay escenario para exportar.');
-      return;
+      return false;
     }
 
-    const data = {
-      version: 'SETCA-Scenario-2.0',
-      timestamp: new Date().toISOString(),
-      scene: {
-        planes: Array.isArray(st.planes) ? st.planes : [],
-        roles: st.roles || {},
-        drawings: Array.isArray(st.drawings) ? st.drawings : [],
-        gtc: Array.isArray(st.gtc) ? st.gtc : [],
-        missiles: Array.isArray(st.missiles) ? st.missiles : [],
-        impactMarks: Array.isArray(st.impactMarks) ? st.impactMarks : [],
-        missileStats: __normalizeMissileStats(st.missileStats),
-        pairs: Array.isArray(st.pairs) ? st.pairs : [],
-        windKmh: Number.isFinite(+st.windKmh) ? +st.windKmh : 0,
-        windDir: Number.isFinite(+st.windDir) ? +st.windDir : 0,
-        metric: !!st.metric,
-        altUnit: (st.altUnit === 'm') ? 'm' : 'ft',
-        predMin: Number.isFinite(+st.predMin) ? +st.predMin : 5
-      }
-    };
-
-    const blob = new Blob([JSON.stringify(data,null,2)], {type:'application/json'});
-    const a = document.createElement('a');
-    a.href = URL.createObjectURL(blob);
-    a.download = `setca_escenario_${new Date().toISOString().replace(/[:.]/g,'-')}.json`;
-    a.click();
-    setTimeout(()=>{ try{ URL.revokeObjectURL(a.href); }catch(_){ } }, 1500);
+    try{
+      const filename = `setca_mapa_${new Date().toISOString().replace(/[:.]/g,'-')}.json`;
+      const payload = buildExportJsonText();
+      triggerJsonDownload(filename, payload);
+    }catch(err){
+      try{ console.error('SETCA export error:', err); }catch(_){ }
+      alert('No se pudo exportar el mapa JSON. Detalle: ' + (err && err.message ? err.message : err));
+    }
+    return false;
   };
 
-  // === IMPORTAR ===
-  importBtn.onclick = ()=>{ fileInput.click(); };
+  // === CARGAR (REEMPLAZA) / IMPORTAR (SUMA) ===
+  loadBtn.onclick = ()=>{ loadFileInput.click(); };
+  importBtn.onclick = ()=>{ importFileInput.click(); };
 
-  fileInput.addEventListener('change', (e)=>{
+  loadFileInput.addEventListener('change', (e)=>{
     const file = e.target.files[0];
-    if(!file) return;
-    const reader = new FileReader();
-    reader.onload = (ev)=>{
-      try{
-        const data = JSON.parse(ev.target.result);
-        const scene = data && typeof data === 'object' && data.scene ? data.scene : data;
-        if(!scene || !Array.isArray(scene.planes)) throw new Error('Archivo inválido');
+    loadSceneFromFile(file, 'replace');
+  });
 
-        st.planes = Array.isArray(scene.planes) ? scene.planes : [];
-        st.roles = scene.roles || {};
-        st.drawings = Array.isArray(scene.drawings) ? scene.drawings : [];
-        st.gtc = Array.isArray(scene.gtc) ? scene.gtc : [];
-        st.missiles = Array.isArray(scene.missiles) ? scene.missiles : [];
-        st.impactMarks = Array.isArray(scene.impactMarks) ? scene.impactMarks : [];
-        st.missileStats = __normalizeMissileStats(scene.missileStats || st.missileStats);
-        st.pairs = Array.isArray(scene.pairs) ? scene.pairs : [];
-        st.windKmh = Number.isFinite(+scene.windKmh) ? +scene.windKmh : 0;
-        st.windDir = Number.isFinite(+scene.windDir) ? +scene.windDir : 0;
-
-        if(typeof scene.metric === 'boolean') st.metric = scene.metric;
-        if(scene.altUnit === 'm' || scene.altUnit === 'ft') st.altUnit = scene.altUnit;
-        if(Number.isFinite(+scene.predMin)) st.predMin = Math.max(0, Math.min(60, (+scene.predMin|0)));
-
-        try{
-          const ws = document.getElementById('windSpd');
-          const wd = document.getElementById('windDir');
-          if(ws) ws.value = String(st.windKmh || 0);
-          if(wd) wd.value = String(st.windDir || 0);
-        }catch(_){ }
-
-        repaintPlanesList && repaintPlanesList();
-        repaintNav && repaintNav();
-        repaintAlt && repaintAlt();
-        repaintPairs && repaintPairs();
-        try{ repaintPairList && repaintPairList(); }catch(_){ }
-        try{ repaintVuelos && repaintVuelos(); }catch(_){ }
-        try{ repaintGTC && repaintGTC(); }catch(_){ }
-        try{ paintAlerts && paintAlerts(); }catch(_){ }
-        try{ if(window.__applyLocalTagOffsets) window.__applyLocalTagOffsets(); }catch(_){ }
-        try{ if(window.__saveLocalPrefs) window.__saveLocalPrefs(); }catch(_){ }
-        try{ if(window.__updateLocalUI) window.__updateLocalUI(); }catch(_){ }
-        try{ if(window._SETCA_SYNC && typeof window._SETCA_SYNC.push === 'function') window._SETCA_SYNC.push(); }catch(_){ }
-
-        alert('Escenario cargado correctamente.');
-      }catch(err){
-        alert('Error al cargar el archivo: '+err.message);
-      }finally{
-        try{ fileInput.value = ''; }catch(_){ }
-      }
-    };
-    reader.readAsText(file);
+  importFileInput.addEventListener('change', (e)=>{
+    const file = e.target.files[0];
+    loadSceneFromFile(file, 'merge');
   });
 })();
 </script>
@@ -7074,10 +7634,13 @@ function ensureDrawingName(d){
 
     <div class="setca-gate-actions">
       <button type="button" id="gateRefreshRooms" class="btn mini focusable">⟳ Actualizar salas</button>
-      <div class="setca-gate-spacer"></div>
+      <div class="setca-gate-action-center">
+        <button type="button" id="gateEnterBtn" class="btn focusable">Ingresar</button>
+      </div>
+      <button type="button" id="gatePlanningBtn" class="btn focusable ghost" title="Abre el mapa en modo de planificación local, sin sincronización ni movimiento.">🗺️ Planning tool</button>
       <button type="button" id="gateCancelEdit" class="btn mini focusable" style="display:none;">Cancelar</button>
-      <button type="button" id="gateEnterBtn" class="btn focusable">Ingresar</button>
     </div>
+    <div class="setca-gate-planning-note">Modo local: permite planear, crear, exportar e importar escenarios sin sincronización, sin centro de mando, sin emparejamientos, con panel de navegación activo y con aeronaves inmóviles.</div>
   </div>
 </div>
 
@@ -7343,12 +7906,19 @@ body.setca-access-locked .app{
   margin-top: 10px;
 }
 .setca-gate-actions{
-  display:flex;
+  display:grid;
+  grid-template-columns:132px minmax(320px,1fr) 132px;
   align-items:center;
   gap:8px;
   margin-top: 10px;
   padding-top: 10px;
   border-top:1px solid rgba(90,180,110,0.2);
+}
+.setca-gate-action-center{
+  width:100%;
+  display:flex;
+  align-items:center;
+  justify-content:center;
 }
 .setca-gate-spacer{ flex:1; }
 #setcaAccessGate .ghost,
@@ -7363,13 +7933,88 @@ body.setca-access-locked .app{
   font-size:12px;
 }
 #setcaAccessGate .btn{ min-width:112px; }
-#gateEnterBtn.ready{
+#gateRefreshRooms,
+#gatePlanningBtn,
+#gateCancelEdit{
+  width:132px;
+  min-width:132px;
+}
+#gateRefreshRooms{ justify-self:start; }
+#gatePlanningBtn{
+  justify-self:end;
+  font-size:11px;
+  padding-left:10px;
+  padding-right:10px;
+}
+#gateCancelEdit{
+  grid-column:3;
+  grid-row:2;
+  justify-self:end;
+}
+#gateEnterBtn{
+  width:100%;
+  min-width:0;
+  max-width:none;
+  padding-left:18px;
+  padding-right:18px;
+}
+@media (max-width: 680px){
+  .setca-gate-actions{
+    grid-template-columns:1fr;
+  }
+  #gateRefreshRooms,
+  #gatePlanningBtn,
+  #gateCancelEdit{
+    width:100%;
+    min-width:0;
+    justify-self:stretch;
+    grid-column:auto;
+    grid-row:auto;
+  }
+  .setca-gate-action-center{
+    width:100%;
+  }
+  #gateEnterBtn{
+    width:100%;
+    min-width:0;
+  }
+}
+#gateEnterBtn.ready,
+#gatePlanningBtn.ready{
   background:rgba(255,209,102,.22)!important;
   border-color:#ffd166!important;
   color:#ffe08a!important;
   box-shadow:0 0 10px rgba(255,209,102,.18);
   font-weight:700;
 }
+.setca-gate-planning-note{
+  margin-top:8px;
+  font-size:11px;
+  line-height:1.35;
+  color:#9fd5a7;
+}
+.setca-export-import-row{
+  grid-template-columns:repeat(3,minmax(0,1fr));
+}
+body.setca-planning-mode #pCmd,
+body.setca-planning-mode #pPair,
+body.setca-planning-mode #pAlt,
+body.setca-planning-mode #pAlerts,
+body.setca-planning-mode #start,
+body.setca-planning-mode #pause,
+body.setca-planning-mode #reportPartialBtn,
+body.setca-planning-mode #salasBtn,
+body.setca-planning-mode #refreshBtn{
+  display:none !important;
+}
+body.setca-planning-mode #stateChip{
+  border-color:#ffd166 !important;
+  color:#ffd166 !important;
+}
+body.setca-planning-mode #simstate{
+  color:#ffd166 !important;
+}
+
 #setcaAccessChip{
   display:inline-flex;
   align-items:center;
@@ -7643,7 +8288,10 @@ window.setcaLeaveToMain = async function(){
       console.warn('SALIR: no se pudo limpiar presencia', e);
     }
     try{ sessionStorage.removeItem('setca_access_gate_v2'); }catch(_){ }
+    try{ sessionStorage.removeItem('setca_access_gate_v3'); }catch(_){ }
     try{ sessionStorage.removeItem('setca_session_start'); }catch(_){ }
+    try{ delete window.__setcaAccess; }catch(_){ }
+    try{ delete window.__SETCA_PLANNING_BOOT; }catch(_){ }
     try{ location.hash = ''; }catch(_){ }
     const cleanUrl = String(location.pathname || '') + String(location.search || '');
     location.href = cleanUrl || location.href.split('#')[0];
@@ -9430,22 +10078,35 @@ document.querySelectorAll('#pCmdBody .btn').forEach(btn=>{
     rs.prevDist = distNM;
 
     if(reachedNow){
-      if(idx < arr.length - 1){
-        p.routeIdx = idx + 1;
-        p.routeCompleted = false;
-        p.routeLastReached = idx;
+      const reachedWp = cloneWp(wp);
+      arr.splice(idx, 1); // consume el waypoint alcanzado para que desaparezca de la ruta
+      p.routePlan = arr;
+      p.routeCompleted = false;
+      p.routeLastReached = reachedWp && reachedWp.id ? reachedWp.id : idx;
+      p.routeLastChange = nowMs();
 
-        if(p.__routeFollowState){
-          p.__routeFollowState.idx = -1;
-          p.__routeFollowState.prevDist = NaN;
-          p.__routeFollowState.near = false;
-        }
+      if(p.__routeFollowState){
+        p.__routeFollowState.idx = -1;
+        p.__routeFollowState.prevDist = NaN;
+        p.__routeFollowState.near = false;
+      }
 
-        // al avanzar de waypoint, retomamos guiado normal salvo que el usuario siga tocando controles
-        if(Number.isFinite(p.routeManualUntil) && p.routeManualUntil < nowMs() + 500){
-          p.routeManualUntil = 0;
+      // al pasar un punto, retomamos guiado normal salvo que el usuario siga tocando controles
+      if(Number.isFinite(p.routeManualUntil) && p.routeManualUntil < nowMs() + 500){
+        p.routeManualUntil = 0;
+      }
+
+      if(arr.length){
+        const nextIdx = Math.min(idx, arr.length - 1);
+        p.routeIdx = nextIdx;
+        const nextWp = arr[nextIdx];
+        if(nextWp){
+          if(Number.isFinite(nextWp.alt)) p.tgtAlt = nextWp.alt;
+          if(Number.isFinite(nextWp.spd)) p.tgtSpd = nextWp.spd;
+          p.tgtHdg = bearingDeg(p, nextWp);
         }
       }else{
+        p.routeIdx = 0;
         p.routeEnabled = false;
         p.routeCompleted = true;
         p.routeFinishedAt = nowMs();
@@ -11211,6 +11872,7 @@ import { getDatabase, ref, get, set } from "https://www.gstatic.com/firebasejs/1
   const errorBox = document.getElementById('gateError');
   const enterBtn = document.getElementById('gateEnterBtn');
   const refreshRoomsBtn = document.getElementById('gateRefreshRooms');
+  const planningBtn = document.getElementById('gatePlanningBtn');
   const cancelEditBtn = document.getElementById('gateCancelEdit');
 
   const roleSelect = document.getElementById('gateRole');
@@ -11280,7 +11942,8 @@ import { getDatabase, ref, get, set } from "https://www.gstatic.com/firebasejs/1
       side: 'neutral',
       role: String(a.role || 'default'),
       callsign: String(a.callsign || '').trim(),
-      room: String(a.room || currentHashRoom()).trim() || currentHashRoom()
+      room: String(a.room || currentHashRoom()).trim() || currentHashRoom(),
+      planning: !!a.planning
     };
   }
   window.__SETCA_getCurrentSide = function(){ return 'neutral'; };
@@ -11395,6 +12058,10 @@ import { getDatabase, ref, get, set } from "https://www.gstatic.com/firebasejs/1
     createRoomInput.disabled = !callsignReady || gateMode !== 'create';
     createPasswordInput.disabled = !callsignReady || gateMode !== 'create';
     refreshRoomsBtn.disabled = !callsignReady;
+    if(planningBtn){
+      planningBtn.disabled = !callsignReady;
+      planningBtn.classList.toggle('ready', callsignReady);
+    }
     enterBtn.disabled = !roomReady;
     enterBtn.classList.toggle('ready', roomReady);
 
@@ -11477,17 +12144,23 @@ import { getDatabase, ref, get, set } from "https://www.gstatic.com/firebasejs/1
       chip.id = 'setcaAccessChip';
       hdr.appendChild(chip);
     }
+    if(access && access.planning){
+      chip.innerHTML = `<strong>PLANNING TOOL</strong> · ${roleToLabel(access.role)} · ${access.callsign} · LOCAL`;
+      return;
+    }
     chip.innerHTML = `<strong>${roleToLabel(access.role)}</strong> · ${access.callsign} · ${roomLabel(access.room)}`;
   }
 
   function applyRoleAccess(access){
-    const mode = access.role === 'odi' ? 'odi' : access.role === 'odt' ? 'odt' : access.role === 'observer' ? 'observer' : 'default';
+    const planning = !!(access && access.planning);
+    body.classList.toggle('setca-planning-mode', planning);
+    const mode = planning ? 'default' : (access.role === 'odi' ? 'odi' : access.role === 'odt' ? 'odt' : access.role === 'observer' ? 'observer' : 'default');
     if(typeof window.__SETCA_applyRoleMode === 'function'){
       window.__SETCA_applyRoleMode(mode);
     }
-    const isInstructor = String(access.role || 'default') === 'default';
+    const isInstructor = planning ? true : (String(access.role || 'default') === 'default');
     body.classList.add('setca-role-locked');
-    body.setAttribute('data-setca-role', String(access.role || 'default'));
+    body.setAttribute('data-setca-role', planning ? 'planning' : String(access.role || 'default'));
     const ids = ['alumnoBtn','odtBtn','observerBtn'];
     ids.forEach(id=>{
       const btn = document.getElementById(id);
@@ -11497,7 +12170,7 @@ import { getDatabase, ref, get, set } from "https://www.gstatic.com/firebasejs/1
       btn.style.opacity = '0';
       btn.style.pointerEvents = 'none';
       btn.style.display = 'none';
-      btn.title = 'Rol fijado al ingresar: ' + roleToLabel(access.role);
+      btn.title = planning ? 'Modo local de planificación activo.' : ('Rol fijado al ingresar: ' + roleToLabel(access.role));
     });
     const salasBtn = document.getElementById('salasBtn');
     if(salasBtn){
@@ -11507,12 +12180,21 @@ import { getDatabase, ref, get, set } from "https://www.gstatic.com/firebasejs/1
       salasBtn.style.opacity = showAccessBtn ? '' : '0';
       salasBtn.style.pointerEvents = showAccessBtn ? '' : 'none';
       salasBtn.style.display = showAccessBtn ? '' : 'none';
-      salasBtn.title = showAccessBtn ? (salasBtn.dataset.setcaTitle || 'Cambiar acceso / sala') : 'Acceso oculto para Instructor';
+      salasBtn.title = planning ? 'Planning tool local: sin sala ni sincronización.' : (showAccessBtn ? (salasBtn.dataset.setcaTitle || 'Cambiar acceso / sala') : 'Acceso oculto para Instructor');
     }
     const unitMgr = document.getElementById('pUnitMgr');
     if(unitMgr){
       const showUnitMgr = isInstructor;
       unitMgr.style.display = showUnitMgr ? '' : 'none';
+    }
+    if(planning){
+      try{
+        st.paused = true;
+        const chip = document.getElementById('stateChip');
+        const simst = document.getElementById('simstate');
+        if(chip) chip.textContent = 'Planning local';
+        if(simst) simst.textContent = 'PLAN';
+      }catch(_){ }
     }
   }
 
@@ -11689,7 +12371,8 @@ import { getDatabase, ref, get, set } from "https://www.gstatic.com/firebasejs/1
       side: 'neutral',
       role: String(access.role || 'default'),
       callsign: String(access.callsign || '').trim(),
-      room: String(access.room || currentHashRoom()).trim() || currentHashRoom()
+      room: String(access.room || currentHashRoom()).trim() || currentHashRoom(),
+      planning: !!access.planning
     };
     try{ localStorage.setItem('setca_username', window.__setcaAccess.callsign); }catch(_){ }
     try{ window.__setcaUsername = window.__setcaAccess.callsign; }catch(_){ }
@@ -11739,6 +12422,31 @@ import { getDatabase, ref, get, set } from "https://www.gstatic.com/firebasejs/1
     return { ok:true, room:safeId };
   }
 
+  function handlePlanningEnter(){
+    setError('');
+    safeSetGateState({
+      callsign: callsignInput.value.trim(),
+      createRoom: createRoomInput.value,
+      createPassword: createPasswordInput.value
+    });
+    updateGateUI();
+
+    if(!gateState.role){ setError('Debes elegir un rol para Planning tool.'); return; }
+    if(gateState.callsign.trim().length < 2){ setError('Debes ingresar un callsign válido para Planning tool.'); return; }
+
+    const access = {
+      side: 'neutral',
+      role: String(gateState.role || 'default'),
+      callsign: gateState.callsign.trim(),
+      room: currentHashRoom(),
+      planning: true,
+      ts: Date.now()
+    };
+    saveSession(access);
+    try{ localStorage.setItem('setca_username', access.callsign); }catch(_){ }
+    location.reload();
+  }
+
   async function handleEnter(){
     setError('');
     safeSetGateState({
@@ -11771,6 +12479,7 @@ import { getDatabase, ref, get, set } from "https://www.gstatic.com/firebasejs/1
       role: String(gateState.role || 'default'),
       callsign: gateState.callsign.trim(),
       room: chosenRoom,
+      planning: false,
       ts: Date.now()
     };
     saveSession(access);
@@ -11783,6 +12492,7 @@ import { getDatabase, ref, get, set } from "https://www.gstatic.com/firebasejs/1
   function openGate(isEdit, focusRoom){
     editMode = !!isEdit;
     cancelEditBtn.style.display = editMode ? '' : 'none';
+    if(body.classList.contains('setca-planning-mode')) body.classList.remove('setca-planning-mode');
     gate.classList.add('open');
     gate.setAttribute('aria-hidden', 'false');
     body.classList.add('setca-access-locked');
@@ -11821,6 +12531,7 @@ import { getDatabase, ref, get, set } from "https://www.gstatic.com/firebasejs/1
   createTab.addEventListener('click', ()=>{ if(createTab.disabled) return; gateMode='create'; setError(''); updateGateUI(); });
   refreshRoomsBtn.addEventListener('click', ()=>{ fetchRooms(); });
   enterBtn.addEventListener('click', ()=>{ handleEnter().catch(err=>{ console.error(err); setError('No se pudo completar el ingreso.'); }); });
+  if(planningBtn){ planningBtn.addEventListener('click', ()=>{ try{ handlePlanningEnter(); }catch(err){ console.error(err); setError('No se pudo abrir Planning tool.'); } }); }
   cancelEditBtn.addEventListener('click', ()=>{ closeGateFromEdit(); });
 
   addEventListener('keydown', (e)=>{
@@ -11832,7 +12543,7 @@ import { getDatabase, ref, get, set } from "https://www.gstatic.com/firebasejs/1
   }, true);
 
   const saved = loadSession();
-  if(saved && String(saved.room || '') === currentHashRoom()){
+  if(saved && (saved.planning || String(saved.room || '') === currentHashRoom())){
     unlockWithAccess(saved);
   }else{
     clearSession();
@@ -11856,7 +12567,11 @@ import { getDatabase, ref, get, set } from "https://www.gstatic.com/firebasejs/1
 
   window.__SETCA_leaveToMain = function(){
     try{ clearSession(); }catch(_){ }
+    try{ sessionStorage.removeItem('setca_access_gate_v2'); }catch(_){ }
+    try{ sessionStorage.removeItem('setca_access_gate_v3'); }catch(_){ }
     try{ sessionStorage.removeItem('setca_session_start'); }catch(_){ }
+    try{ delete window.__setcaAccess; }catch(_){ }
+    try{ delete window.__SETCA_PLANNING_BOOT; }catch(_){ }
     const cleanUrl = String(location.pathname || '') + String(location.search || '');
     location.href = cleanUrl || location.href.split('#')[0];
   };
