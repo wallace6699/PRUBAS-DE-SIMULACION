@@ -1,4 +1,4 @@
-ESTE SIMULADOR SE ENCUENTRA EN FASE DE PRUEBA - PUEDEN OCURRIR ERRORES DURANTE EL FUNCIONAMIENTO 2.6.2
+ESTE SIMULADOR SE ENCUENTRA EN FASE DE PRUEBA - PUEDEN OCURRIR ERRORES DURANTE EL FUNCIONAMIENTO 2.6.3
 <!DOCTYPE html>
 <html lang="es">
 <head>
@@ -42,7 +42,17 @@ document.getElementById('cancelDelete').onclick = ()=>{
     const access = readSavedAccess();
     return !!(access && access.planning);
   };
+  window.__SETCA_isFreePlayMode = function(){
+    const access = readSavedAccess();
+    return !!(access && access.freeplay);
+  };
+  window.__SETCA_isLocalOnlyMode = function(){
+    const access = readSavedAccess();
+    return !!(access && (access.planning || access.freeplay));
+  };
   window.__SETCA_PLANNING_BOOT = !!window.__SETCA_isPlanningMode();
+  window.__SETCA_FREEPLAY_BOOT = !!window.__SETCA_isFreePlayMode();
+  window.__SETCA_LOCALONLY_BOOT = !!window.__SETCA_isLocalOnlyMode();
 })();
 </script>
 
@@ -72,9 +82,11 @@ document.getElementById('cancelDelete').onclick = ()=>{
   const ROOM_ID = getRoomId();
   const stateRef = ref(db, `rooms/${ROOM_ID}/state`);
   const __planningMode = !!(window.__SETCA_PLANNING_BOOT || (window.__SETCA_isPlanningMode && window.__SETCA_isPlanningMode()));
+  const __freePlayMode = !!(window.__SETCA_FREEPLAY_BOOT || (window.__SETCA_isFreePlayMode && window.__SETCA_isFreePlayMode()));
+  const __localOnlyMode = !!(window.__SETCA_LOCALONLY_BOOT || (window.__SETCA_isLocalOnlyMode && window.__SETCA_isLocalOnlyMode()));
   let currentUID = null;
 
-  if(!__planningMode){
+  if(!__localOnlyMode){
     signInAnonymously(auth).catch(console.error);
     onAuthStateChanged(auth, (user) => {
       if (!user) return;
@@ -99,7 +111,7 @@ document.getElementById('cancelDelete').onclick = ()=>{
   }
 
   async function pushStateToCloud(local) {
-    if (__planningMode) return false;
+    if (__localOnlyMode) return false;
     if (!local) return;
     __pushLast = local;
 
@@ -342,7 +354,7 @@ let __setcaLastAppliedRemoteTs = 0;
     }, __SETCA_REMOTE_APPLY_DELAY_MS);
   }
 
-  if(!__planningMode){
+  if(!__localOnlyMode){
     onValue(stateRef, (snap) => {
       const v = snap.val();
       if (!v || v.lastWriteBy === currentUID) return;
@@ -351,10 +363,10 @@ let __setcaLastAppliedRemoteTs = 0;
   }
 
   window._SETCA_SYNC = {
-    pushNow: () => __planningMode ? false : pushStateToCloud(st),
-    push: () => __planningMode ? false : pushStateToCloud(st),
+    pushNow: () => __localOnlyMode ? false : pushStateToCloud(st),
+    push: () => __localOnlyMode ? false : pushStateToCloud(st),
     pull: async (opts={}) => {
-      if(__planningMode) return false;
+      if(__localOnlyMode) return false;
       try{
         const snap = await get(stateRef);
         const v = snap.val();
@@ -445,9 +457,35 @@ function __normalizeMissileStats(src){
   html,body{height:100%;margin:0}
   body{background:#000;color:var(--txt);font-family:Segoe UI,Tahoma,Arial,sans-serif;overflow:hidden}
   .app{display:grid;grid-template-columns:320px 1fr 360px;grid-template-rows:auto 1fr;grid-template-areas:"top top top" "left center right";gap:8px;padding:8px;height:100vh}
-  header{grid-area:top;background:linear-gradient(180deg,#0b150e,#07100a);border:1px solid var(--br);border-radius:10px;padding:8px;display:flex;align-items:center;gap:10px}
-  h1{margin:0;font-size:18px;color:var(--mut);letter-spacing:.3px}
-  .timer{margin-left:auto;background:#030; border:1px solid #164; border-radius:8px; padding:6px 10px; font-family:monospace; color:var(--warn)}
+  header{grid-area:top;background:linear-gradient(180deg,#0b150e,#07100a);border:1px solid var(--br);border-radius:10px;padding:6px 8px;display:flex;align-items:center;gap:6px}
+  h1{margin:0 6px 0 0;font-size:17px;color:var(--mut);letter-spacing:.6px;font-weight:700}
+  .timer{margin-left:auto;background:linear-gradient(180deg,#061109,#040d07); border:1px solid #1d4730; border-radius:8px; padding:5px 9px; font-family:ui-monospace,SFMono-Regular,Consolas,monospace; font-size:12px; line-height:1; color:var(--warn); box-shadow:inset 0 1px 0 rgba(255,255,255,.03)}
+  header > .btn,
+  header > button.btn,
+  header > button:not(.close){
+    min-height:30px;
+    padding:5px 9px;
+    font-size:11.5px;
+    line-height:1.05;
+    border-radius:8px;
+    border-color:#22553a;
+    background:linear-gradient(180deg,#102116,#0b1710);
+    color:#eef7ef;
+    box-shadow:inset 0 1px 0 rgba(255,255,255,.03);
+    letter-spacing:.01em;
+  }
+  header > .btn:hover,
+  header > button.btn:hover,
+  header > button:not(.close):hover{background:linear-gradient(180deg,#173220,#102218)}
+  header > .btn:active,
+  header > button.btn:active,
+  header > button:not(.close):active{transform:translateY(1px)}
+  #pause,#toggleLabels,#reportBtn,#navBtn,#reportPartialBtn{font-weight:600}
+  #reportBtn{padding-inline:8px}
+  #reportPartialBtn{padding-inline:8px}
+  header label[for="localDelaySelect"]{display:inline-flex;align-items:center;gap:6px;margin-left:2px;padding:4px 8px !important;border:1px solid #223a2c !important;border-radius:8px !important;background:linear-gradient(180deg,#0d1711,#09110d) !important;color:#d7e7dc !important;font-size:11px;line-height:1.05;white-space:nowrap}
+  header #localDelaySelect{background:#fff !important;color:#000 !important;border:1px solid #728279 !important;border-radius:7px !important;padding:3px 22px 3px 7px !important;font-size:11px;min-width:78px !important;height:24px}
+  #stateChip{padding:3px 7px;border-radius:999px;font-size:10px;line-height:1.1;letter-spacing:.04em;text-transform:uppercase}
   .panel{background:linear-gradient(180deg,var(--card),var(--card2));border:1px solid var(--br);border-radius:10px;padding:8px;display:flex;flex-direction:column;gap:8px;min-height:0}
   .panel-header{display:flex;align-items:center;gap:8px;border-bottom:1px solid #163; padding-bottom:6px}
   .panel-header h3{margin:0;font-size:15px;color:var(--mut);flex:1;text-align:center}
@@ -476,6 +514,11 @@ function __normalizeMissileStats(src){
   #observerStatsPanel .observerTypeRow strong{color:#fff6bf}
   body.observer-mode #observerStatsPanel{display:block}
   @media (max-width: 900px){
+    header > .btn,
+    header > button.btn,
+    header > button:not(.close){font-size:10.5px;padding:4px 7px;min-height:28px;}
+    header label[for="localDelaySelect"]{padding:3px 6px !important;font-size:10px;}
+    header #localDelaySelect{min-width:70px !important;font-size:10px;height:22px;}
     #observerStatsPanel{top:auto;bottom:10px;right:10px;left:10px;max-width:none;min-width:0}
     #observerStatsPanel .observerStatsControls{display:grid;grid-template-columns:repeat(2,minmax(0,1fr))}
   }
@@ -910,7 +953,8 @@ canvas#radar {
 #vuelosList .vuelosTable tbody tr[data-role="Neutral"] td:first-child,
 #vuelosList .vuelosTable tbody tr[data-role="Commercial"] td:first-child,
 #vuelosList .vuelosTable tbody tr[data-role="Boogey"] td:first-child,
-#vuelosList .vuelosTable tbody tr[data-role="Hostile"] td:first-child{
+#vuelosList .vuelosTable tbody tr[data-role="Hostile"] td:first-child,
+#vuelosList .vuelosTable tbody tr[data-role="Unknown"] td:first-child{
   border-left:none !important;
 }
 
@@ -949,11 +993,23 @@ canvas#radar {
   height:12px;
   min-width:12px;
   padding:0;
+  display:flex;
+  align-items:center;
+  justify-content:center;
   border-radius:999px !important;
   background:#d7d7d7 !important;
   border:1px solid rgba(255,255,255,0.55) !important;
   box-shadow:0 0 6px rgba(255,255,255,0.14);
   cursor:pointer;
+  font-size:11px;
+  line-height:1;
+  font-weight:900;
+  color:#111;
+}
+#vuelosList .vuelosTable .vuelosCenterDot.isUnknown{
+  border-radius:2px !important;
+  border-color:rgba(0,0,0,0.45) !important;
+  box-shadow:0 0 5px rgba(255,255,255,0.10);
 }
 #vuelosList .vuelosTable .vuelosCenterDot:hover{
   filter:brightness(1.08);
@@ -1017,6 +1073,30 @@ canvas#radar {
 }
 #vuelosList .vuelosTable .vuelosRoleSelect.roleHostile{
   color:#ff4d4d;
+}
+#vuelosList .vuelosTable .vuelosRoleSelect.roleUnknown{
+  color:#9aa0a6;
+}
+
+#vuelosList .vuelosTable .vuelosRoleSelect,
+#vuelosList .vuelosTable .vuelosRoleSelect:hover,
+#vuelosList .vuelosTable .vuelosRoleSelect:focus,
+#navCards select[id^="role-"],
+#navCards select[id^="role-"]:hover,
+#navCards select[id^="role-"]:focus,
+#setcaPlaneCtxRole,
+#setcaPlaneCtxRole:hover,
+#setcaPlaneCtxRole:focus{
+  background:#ffffff !important;
+  color:#000000 !important;
+  border:1px solid #a8a8a8 !important;
+  box-shadow:none !important;
+}
+#vuelosList .vuelosTable .vuelosRoleSelect option,
+#navCards select[id^="role-"] option,
+#setcaPlaneCtxRole option{
+  background:#ffffff !important;
+  color:#000000 !important;
 }
 #vuelosList .vuelosTable .vuelosXpdrInput{
   width:54px;
@@ -1333,103 +1413,220 @@ body[data-setca-role="observer"] #pUnitMgr{
   text-align:right;
   color:var(--mut);
 }
-/* === Relación de dibujos: simple, compacta y vertical === */
-#drawingScopePanel{
+.drawingScopeLauncher{
+  width:100%;
   margin-top:8px;
-  border:1px solid rgba(255,234,0,.18);
-  border-radius:10px;
-  background:rgba(0,0,0,.18);
-  padding:6px;
+  border:1px solid rgba(148,163,184,.26) !important;
+  background:#f8fafc !important;
+  color:#334155 !important;
+  font-weight:600;
+  letter-spacing:.01em;
+  box-shadow:none !important;
 }
-#drawingScopePanel .drawingScopeHdr{
+.drawingScopeLauncher:hover{
+  background:#ffffff !important;
+  border-color:rgba(100,116,139,.36) !important;
+}
+.drawingScopeLauncher:active{
+  transform:translateY(1px);
+}
+.drawingScopeModal{
+  position:fixed !important;
+  inset:auto !important;
+  top:76px !important;
+  left:12px !important;
+  right:auto !important;
+  bottom:14px !important;
+  width:340px !important;
+  max-width:340px !important;
+  min-width:340px !important;
+  height:auto !important;
+  max-height:calc(100vh - 92px) !important;
+  margin:0 !important;
+  padding:10px !important;
+  background:rgba(11,18,28,.72) !important;
+  color:#e5edf8 !important;
+  border:1px solid rgba(148,163,184,.20) !important;
+  border-radius:14px !important;
+  box-shadow:0 16px 34px rgba(2,8,23,.32) !important;
+  overflow:hidden !important;
+  backdrop-filter:blur(7px) saturate(115%);
+  transform:none !important;
+  z-index:1100;
+}
+#drawingScopeModal .close{
+  color:#f8fafc;
+  top:6px;
+  right:10px;
+}
+#drawingScopeModalContent{
+  height:100%;
+  display:grid;
+  grid-template-rows:auto auto minmax(0,1fr);
+  gap:8px;
+}
+#drawingScopeModalContent h2{
+  margin:0;
+  text-align:left;
+  font-size:14px;
+  letter-spacing:.06em;
+  color:#f8fafc;
+  padding-right:26px;
+}
+.drawingScopeModalToolbar{
   display:flex;
   align-items:center;
   justify-content:space-between;
-  gap:8px;
-  margin-bottom:6px;
+  gap:10px;
+  padding:7px 9px;
+  border:1px solid rgba(148,163,184,.18);
+  border-radius:10px;
+  background:rgba(15,23,42,.18);
 }
-#drawingScopePanel .drawingScopeTitle{
-  font-size:11px;
-  letter-spacing:.04em;
-  opacity:.9;
-}
-#drawingScopePanel .drawingScopeCount{
+.drawingScopeModalHint{
   font-size:10px;
-  padding:2px 7px;
+  font-weight:600;
+  color:#dbe7ff;
+  letter-spacing:.03em;
+  text-transform:uppercase;
+}
+.drawingScopeCount{
+  font-size:11px;
+  font-weight:700;
+  padding:2px 8px;
   border-radius:999px;
-  border:1px solid rgba(255,234,0,.22);
-  background:rgba(255,234,0,.08);
+  border:1px solid rgba(148,163,184,.22);
+  background:rgba(255,255,255,.16);
+  color:#f8fafc;
 }
 #drawingScopeList{
-  max-height:190px;
+  min-height:0;
   overflow:auto;
   display:flex;
   flex-direction:column;
-  gap:4px;
+  gap:6px;
+  padding:1px 2px 4px 1px;
 }
+#drawingScopeList::-webkit-scrollbar{width:8px}
+#drawingScopeList::-webkit-scrollbar-thumb{background:rgba(148,163,184,.36);border-radius:999px}
 .drawingScopeEmpty{
-  font-size:11px;
-  opacity:.72;
-  padding:6px 4px;
+  font-size:13px;
+  color:#dbe7ff;
+  padding:10px;
+  border:1px dashed rgba(148,163,184,.28);
+  border-radius:10px;
+  background:rgba(255,255,255,.10);
 }
 .drawingScopeItem{
   display:grid;
-  grid-template-columns:minmax(0,1fr) auto auto auto;
+  grid-template-columns:minmax(0,1fr) auto auto auto auto auto;
   align-items:center;
   gap:6px;
-  border:1px solid rgba(255,255,255,.08);
-  border-radius:8px;
-  padding:4px 6px;
-  background:rgba(255,255,255,.03);
+  border:1px solid rgba(148,163,184,.18);
+  border-radius:10px;
+  padding:7px 8px;
+  background:rgba(255,255,255,.16);
 }
 .drawingScopeItem:hover{
-  border-color:rgba(255,234,0,.24);
-  background:rgba(255,234,0,.05);
+  border-color:rgba(191,219,254,.34);
+  background:rgba(255,255,255,.22);
 }
 .drawingScopeItem.isSelected{
-  border-color:rgba(255,234,0,.48);
-  box-shadow:0 0 0 1px rgba(255,234,0,.18) inset;
+  border-color:rgba(245, 200, 66, .58);
+  box-shadow:0 0 0 1px rgba(245, 200, 66, .16) inset;
+  background:rgba(255,253,243,.18);
+}
+.drawingScopeItem.isHiddenLocal{
+  opacity:.68;
+}
+.drawingScopeMeta{
+  min-width:0;
+  display:flex;
+  flex-direction:column;
+  gap:2px;
+  cursor:pointer;
 }
 .drawingScopeName{
   min-width:0;
-  font-size:11px;
+  font-size:12.5px;
   line-height:1.2;
-  color:#eaffea;
+  color:#f8fafc;
   white-space:nowrap;
   overflow:hidden;
   text-overflow:ellipsis;
-  cursor:pointer;
-  padding:0 2px;
+  padding:0 1px;
+  font-weight:700;
+}
+.drawingScopeCreator{
+  min-width:0;
+  font-size:10.5px;
+  color:#dbe7ff;
+  white-space:nowrap;
+  overflow:hidden;
+  text-overflow:ellipsis;
 }
 .drawingScopeActionBtn{
   min-width:30px;
-  height:24px;
-  padding:0 6px;
-  border-radius:6px !important;
-  border:1px solid rgba(255,255,255,.14);
-  background:rgba(16,33,22,.82);
-  color:#eaffea;
-  font-size:11px;
+  height:26px;
+  padding:0 7px;
+  border-radius:7px !important;
+  border:1px solid rgba(148,163,184,.22);
+  background:rgba(255,255,255,.16);
+  color:#f8fafc;
+  font-size:12px;
   line-height:1;
   display:inline-flex;
   align-items:center;
   justify-content:center;
   cursor:pointer;
+  box-shadow:none;
 }
 .drawingScopeActionBtn:hover{
-  background:rgba(255,234,0,.10);
-  border-color:rgba(255,234,0,.28);
+  background:rgba(255,255,255,.24);
+  border-color:rgba(191,219,254,.34);
+}
+.drawingScopeHideBtn.isHidden{
+  color:#cbd5e1;
+}
+.drawingScopeScopeBtn{
+  font-size:10px;
+  font-weight:800;
+  letter-spacing:.04em;
+  min-width:56px;
+}
+.drawingScopeScopeBtn.isGlobal{
+  color:#8ef7d2;
 }
 .drawingScopeScopeBtn.isLocal{
-  color:#ffe066;
-  border-color:rgba(255,224,102,.30);
+  color:#d8b4fe;
 }
+.drawingScopeScopeBtn[disabled]{
+  opacity:.58;
+  cursor:not-allowed;
+}
+.drawingScopeGLBtn{
+  min-width:30px;
+  font-size:11px;
+  font-weight:800;
+  letter-spacing:.03em;
+}
+.drawingScopeGLBtn.isActive{
+  background:rgba(255,255,255,.30);
+  border-color:rgba(191,219,254,.42);
+  box-shadow:0 0 0 1px rgba(191,219,254,.14) inset;
+}
+.drawingScopeGLBtn.isGlobal{ color:#8ef7d2; }
+.drawingScopeGLBtn.isLocal{ color:#d8b4fe; }
 .drawingScopeDeleteBtn{
-  color:#ffb3b3;
+  color:#fecaca;
 }
-.drawingScopeDeleteBtn:hover{
-  background:rgba(255,77,77,.10);
-  border-color:rgba(255,77,77,.35);
+.drawingScopeDeleteBtn[disabled]{
+  opacity:.42;
+  cursor:not-allowed;
+}
+.drawingScopeDeleteBtn:not([disabled]):hover{
+  background:rgba(127,29,29,.22);
+  border-color:rgba(239,68,68,.28);
 }
 /* === UI order / layout polish (CMD, Dibujo) === */
 .group{
@@ -2074,6 +2271,64 @@ body[data-setca-role="observer"] #pUnitMgr{
   font:12px/1.2 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
   color:#d7ffd7;
 }
+.navPairLocalWrap{
+  display:flex;
+  flex-direction:column;
+  gap:8px;
+  margin:10px 0 6px;
+}
+.navPairLocalGroup{
+  display:flex;
+  align-items:center;
+  gap:6px;
+  flex-wrap:wrap;
+  padding:8px 10px;
+  border:1px solid rgba(46,231,79,.18);
+  border-radius:10px;
+  background:rgba(9,22,12,.55);
+}
+.navPairLocalGroup select{
+  min-width:180px;
+  height:32px;
+  border-radius:8px;
+  border:1px solid rgba(46,231,79,.28);
+  background:#fff;
+  color:#111;
+  padding:0 8px;
+}
+.navPairLocalLabel{
+  font:700 12px/1 Segoe UI, Arial, sans-serif;
+  color:#d7ffd7;
+}
+.navPairLocalHint{
+  font:11px/1.2 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  color:#96c896;
+}
+.navPairLocalList{
+  display:flex;
+  flex-wrap:wrap;
+  gap:6px;
+}
+.navPairLocalChip{
+  display:flex;
+  align-items:center;
+  gap:8px;
+  min-height:32px;
+  padding:6px 10px;
+  border-radius:999px;
+  border:1px solid rgba(127,238,255,.28);
+  background:rgba(9,22,20,.72);
+  color:#eaffff;
+  font:12px/1.15 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+}
+.navPairLocalMetric{
+  color:#8ccccc;
+}
+.navPairLocalEmpty{
+  color:#8aa98a;
+  font:12px/1.2 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  padding:2px 4px;
+}
 .nav3DViewGroup button:disabled,
 .nav3DPitchRange:disabled{
   opacity:.45;
@@ -2185,6 +2440,164 @@ body[data-setca-role="observer"] #pUnitMgr{
 </style>
 
 
+
+<style id="nav-single-sheet-overrides">
+/* ===== NAV single-sheet responsive layout ===== */
+#navReport{
+  inset:1.2vh 1.2vw !important;
+  padding:10px 12px !important;
+  overflow:hidden !important;
+}
+#navReport .close{
+  top:6px;
+  right:10px;
+  z-index:3;
+}
+#navReportContent{
+  display:grid !important;
+  grid-template-rows:auto auto auto minmax(0,1fr) auto !important;
+  gap:6px;
+  height:calc(97.6vh - 24px);
+  min-height:0;
+}
+#navReportContent h2{
+  margin:0 32px 2px 0 !important;
+  font-size:20px;
+  line-height:1.05;
+}
+.navReportToolbar{
+  margin:0 !important;
+  gap:6px !important;
+}
+.navZoomGroup,
+.navReplayGroup{
+  gap:5px !important;
+}
+.navZoomBtn,
+.navModeBtn,
+.navMiniBtn{
+  height:28px !important;
+  min-height:28px;
+}
+.navZoomBtn{ min-width:34px !important; font-size:14px !important; }
+.navModeBtn{ min-width:84px !important; padding:0 8px !important; font-size:11px !important; }
+.navMiniBtn{ min-width:34px !important; padding:0 6px !important; font-size:13px !important; }
+.navZoomReadout,
+.navReplayTime,
+.nav3DReadout{
+  min-width:auto !important;
+  font-size:11px !important;
+}
+.navReplayRange{
+  width:min(220px, 26vw) !important;
+  min-width:120px !important;
+}
+.nav3DViewGroup{
+  gap:5px !important;
+  padding:3px 6px !important;
+}
+.nav3DPitchRange{
+  width:min(160px, 18vw) !important;
+  min-width:90px !important;
+}
+.navPairLocalWrap{
+  margin:0 !important;
+  gap:4px !important;
+  min-height:0;
+}
+.navPairLocalGroup{
+  gap:5px !important;
+  padding:5px 8px !important;
+}
+.navPairLocalGroup select{
+  min-width:128px !important;
+  height:28px !important;
+  font-size:12px !important;
+}
+.navPairLocalLabel,
+.navPairLocalHint{
+  font-size:11px !important;
+}
+.navPairLocalList{
+  display:flex !important;
+  flex-wrap:nowrap !important;
+  overflow-x:auto !important;
+  overflow-y:hidden !important;
+  scrollbar-width:thin;
+  min-height:0;
+  padding-bottom:2px;
+}
+.navPairLocalChip{
+  min-height:28px !important;
+  padding:4px 8px !important;
+  white-space:nowrap;
+  flex:0 0 auto;
+}
+#navReportCanvas{
+  width:100% !important;
+  height:100% !important;
+  min-height:0 !important;
+}
+.navLegend{
+  margin-top:0 !important;
+  display:flex !important;
+  flex-wrap:nowrap !important;
+  overflow-x:auto !important;
+  overflow-y:hidden !important;
+  gap:6px !important;
+  min-height:0;
+  padding-bottom:2px;
+  scrollbar-width:thin;
+}
+.navLegendItem{
+  min-width:230px;
+  max-width:260px;
+  padding:5px 7px !important;
+  gap:6px !important;
+  flex:0 0 auto;
+}
+.navLegendSwatch{
+  width:11px !important;
+  height:11px !important;
+  flex-basis:11px !important;
+}
+.navLegendText{
+  gap:0 !important;
+}
+.navLegendName{
+  font-size:11px !important;
+}
+.navColorControl{
+  gap:4px !important;
+  flex-wrap:nowrap !important;
+}
+.navColorSelect{
+  min-width:98px !important;
+  height:24px !important;
+  font-size:11px !important;
+  padding:0 6px !important;
+}
+.navColorApplyBtn{
+  min-width:68px !important;
+  height:24px !important;
+  font-size:10px !important;
+}
+@media (max-height: 920px){
+  #navReport{ inset:.8vh .8vw !important; padding:8px 10px !important; }
+  #navReportContent{ gap:4px !important; height:calc(98.4vh - 16px); }
+  #navReportContent h2{ font-size:18px !important; }
+  .navReportToolbar{ gap:4px !important; }
+  .navPairLocalGroup{ padding:4px 6px !important; }
+  .navPairLocalHint{ display:none !important; }
+  .navLegendItem{ min-width:210px; max-width:240px; }
+}
+@media (max-width: 1100px){
+  #navReportContent{ grid-template-rows:auto auto auto minmax(0,1fr) auto !important; }
+  .navReportToolbar{ justify-content:flex-start !important; }
+  .navPairLocalGroup{ justify-content:flex-start !important; }
+}
+</style>
+
 </head>
 <body class="setca-access-locked">
 <div class="app">
@@ -2193,8 +2606,16 @@ body[data-setca-role="observer"] #pUnitMgr{
 
   <button id="start" style="display:none" class="btn focusable">▶️ Iniciar</button>
   <button id="pause" class="btn focusable">⏸️ Pausar</button>
-<button id="toggleLabels" class="btn focusable">🧷 Etiquetas</button>
-  <button id="reportBtn" class="btn focusable">📝 Reporte Táctico</button>
+  <label for="localDelaySelect" class="mini" style="display:inline-flex;align-items:center;gap:6px;margin-left:8px;padding:6px 10px;border:1px solid #2b3347;border-radius:10px;background:#101927;color:#dfe7ff;">Delay local
+    <select id="localDelaySelect" class="focusable" style="background:#fff;color:#000;border:1px solid #7f8da5;border-radius:8px;padding:4px 8px;font:inherit;min-width:92px;">
+      <option value="0">NORMAL</option>
+      <option value="1">1 s</option>
+      <option value="3">3 s</option>
+      <option value="5">5 s</option>
+    </select>
+  </label>
+<button id="toggleLabels" class="btn focusable">🧷 Etiq.</button>
+  <button id="reportBtn" class="btn focusable">📝 Rep. táctico</button>
   <button id="navBtn" class="btn focusable">🧭 NAV</button>
 
   <button
@@ -2202,7 +2623,7 @@ body[data-setca-role="observer"] #pUnitMgr{
     class="btn focusable"
     style="margin-left:10px;"
     onclick="window.open('https://wallace6699.github.io/odi-simulador-2025/reporte.html', '_blank')">
-    📄 Ver / Imprimir Informe Parcial
+    📄 Informe parcial
   </button>
 
   <span id="stateChip" class="pill">Pausada</span>
@@ -2255,6 +2676,7 @@ body[data-setca-role="observer"] #pUnitMgr{
           <button id="addHeli" class="btn mini focusable">🚁 Helicóptero</button>
           <button id="addAwacs" class="btn mini focusable">📡 AWACS</button>
           <button id="addTanker" class="btn mini focusable">⛽ Tanker</button>
+          <button id="addUnknown" class="btn mini focusable">❓ Desconocido</button>
           <button id="delLast" class="btn mini focusable">🗑️ Eliminar</button>
         </div>
 
@@ -2343,6 +2765,8 @@ body[data-setca-role="observer"] #pUnitMgr{
           <button class="btn mini tool focusable" data-tool="square">Cuadrado</button>
           <button class="btn mini tool focusable" data-tool="polygon">Polígono</button>
           <button class="btn mini tool focusable" data-tool="bullseye">Bullseye</button>
+          <button class="btn mini tool focusable" data-tool="cap_l">CAP L</button>
+          <button class="btn mini tool focusable" data-tool="cap_s">CAP S</button>
           <button class="btn mini tool focusable" data-tool="label">Etiqueta</button>
         </div>
 <div class="coord-grid">
@@ -2350,13 +2774,7 @@ body[data-setca-role="observer"] #pUnitMgr{
           <input id="coordLon" class="ghost focusable" type="text" placeholder="Lon (DMS o decimal)">
           <button id="placeLL" class="btn mini focusable">Crear (Coord)</button>
         </div>
-        <div id="drawingScopePanel" aria-label="Relación de gráficos">
-          <div class="drawingScopeHdr">
-            <span class="drawingScopeTitle">Relación de gráficos</span>
-            <span id="drawingScopeCount" class="drawingScopeCount">0</span>
-          </div>
-          <div id="drawingScopeList"></div>
-        </div>
+        <button id="drawingScopeOpenBtn" class="btn mini focusable drawingScopeLauncher" type="button" title="Abrir relación de gráficos">Relación de gráficos</button>
 
       </div>
     </section>
@@ -2405,7 +2823,8 @@ body[data-setca-role="observer"] #pUnitMgr{
 
 <!-- Reporte -->
 <div id="report" class="modal"><span id="closeReport" class="close">&times;</span><div id="reportContent"></div></div>
-<div id="navReport" class="modal"><span id="closeNavReport" class="close">&times;</span><div id="navReportContent"><h2>ANALISIS DE NAVEGACIONES</h2><div class="navReportToolbar"><div class="navZoomGroup"><button id="navZoomOut" class="navZoomBtn" type="button" title="Alejar">−</button><div id="navZoomReadout" class="navZoomReadout">100%</div><button id="navZoomIn" class="navZoomBtn" type="button" title="Acercar">+</button><button id="navZoomReset" class="navZoomBtn" type="button" title="Restablecer vista">Reset</button></div><div class="navReplayGroup"><button id="navMeasureToggle" class="navModeBtn" type="button" title="Usar regla local en NAV">📏 Regla</button><button id="nav3DToggle" class="navModeBtn" type="button" title="Ver perfil de vuelo 3D local">🧱 3D</button><div class="nav3DViewGroup"><button id="nav3DRotateLeft" class="navMiniBtn" type="button" title="Rotar vista 3D a la izquierda">◀</button><input id="nav3DPitch" class="nav3DPitchRange" type="range" min="0" max="89" step="1" value="58" aria-label="Ángulo de vista 3D"><div id="nav3DReadout" class="nav3DReadout">3D 58°</div><button id="nav3DRotateRight" class="navMiniBtn" type="button" title="Rotar vista 3D a la derecha">▶</button></div><button id="navReplayToggle" class="navModeBtn" type="button" title="Activar replay local">⏯ Replay</button><button id="navReplayBack" class="navMiniBtn" type="button" title="Retroceder 5 segundos">⏪</button><button id="navReplayPlay" class="navMiniBtn" type="button" title="Reproducir / pausar replay">▶</button><button id="navReplayFwd" class="navMiniBtn" type="button" title="Avanzar 5 segundos">⏩</button><input id="navReplayRange" class="navReplayRange" type="range" min="0" max="1000" step="1" value="1000" aria-label="Replay local NAV"><div id="navReplayTime" class="navReplayTime">LIVE</div></div></div><div id="navReportMeta" class="navReportMeta"></div><canvas id="navReportCanvas"></canvas><div id="navLegend" class="navLegend"></div></div></div>
+<div id="navReport" class="modal"><span id="closeNavReport" class="close">&times;</span><div id="navReportContent"><h2>ANALISIS DE NAVEGACIONES</h2><div class="navReportToolbar"><div class="navZoomGroup"><button id="navZoomOut" class="navZoomBtn" type="button" title="Alejar">−</button><div id="navZoomReadout" class="navZoomReadout">100%</div><button id="navZoomIn" class="navZoomBtn" type="button" title="Acercar">+</button><button id="navZoomReset" class="navZoomBtn" type="button" title="Restablecer vista">Reset</button></div><div class="navReplayGroup"><button id="navMeasureToggle" class="navModeBtn" type="button" title="Usar regla local en NAV">📏 Regla</button><button id="nav3DToggle" class="navModeBtn" type="button" title="Ver perfil de vuelo 3D local">🧱 3D</button><div class="nav3DViewGroup"><input id="nav3DPitch" class="nav3DPitchRange" type="range" min="0" max="89" step="1" value="58" aria-label="Ángulo de vista 3D"><div id="nav3DReadout" class="nav3DReadout">3D 58°</div></div><button id="navReplayToggle" class="navModeBtn" type="button" title="Activar replay local">⏯ Replay</button><button id="navReplayBack" class="navMiniBtn" type="button" title="Retroceder 5 segundos">⏪</button><button id="navReplayPlay" class="navMiniBtn" type="button" title="Reproducir / pausar replay">▶</button><button id="navReplayFwd" class="navMiniBtn" type="button" title="Avanzar 5 segundos">⏩</button><input id="navReplayRange" class="navReplayRange" type="range" min="0" max="1000" step="1" value="1000" aria-label="Replay local NAV"><div id="navReplayTime" class="navReplayTime">LIVE</div></div></div><div class="navPairLocalWrap"><div class="navPairLocalGroup"><span class="navPairLocalLabel">Pareo local NAV</span><select id="navPairLocalA" aria-label="Aeronave A para pareo local"></select><select id="navPairLocalB" aria-label="Aeronave B para pareo local"></select><button id="navPairLocalAdd" class="navModeBtn" type="button" title="Agregar pareo local para análisis">PAREAR</button><button id="navPairLocalClear" class="navMiniBtn" type="button" title="Limpiar todos los pareos locales">✕</button><span class="navPairLocalHint">Solo local · no sincroniza · en 3D usa SHIFT + click-drag para mover la vista</span></div><div id="navPairLocalList" class="navPairLocalList"></div></div><div id="navReportMeta" class="navReportMeta"></div><canvas id="navReportCanvas"></canvas><div id="navLegend" class="navLegend"></div></div></div>
+<div id="drawingScopeModal" class="modal drawingScopeModal" aria-hidden="true"><span id="closeDrawingScopeModal" class="close">&times;</span><div id="drawingScopeModalContent"><h2>RELACIÓN DE GRÁFICOS</h2><div class="drawingScopeModalToolbar"><span class="drawingScopeModalHint">Costado izquierdo · mapa visible</span><span id="drawingScopeCount" class="drawingScopeCount">0</span></div><div id="drawingScopeList" class="drawingScopeModalList" aria-label="Listado de gráficos"></div></div></div>
 
 <script>
 /* ===== Utils ===== */
@@ -2704,7 +3123,10 @@ let st={
   altUnit:'ft',
   pairs:[],
   radarFail:false,
-  showAwacsCoverage:true
+  showAwacsCoverage:true,
+  localDisplayDelaySec:0,
+  localDelaySnapshot:null,
+  localDelaySnapshotAt:0
 };
 
 /* ===== LOCAL ONLY: Unidades + Predicción + Data Block offsets (NO se sincroniza) ===== */
@@ -2813,6 +3235,7 @@ window.__saveLocalPrefs = ()=>{
   __localPrefs.predMin = Math.max(0, Math.min(60, (st.predMin|0)));
   __localPrefs.mode = (st.mode || 'digital');
   __localPrefs.showAwacsCoverage = !!st.showAwacsCoverage;
+  __localPrefs.localDisplayDelaySec = [0,1,3,5].includes(Number(st.localDisplayDelaySec)) ? Number(st.localDisplayDelaySec) : 0;
   if(typeof __NAV_STORE !== 'undefined' && __NAV_STORE){
     __localPrefs.navZoom = Math.max(1, Math.min(40, Number.isFinite(+(__NAV_STORE.view && __NAV_STORE.view.zoom)) ? +__NAV_STORE.view.zoom : 1));
     __localPrefs.navPanX = Number.isFinite(+(__NAV_STORE.view && __NAV_STORE.view.panX)) ? +__NAV_STORE.view.panX : 0;
@@ -2849,6 +3272,15 @@ window.__updateLocalUI = ()=>{
     aw.textContent = `📡 Cobertura AWACS: ${on ? 'ON' : 'OFF'}`;
     aw.title = on ? 'Apagar halo de cobertura AWACS' : 'Encender halo de cobertura AWACS';
   }
+
+  const delaySel = document.getElementById('localDelaySelect');
+  if(delaySel){
+    const delayVal = [0,1,3,5].includes(Number(st.localDisplayDelaySec)) ? Number(st.localDisplayDelaySec) : 0;
+    if(String(delaySel.value) !== String(delayVal)) delaySel.value = String(delayVal);
+    delaySel.title = delayVal > 0
+      ? `Actualiza esta vista local por saltos cada ${delayVal} segundo${delayVal===1?'':'s'}`
+      : 'Actualización continua local';
+  }
 };
 
 // Aplicar preferencias locales al iniciar (antes de que se pinten los paneles)
@@ -2858,6 +3290,7 @@ window.__updateLocalUI = ()=>{
   if(Number.isFinite(__localPrefs.predMin)) st.predMin = Math.max(0, Math.min(60, (__localPrefs.predMin|0)));
   if(typeof __localPrefs.mode === 'string' && __localPrefs.mode) st.mode = __localPrefs.mode;
   if(typeof __localPrefs.showAwacsCoverage === 'boolean') st.showAwacsCoverage = __localPrefs.showAwacsCoverage;
+  if([0,1,3,5].includes(Number(__localPrefs.localDisplayDelaySec))) st.localDisplayDelaySec = Number(__localPrefs.localDisplayDelaySec);
   if(window.__hydrateLocalDrawingsIntoState) window.__hydrateLocalDrawingsIntoState();
 })();
 window.addEventListener('DOMContentLoaded', ()=>{
@@ -2897,12 +3330,13 @@ const __NAV_STORE = {
     speed:1,
     lastFrameAt:0
   },
+  localPairs: [],
   profile3d: {
     enabled:false,
     altFtPerNm:6000,
     pitchDeg:58,
-    yawDeg:-22,
-    depthShear:0.18,
+    yawDeg:0,
+    depthShear:0,
     liftBoost:1.15
   }
 };
@@ -3038,10 +3472,10 @@ function __navIs3DEnabled(){
 function __navGet3DConfig(){
   const cfg = (__NAV_STORE && __NAV_STORE.profile3d) || {};
   const pitchDeg = Math.max(0.5, Math.min(89, Number.isFinite(+cfg.pitchDeg) ? +cfg.pitchDeg : 58));
-  const yawDeg = (((Number.isFinite(+cfg.yawDeg) ? +cfg.yawDeg : -22) + 540) % 360) - 180;
+  const yawDeg = 0;
   const pitchRad = pitchDeg * Math.PI / 180;
   const yawRad = yawDeg * Math.PI / 180;
-  const depthShear = Math.max(-0.7, Math.min(0.7, Number.isFinite(+cfg.depthShear) ? +cfg.depthShear : 0.18));
+  const depthShear = 0;
   const liftBoost = Math.max(0.6, Math.min(2.4, Number.isFinite(+cfg.liftBoost) ? +cfg.liftBoost : 1.15));
   const topBlend = Math.sin(pitchRad);
   const sideBlend = Math.cos(pitchRad);
@@ -3124,14 +3558,12 @@ function __navNudge3DYaw(deltaDeg, rerender=true){
 function __navDescribe3DView(){
   const cfg = __navGet3DConfig();
   const pitch = Math.round(cfg.pitchDeg);
-  const yaw = Math.round(cfg.yawDeg);
   let verticalLabel = 'Mixto';
   if(pitch <= 6) verticalLabel = 'Costado extremo';
   else if(pitch <= 16) verticalLabel = 'Costado';
   else if(pitch <= 30) verticalLabel = 'Semi-costado';
   else if(pitch >= 72) verticalLabel = 'Arriba';
-  const sideLabel = yaw < -8 ? 'izq' : (yaw > 8 ? 'der' : 'centro');
-  return `${verticalLabel} ${pitch}° · ${sideLabel}`;
+  return `${verticalLabel} ${pitch}°`;
 }
 function __navFormatAltLabel(ft){
   const v = Math.max(0, Number.isFinite(+ft) ? +ft : 0);
@@ -3198,6 +3630,34 @@ function __captureLocalPauseSnapshot(){
 function __clearLocalPauseSnapshot(){
   st.pauseSnapshot = null;
   st.pauseSnapshotAt = 0;
+}
+function __captureLocalDelaySnapshot(){
+  const snap = __clonePlain(st);
+  if(!snap) return;
+  snap.localPause = false;
+  snap.pauseSnapshot = null;
+  snap.pauseSnapshotAt = 0;
+  snap.localDelaySnapshot = null;
+  snap.localDelaySnapshotAt = 0;
+  snap.localDisplayDelaySec = 0;
+  st.localDelaySnapshot = snap;
+  st.localDelaySnapshotAt = performance.now();
+}
+function __clearLocalDelaySnapshot(){
+  st.localDelaySnapshot = null;
+  st.localDelaySnapshotAt = 0;
+}
+function __refreshLocalDelaySnapshot(force){
+  const sec = [0,1,3,5].includes(Number(st.localDisplayDelaySec)) ? Number(st.localDisplayDelaySec) : 0;
+  if(sec <= 0){
+    __clearLocalDelaySnapshot();
+    return;
+  }
+  const now = performance.now();
+  const wait = sec * 1000;
+  if(force || !st.localDelaySnapshot || !Number.isFinite(st.localDelaySnapshotAt) || (now - st.localDelaySnapshotAt) >= wait){
+    __captureLocalDelaySnapshot();
+  }
 }
 function __setLocalPauseUI(){
   if(window.__SETCA_isPlanningMode && window.__SETCA_isPlanningMode()) return;
@@ -3368,8 +3828,6 @@ function __navUpdateReplayUI(){
   const mode3dBtn = document.getElementById('nav3DToggle');
   const pitchRange = document.getElementById('nav3DPitch');
   const pitchReadout = document.getElementById('nav3DReadout');
-  const rotateLeftBtn = document.getElementById('nav3DRotateLeft');
-  const rotateRightBtn = document.getElementById('nav3DRotateRight');
   const mode3d = __navIs3DEnabled();
   const cfg3d = __navGet3DConfig();
   if(measureBtn){
@@ -3388,9 +3846,7 @@ function __navUpdateReplayUI(){
     pitchRange.disabled = !mode3d;
     pitchRange.title = 'Ángulo 3D: muy bajo = casi de costado, alto = vista desde arriba';
   }
-  if(pitchReadout) pitchReadout.textContent = `3D ${__navDescribe3DView()}`;
-  if(rotateLeftBtn) rotateLeftBtn.disabled = !mode3d;
-  if(rotateRightBtn) rotateRightBtn.disabled = !mode3d;
+  if(pitchReadout) pitchReadout.textContent = mode3d ? `3D ${__navDescribe3DView()} · SHIFT+drag` : `3D ${__navDescribe3DView()}`;
   if(!bounds){
     if(range){ range.min = '0'; range.max = '1000'; range.value = '1000'; }
     if(time) time.textContent = mode3d ? 'LIVE · 3D' : 'LIVE';
@@ -3419,10 +3875,10 @@ function __navUpdateReplayUI(){
   }
 }
 function __navSet3DEnabled(enabled){
-  if(!__NAV_STORE.profile3d) __NAV_STORE.profile3d = { enabled:false, altFtPerNm:6000, pitchDeg:58, yawDeg:-22, depthShear:0.18, liftBoost:1.15 };
+  if(!__NAV_STORE.profile3d) __NAV_STORE.profile3d = { enabled:false, altFtPerNm:6000, pitchDeg:58, yawDeg:0, depthShear:0, liftBoost:1.15 };
   __NAV_STORE.profile3d.enabled = !!enabled;
   if(enabled && !Number.isFinite(+__NAV_STORE.profile3d.pitchDeg)) __NAV_STORE.profile3d.pitchDeg = 58;
-  if(enabled && !Number.isFinite(+__NAV_STORE.profile3d.yawDeg)) __NAV_STORE.profile3d.yawDeg = -22;
+  if(enabled) __NAV_STORE.profile3d.yawDeg = 0;
   if(enabled && __NAV_STORE.measure){
     __NAV_STORE.measure.enabled = false;
     __NAV_STORE.measure.dragging = false;
@@ -3622,6 +4078,102 @@ function __navCenterOnTrack(trackId, rerender=true){
   if(rerender && typeof renderNavReport === 'function') renderNavReport();
   return true;
 }
+
+function __navLocalPairKey(a, b){
+  const ids = [String(a || '').trim(), String(b || '').trim()].filter(Boolean).sort();
+  return ids.length === 2 ? ids.join('::') : '';
+}
+function __navLocalPairMetrics(aTrack, bTrack){
+  const A = aTrack && aTrack.current;
+  const B = bTrack && bTrack.current;
+  if(!A || !B) return 'sin datos';
+  const dx = (+B.x || 0) - (+A.x || 0);
+  const dy = (+B.y || 0) - (+A.y || 0);
+  const dNM = Math.hypot(dx, dy);
+  const dAlt = Math.abs((+B.alt || 0) - (+A.alt || 0));
+  return `${dNM.toFixed(1)} NM · ΔAlt ${Math.round(dAlt)} ft`;
+}
+function __navNormalizeLocalPairs(validIds=null){
+  const allow = validIds instanceof Set ? validIds : null;
+  const next = [];
+  const seen = new Set();
+  (Array.isArray(__NAV_STORE.localPairs) ? __NAV_STORE.localPairs : []).forEach(pr=>{
+    const a = String(pr && pr.a || '').trim();
+    const b = String(pr && pr.b || '').trim();
+    const key = __navLocalPairKey(a, b);
+    if(!key || seen.has(key)) return;
+    if(allow && (!allow.has(a) || !allow.has(b))) return;
+    seen.add(key);
+    next.push({ a, b });
+  });
+  __NAV_STORE.localPairs = next;
+  return next;
+}
+function __navRefreshLocalPairUI(tracks){
+  const selA = document.getElementById('navPairLocalA');
+  const selB = document.getElementById('navPairLocalB');
+  const list = document.getElementById('navPairLocalList');
+  if(!selA || !selB || !list) return;
+  const arr = (Array.isArray(tracks) ? tracks : []).slice().sort((a,b)=>String(a && a.name || '').localeCompare(String(b && b.name || '')));
+  const ids = new Set(arr.map(t=>String(t && t.id || '')).filter(Boolean));
+  __navNormalizeLocalPairs(ids);
+  const prevA = String(selA.value || '');
+  const prevB = String(selB.value || '');
+  const opts = ['<option value="">-- aeronave --</option>'].concat(arr.map(track=>{
+    const id = String(track && track.id || '');
+    const label = `${String(track && track.name || id)}${track && track.tipo ? ' · ' + String(track.tipo) : ''}`;
+    return `<option value="${id}">${label}</option>`;
+  })).join('');
+  selA.innerHTML = opts;
+  selB.innerHTML = opts;
+  if(ids.has(prevA)) selA.value = prevA;
+  if(ids.has(prevB)) selB.value = prevB;
+  const trackMap = new Map(arr.map(t=>[String(t && t.id || ''), t]));
+  const chips = [];
+  (Array.isArray(__NAV_STORE.localPairs) ? __NAV_STORE.localPairs : []).forEach((pr, idx)=>{
+    const a = trackMap.get(String(pr && pr.a || ''));
+    const b = trackMap.get(String(pr && pr.b || ''));
+    if(!a || !b) return;
+    const metric = __navLocalPairMetrics(a, b);
+    chips.push(`<div class="navPairLocalChip"><span>${a.name} ↔ ${b.name}</span><span class="navPairLocalMetric">${metric}</span><button class="navMiniBtn" type="button" data-nav-pair-remove="${idx}" title="Quitar este pareo local">✕</button></div>`);
+  });
+  list.innerHTML = chips.length ? chips.join('') : '<div class="navPairLocalEmpty">Sin pareos locales activos.</div>';
+}
+function __navDrawLocalPairs(c, tracks, ptScreen, mode3d=false){
+  const arr = __navNormalizeLocalPairs(new Set((Array.isArray(tracks) ? tracks : []).map(t=>String(t && t.id || '')).filter(Boolean)));
+  if(!arr.length) return 0;
+  const trackMap = new Map((Array.isArray(tracks) ? tracks : []).map(t=>[String(t && t.id || ''), t]));
+  let drawn = 0;
+  arr.forEach(pr=>{
+    const aTrack = trackMap.get(String(pr && pr.a || ''));
+    const bTrack = trackMap.get(String(pr && pr.b || ''));
+    if(!(aTrack && bTrack && aTrack.current && bTrack.current)) return;
+    const a = ptScreen(aTrack.current);
+    const b = ptScreen(bTrack.current);
+    const mx = (a.x + b.x) / 2;
+    const my = (a.y + b.y) / 2;
+    c.save();
+    c.setLineDash([10, 6]);
+    c.strokeStyle = 'rgba(127,238,255,.72)';
+    c.lineWidth = mode3d ? 1.7 : 1.5;
+    c.beginPath();
+    c.moveTo(a.x, a.y);
+    c.lineTo(b.x, b.y);
+    c.stroke();
+    c.setLineDash([]);
+    c.fillStyle = 'rgba(4,16,18,.88)';
+    c.fillRect(mx - 70, my - 20, 140, 18);
+    c.strokeStyle = 'rgba(127,238,255,.35)';
+    c.strokeRect(mx - 70, my - 20, 140, 18);
+    c.fillStyle = '#d7ffff';
+    c.font = '11px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace';
+    c.textAlign = 'center';
+    c.fillText(__navLocalPairMetrics(aTrack, bTrack), mx, my - 7);
+    c.restore();
+    drawn++;
+  });
+  return drawn;
+}
 function renderNavReport(forceLegend=false){
   const modal = document.getElementById('navReport');
   const canvas = document.getElementById('navReportCanvas');
@@ -3633,6 +4185,7 @@ function renderNavReport(forceLegend=false){
   const tracks = info.tracks;
   const replayActive = !!info.replayActive;
   const mode3d = !!info.mode3d;
+  __navRefreshLocalPairUI(tracks);
   const dpr = Math.max(1, Math.min(2, window.devicePixelRatio || 1));
   const rect = canvas.getBoundingClientRect();
   const cssW = Math.max(300, Math.round(rect.width || canvas.clientWidth || 1000));
@@ -3747,14 +4300,17 @@ function renderNavReport(forceLegend=false){
   const centerX = centerProj.vx;
   const centerY = centerProj.vy;
 
-  function sx(vx){ return (cssW/2) + ((vx - centerX) * scale); }
-  function sy(vy){ return (cssH/2) + ((vy - centerY) * scale); }
+  const panX = Number.isFinite(+__NAV_STORE.view.panX) ? +__NAV_STORE.view.panX : 0;
+  const panY = Number.isFinite(+__NAV_STORE.view.panY) ? +__NAV_STORE.view.panY : 0;
+  function sx(vx){ return (cssW/2) + panX + ((vx - centerX) * scale); }
+  function sy(vy){ return (cssH/2) + panY + ((vy - centerY) * scale); }
   function ptScreen(pt){
     const proj = __navProjectPoint(pt, mode3d);
     return { x:sx(proj.vx), y:sy(proj.vy), proj };
   }
 
-  canvas.__navViewMetrics = { cssW, cssH, centerX, centerY, centerVX:centerX, centerVY:centerY, centerWX, centerWY, scale, zoom, panX:0, panY:0, mode3d };
+  canvas.__navViewMetrics = { cssW, cssH, centerX, centerY, centerVX:centerX, centerVY:centerY, centerWX, centerWY, scale, zoom, panX, panY, mode3d };
+  canvas.title = mode3d ? 'Replay 3D local: mantén SHIFT + click-drag para mover la vista y usa la rueda para zoom' : 'Análisis NAV local: arrastra para mover y usa la rueda para zoom';
 
   c.strokeStyle = 'rgba(46,231,79,.12)';
   c.lineWidth = 1;
@@ -3833,6 +4389,7 @@ function renderNavReport(forceLegend=false){
     }
   });
 
+  const __navLocalPairsDrawn = __navDrawLocalPairs(c, tracks, ptScreen, mode3d);
   __navDrawMeasureOverlay(c, canvas.__navViewMetrics);
   c.restore();
 
@@ -3852,6 +4409,14 @@ function renderNavReport(forceLegend=false){
     meta.style.display = 'block';
   } else if(mode3d){
     meta.textContent = `VISTA 3D LOCAL · ${__navDescribe3DView()} · rumbo + altura sobre la traza NAV`;
+    meta.style.display = 'block';
+  }
+
+  const __navLocalPairCount = Array.isArray(__NAV_STORE.localPairs) ? __NAV_STORE.localPairs.length : 0;
+  if(__navLocalPairCount && meta.textContent){
+    meta.textContent += ` · ${__navLocalPairCount} pareo${__navLocalPairCount===1?'':'s'} local${__navLocalPairCount===1?'':'es'}`;
+  } else if(__navLocalPairCount && !meta.textContent){
+    meta.textContent = `${__navLocalPairCount} pareo${__navLocalPairCount===1?'':'s'} locales · solo en esta pantalla`;
     meta.style.display = 'block';
   }
 
@@ -3901,8 +4466,10 @@ document.addEventListener('click', (e)=>{
   const zoomResetBtn = document.getElementById('navZoomReset');
   const measureBtn = document.getElementById('navMeasureToggle');
   const mode3dBtn = document.getElementById('nav3DToggle');
-  const rotateLeftBtn = document.getElementById('nav3DRotateLeft');
-  const rotateRightBtn = document.getElementById('nav3DRotateRight');
+  const pairAddBtn = document.getElementById('navPairLocalAdd');
+  const pairClearBtn = document.getElementById('navPairLocalClear');
+  const pairSelA = document.getElementById('navPairLocalA');
+  const pairSelB = document.getElementById('navPairLocalB');
   const pitchRange = document.getElementById('nav3DPitch');
   const replayToggleBtn = document.getElementById('navReplayToggle');
   const replayBackBtn = document.getElementById('navReplayBack');
@@ -3922,17 +4489,19 @@ document.addEventListener('click', (e)=>{
       const py = Number.isFinite(clientY) ? (clientY - rect.top) : (m.cssH / 2);
       const oldScale = Math.max(0.0001, Number.isFinite(+m.scale) ? +m.scale : 1);
       const newScale = (oldScale / oldZoom) * newZoom;
-      const anchorVX = (Number.isFinite(+m.centerVX) ? +m.centerVX : 0) + ((px - (m.cssW / 2)) / oldScale);
-      const anchorVY = (Number.isFinite(+m.centerVY) ? +m.centerVY : 0) + ((py - (m.cssH / 2)) / oldScale);
+      const panX = Number.isFinite(+m.panX) ? +m.panX : 0;
+      const panY = Number.isFinite(+m.panY) ? +m.panY : 0;
+      const anchorVX = (Number.isFinite(+m.centerVX) ? +m.centerVX : 0) + ((px - (m.cssW / 2) - panX) / oldScale);
+      const anchorVY = (Number.isFinite(+m.centerVY) ? +m.centerVY : 0) + ((py - (m.cssH / 2) - panY) / oldScale);
       const anchorWorld = __navProjectedToGroundWorld(anchorVX, anchorVY, !!m.mode3d);
       const anchorProj = __navProjectPoint({ x:anchorWorld.x, y:anchorWorld.y, alt:0, hdg:0 }, !!m.mode3d);
-      const nextCenterVX = anchorProj.vx - ((px - (m.cssW / 2)) / newScale);
-      const nextCenterVY = anchorProj.vy - ((py - (m.cssH / 2)) / newScale);
+      const nextCenterVX = anchorProj.vx - ((px - (m.cssW / 2) - panX) / newScale);
+      const nextCenterVY = anchorProj.vy - ((py - (m.cssH / 2) - panY) / newScale);
       const nextCenterWorld = __navProjectedToGroundWorld(nextCenterVX, nextCenterVY, !!m.mode3d);
       __NAV_STORE.view.centerWX = nextCenterWorld.x;
       __NAV_STORE.view.centerWY = nextCenterWorld.y;
-      __NAV_STORE.view.panX = 0;
-      __NAV_STORE.view.panY = 0;
+      __NAV_STORE.view.panX = panX;
+      __NAV_STORE.view.panY = panY;
     }
     __NAV_STORE.view.zoom = newZoom;
     try{ if(window.__saveLocalPrefs) window.__saveLocalPrefs(); }catch(_){ }
@@ -3957,6 +4526,7 @@ document.addEventListener('click', (e)=>{
       return;
     }
     const m = canvas.__navViewMetrics || {};
+    if(m.mode3d && !e.shiftKey) return;
     __NAV_STORE.drag = {
       id: e.pointerId,
       x: e.clientX,
@@ -3964,6 +4534,8 @@ document.addEventListener('click', (e)=>{
       scale: Math.max(0.0001, Number.isFinite(+m.scale) ? +m.scale : 1),
       centerVX: Number.isFinite(+m.centerVX) ? +m.centerVX : 0,
       centerVY: Number.isFinite(+m.centerVY) ? +m.centerVY : 0,
+      panX: Number.isFinite(+m.panX) ? +m.panX : 0,
+      panY: Number.isFinite(+m.panY) ? +m.panY : 0,
       mode3d: !!m.mode3d
     };
     canvas.classList.add('is-dragging');
@@ -3978,15 +4550,24 @@ document.addEventListener('click', (e)=>{
       return;
     }
     if(!__NAV_STORE.drag || __NAV_STORE.drag.id !== e.pointerId) return;
+    if(__NAV_STORE.drag.mode3d && !e.shiftKey){
+      endDrag(e);
+      return;
+    }
     const dx = e.clientX - __NAV_STORE.drag.x;
     const dy = e.clientY - __NAV_STORE.drag.y;
-    const nextCenterVX = __NAV_STORE.drag.centerVX - (dx / __NAV_STORE.drag.scale);
-    const nextCenterVY = __NAV_STORE.drag.centerVY - (dy / __NAV_STORE.drag.scale);
-    const nextCenterWorld = __navProjectedToGroundWorld(nextCenterVX, nextCenterVY, !!__NAV_STORE.drag.mode3d);
-    __NAV_STORE.view.centerWX = nextCenterWorld.x;
-    __NAV_STORE.view.centerWY = nextCenterWorld.y;
-    __NAV_STORE.view.panX = 0;
-    __NAV_STORE.view.panY = 0;
+    if(__NAV_STORE.drag.mode3d){
+      __NAV_STORE.view.panX = (__NAV_STORE.drag.panX || 0) + dx;
+      __NAV_STORE.view.panY = (__NAV_STORE.drag.panY || 0) + dy;
+    }else{
+      const nextCenterVX = __NAV_STORE.drag.centerVX - (dx / __NAV_STORE.drag.scale);
+      const nextCenterVY = __NAV_STORE.drag.centerVY - (dy / __NAV_STORE.drag.scale);
+      const nextCenterWorld = __navProjectedToGroundWorld(nextCenterVX, nextCenterVY, !!__NAV_STORE.drag.mode3d);
+      __NAV_STORE.view.centerWX = nextCenterWorld.x;
+      __NAV_STORE.view.centerWY = nextCenterWorld.y;
+      __NAV_STORE.view.panX = 0;
+      __NAV_STORE.view.panY = 0;
+    }
     if(typeof renderNavReport === 'function') renderNavReport();
   });
 
@@ -4037,13 +4618,39 @@ document.addEventListener('click', (e)=>{
     if(typeof renderNavReport === 'function') renderNavReport();
   };
   if(mode3dBtn) mode3dBtn.onclick = ()=>__navSet3DEnabled(!__navIs3DEnabled());
-  if(rotateLeftBtn) rotateLeftBtn.onclick = ()=>__navNudge3DYaw(-15);
-  if(rotateRightBtn) rotateRightBtn.onclick = ()=>__navNudge3DYaw(15);
   if(pitchRange) pitchRange.addEventListener('input', ()=>__navSet3DPitchDeg(pitchRange.value, true));
+  if(pairAddBtn) pairAddBtn.onclick = ()=>{
+    const a = String(pairSelA && pairSelA.value || '').trim();
+    const b = String(pairSelB && pairSelB.value || '').trim();
+    const key = __navLocalPairKey(a, b);
+    if(!key){ alert('Selecciona dos aeronaves para el pareo local.'); return; }
+    __navNormalizeLocalPairs();
+    if((__NAV_STORE.localPairs || []).some(pr=>__navLocalPairKey(pr && pr.a, pr && pr.b) === key)){
+      alert('Ese pareo local ya existe.');
+      return;
+    }
+    __NAV_STORE.localPairs.push({ a, b });
+    __navRefreshLocalPairUI((typeof __navCollectRenderData==='function' ? __navCollectRenderData().tracks : []));
+    if(typeof renderNavReport === 'function') renderNavReport();
+  };
+  if(pairClearBtn) pairClearBtn.onclick = ()=>{
+    __NAV_STORE.localPairs = [];
+    __navRefreshLocalPairUI((typeof __navCollectRenderData==='function' ? __navCollectRenderData().tracks : []));
+    if(typeof renderNavReport === 'function') renderNavReport();
+  };
   if(replayToggleBtn) replayToggleBtn.onclick = ()=>__navSetReplayEnabled(!(__NAV_STORE.replay && __NAV_STORE.replay.enabled));
   if(replayBackBtn) replayBackBtn.onclick = ()=>__navStepReplay(-5000);
   if(replayPlayBtn) replayPlayBtn.onclick = ()=>__navToggleReplayPlayback();
   if(replayFwdBtn) replayFwdBtn.onclick = ()=>__navStepReplay(5000);
+  document.addEventListener('click', (e)=>{
+    const rm = e.target && e.target.closest ? e.target.closest('[data-nav-pair-remove]') : null;
+    if(!rm) return;
+    const idx = Number(rm.dataset.navPairRemove);
+    if(!Number.isFinite(idx)) return;
+    __NAV_STORE.localPairs = (Array.isArray(__NAV_STORE.localPairs) ? __NAV_STORE.localPairs : []).filter((_, i)=>i !== idx);
+    __navRefreshLocalPairUI((typeof __navCollectRenderData==='function' ? __navCollectRenderData().tracks : []));
+    if(typeof renderNavReport === 'function') renderNavReport();
+  });
   if(replayRange){
     replayRange.addEventListener('input', ()=>{
       const bounds = __navGetTimeBounds();
@@ -4434,12 +5041,15 @@ function normalizePlaneTipoKey(v){
 }
 function getPlaneVerticalProfile(p){
   const tipo = normalizePlaneTipoKey(getPlaneTipoDisplay(p) || (p && p.tipo) || '');
-  if(tipo.includes('caza') || tipo.includes('fighter')) return { climb:7000, descend:5200, tau:1.7, settle:260 };
-  if(tipo.includes('awacs')) return { climb:1800, descend:1500, tau:2.8, settle:180 };
-  if(tipo.includes('tanker')) return { climb:1600, descend:1400, tau:2.8, settle:170 };
+  const MPS_TO_FPM = 196.8503937007874;
+  const COMMERCIAL_VERTICAL_FPM = 14 * MPS_TO_FPM;   // 14 m/s ≈ 2755.91 ft/min ≈ 0.00756 NM/s
+  const FIGHTER_VERTICAL_FPM = 290 * MPS_TO_FPM;     // 290 m/s ≈ 57086.61 ft/min ≈ 0.15659 NM/s
+  if(tipo.includes('caza') || tipo.includes('fighter')) return { climb:FIGHTER_VERTICAL_FPM, descend:FIGHTER_VERTICAL_FPM, tau:0.7, settle:1200 };
+  if(tipo.includes('awacs')) return { climb:COMMERCIAL_VERTICAL_FPM, descend:COMMERCIAL_VERTICAL_FPM, tau:2.2, settle:220 };
+  if(tipo.includes('tanker')) return { climb:COMMERCIAL_VERTICAL_FPM, descend:COMMERCIAL_VERTICAL_FPM, tau:2.2, settle:220 };
   if(tipo.includes('transporte')) return { climb:1500, descend:1300, tau:2.7, settle:160 };
   if(tipo.includes('helicoptero') || tipo.includes('helicopter')) return { climb:900, descend:700, tau:2.4, settle:90 };
-  if(tipo.includes('comercial') || tipo.includes('airliner') || tipo.includes('civil')) return { climb:2200, descend:1800, tau:2.5, settle:190 };
+  if(tipo.includes('comercial') || tipo.includes('airliner') || tipo.includes('civil')) return { climb:COMMERCIAL_VERTICAL_FPM, descend:COMMERCIAL_VERTICAL_FPM, tau:2.2, settle:220 };
   return { climb:2000, descend:1600, tau:2.6, settle:170 };
 }
 function updatePlaneAltitude(p,dt){
@@ -4513,6 +5123,7 @@ if (Math.min(diffCW, diffCCW) > 0.1) {
   p._gt=(p._gt||0)+dt*1000;if(p._gt>1800){p.ghosts.push({x:p.x,y:p.y});if(p.ghosts.length>40)p.ghosts.shift();p._gt=0;}
 }
 function drawPlane(p){
+  syncPlaneRoleState(p);
   const s=toScreen(p.x,p.y);
 
   if(st.showAwacsCoverage && isAwacsPlane(p) && p.awacsCoverage !== false){
@@ -4563,10 +5174,23 @@ function drawPlane(p){
     }
     return;
   }
-  const role=normalizePlaneRole(st.roles[p.id]||'Neutral');
+  const role=syncPlaneRoleState(p);
   const color=getRoleUiColor(role);
   p.ghosts.forEach((g,i)=>{const sg=toScreen(g.x,g.y);const op=(i+1)/p.ghosts.length*.35;ctx.fillStyle=`rgba(179,0,255,${op})`;ctx.fillRect(sg.x-1,sg.y-1,2,2);});
-  ctx.save();ctx.beginPath();ctx.arc(s.x,s.y,3,0,2*Math.PI);ctx.fillStyle=color;ctx.fill();ctx.lineWidth=1;ctx.strokeStyle='rgba(0,0,0,0.55)';ctx.stroke();ctx.restore();
+  if(role === 'Unknown'){
+    ctx.save();
+    ctx.strokeStyle = color;
+    ctx.lineWidth = 1.6;
+    ctx.beginPath();
+    ctx.moveTo(s.x-4, s.y-4);
+    ctx.lineTo(s.x+4, s.y+4);
+    ctx.moveTo(s.x+4, s.y-4);
+    ctx.lineTo(s.x-4, s.y+4);
+    ctx.stroke();
+    ctx.restore();
+  }else{
+    ctx.save();ctx.beginPath();ctx.arc(s.x,s.y,3,0,2*Math.PI);ctx.fillStyle=color;ctx.fill();ctx.lineWidth=1;ctx.strokeStyle='rgba(0,0,0,0.55)';ctx.stroke();ctx.restore();
+  }
   const lr=(p.hdg-90)*Math.PI/180;ctx.beginPath();ctx.moveTo(s.x,s.y);ctx.lineTo(s.x+Math.cos(lr)*25,s.y+Math.sin(lr)*25);ctx.strokeStyle=color;ctx.lineWidth=.8;ctx.stroke();
   if(st.predMin>0){const t=st.predMin*60,nmps=(p.spd/NM2KM)/3600;const d=nmps*t;const ex=p.x+Math.cos(lr)*d,ey=p.y+Math.sin(lr)*d;const se=toScreen(ex,ey);ctx.setLineDash([4,5]);ctx.strokeStyle=color;ctx.lineWidth=.75;ctx.beginPath();ctx.moveTo(s.x,s.y);ctx.lineTo(se.x,se.y);ctx.stroke();ctx.setLineDash([]);}
   ctx.fillStyle='#eaffea';ctx.font='12px monospace';ctx.textAlign='left';
@@ -5283,9 +5907,93 @@ function drawGTC(){
   ctx.restore();
 }
 
+function __isCapDrawing(d){
+  return !!(d && (d.type === 'cap' || d.type === 'cap_l' || d.type === 'cap_s'));
+}
+
+function __getCapPreset(d){
+  if(!d) return { longNM:15, widthNM:5, angleDeg:0 };
+  if(d.type === 'cap_l') return { longNM:50, widthNM:10, angleDeg: (typeof d.angleDeg === 'number' && isFinite(d.angleDeg)) ? d.angleDeg : 0 };
+  if(d.type === 'cap_s') return { longNM:16, widthNM:8, angleDeg: (typeof d.angleDeg === 'number' && isFinite(d.angleDeg)) ? d.angleDeg : 0 };
+  return {
+    longNM: ((typeof d.legLenNM === 'number' && isFinite(d.legLenNM)) ? d.legLenNM : 15),
+    widthNM: ((typeof d.widthNM === 'number' && isFinite(d.widthNM)) ? d.widthNM : 5),
+    angleDeg: (typeof d.angleDeg === 'number' && isFinite(d.angleDeg)) ? d.angleDeg : 0
+  };
+}
+
+function __rotatePoint(px, py, angRad){
+  const c = Math.cos(angRad), s = Math.sin(angRad);
+  return { x: px*c - py*s, y: px*s + py*c };
+}
+
+function __capLocalPointPx(d, px, py){
+  const s = toScreen(d.x, d.y);
+  const ang = -((__getCapPreset(d).angleDeg || 0) * Math.PI / 180);
+  return __rotatePoint(px - s.x, py - s.y, ang);
+}
+
+function __capGeometryPx(d){
+  const capPreset = __getCapPreset(d);
+  const straightHalfPx = Math.max(0.1, capPreset.longNM / 2) * zoom * PX_PER_NM;
+  const halfWidthPx = Math.max(0.1, capPreset.widthNM / 2) * zoom * PX_PER_NM;
+  return { straightHalfPx, halfWidthPx, angleRad: (capPreset.angleDeg || 0) * Math.PI / 180 };
+}
+
+function __canRotateDrawing(d){
+  return !!(d && d.type !== 'bullseye');
+}
+
+function __getDrawingAngleDeg(d){
+  if(!__canRotateDrawing(d)) return 0;
+  const v = Number.isFinite(+(d && d.angleDeg)) ? +(d && d.angleDeg) : 0;
+  return ((v % 360) + 360) % 360;
+}
+
+function __getDrawingAngleRad(d){
+  return __getDrawingAngleDeg(d) * Math.PI / 180;
+}
+
+function __getDrawingAnchorWorld(d){
+  if(!d) return {x:0, y:0};
+  if((d.type==='line' || d.type==='arwy') && d.ex!==undefined){
+    return { x: ((+d.x || 0) + (+d.ex || 0)) / 2, y: ((+d.y || 0) + (+d.ey || 0)) / 2 };
+  }
+  if((d.type==='route' || d.type==='polygon') && Array.isArray(d.pts) && d.pts.length){
+    try{ return polyCentroid(d.pts); }catch(_){ }
+  }
+  return { x:(+d.x || 0), y:(+d.y || 0) };
+}
+
+function __rotateWorldAround(anchor, pt, angRad){
+  if(!anchor || !pt || !angRad) return { x: pt.x, y: pt.y };
+  const rr = __rotatePoint((+pt.x || 0) - (+anchor.x || 0), (+pt.y || 0) - (+anchor.y || 0), angRad);
+  return { x:(+anchor.x || 0) + rr.x, y:(+anchor.y || 0) + rr.y };
+}
+
+function __getDrawingWorldPoint(d, pt){
+  if(!pt) return {x:0, y:0};
+  const angRad = __getDrawingAngleRad(d);
+  if(!angRad) return { x:(+pt.x || 0), y:(+pt.y || 0) };
+  return __rotateWorldAround(__getDrawingAnchorWorld(d), pt, angRad);
+}
+
+function __getDrawingScreenPoint(d, pt){
+  const q = __getDrawingWorldPoint(d, pt);
+  return toScreen(q.x, q.y);
+}
+
+function __drawingLocalScreenPoint(d, px, py){
+  const c = __getDrawingAnchorWorld(d);
+  const s = toScreen(c.x, c.y);
+  const ang = -__getDrawingAngleRad(d);
+  return __rotatePoint(px - s.x, py - s.y, ang);
+}
+
 function drawShapes(){
   st.drawings.forEach(d=>{
     if(!d) return;
+    if(isDrawingHiddenLocal(d.id)) return;
     __normalizeDrawingScope(d);
     ctx.save();
 
@@ -5316,6 +6024,28 @@ function drawShapes(){
       ctx.stroke();
     }
 
+    // --- CAP HIPÓDROMO TÁCTICO ---
+    if(__isCapDrawing(d)){
+      const { straightHalfPx, halfWidthPx, angleRad } = __capGeometryPx(d);
+      const capColor = d.color || d.lineColor || '#4da3ff';
+      ctx.save();
+      ctx.translate(s.x, s.y);
+      ctx.rotate(angleRad);
+      ctx.strokeStyle = capColor;
+      ctx.fillStyle = capColor;
+      ctx.lineWidth = Math.max(1.2, __lw * 1.5);
+      ctx.beginPath();
+      ctx.moveTo(-straightHalfPx, -halfWidthPx);
+      ctx.lineTo(straightHalfPx, -halfWidthPx);
+      ctx.arc(straightHalfPx, 0, halfWidthPx, -Math.PI/2, Math.PI/2, false);
+      ctx.lineTo(-straightHalfPx, halfWidthPx);
+      ctx.arc(-straightHalfPx, 0, halfWidthPx, Math.PI/2, -Math.PI/2, false);
+      ctx.closePath();
+      ctx.stroke();
+
+      ctx.restore();
+    }
+
     // --- PUNTO ---
     if(d.type === 'point'){
       // Punto normal o marcador "+" (para coordenadas manuales)
@@ -5343,9 +6073,10 @@ function drawShapes(){
 
     // --- LÍNEA ---
     if(d.type === 'line'){
-      const e = toScreen(d.ex, d.ey);
+      const a0 = __getDrawingScreenPoint(d, {x:d.x, y:d.y});
+      const e = __getDrawingScreenPoint(d, {x:d.ex, y:d.ey});
       ctx.beginPath();
-      ctx.moveTo(s.x, s.y);
+      ctx.moveTo(a0.x, a0.y);
       ctx.lineTo(e.x, e.y);
       ctx.stroke();
     }
@@ -5353,11 +6084,12 @@ function drawShapes(){
     
     // --- ARWY (línea entrecortada más delgada) ---
     if(d.type === 'arwy' && d.ex!==undefined){
-      const e = toScreen(d.ex, d.ey);
+      const a0 = __getDrawingScreenPoint(d, {x:d.x, y:d.y});
+      const e = __getDrawingScreenPoint(d, {x:d.ex, y:d.ey});
       ctx.setLineDash([2,6]);
       ctx.lineWidth = __lw;
       ctx.beginPath();
-      ctx.moveTo(s.x, s.y);
+      ctx.moveTo(a0.x, a0.y);
       ctx.lineTo(e.x, e.y);
       ctx.stroke();
       ctx.setLineDash([]);
@@ -5373,16 +6105,21 @@ function drawShapes(){
     // --- CUADRADO ---
     if(d.type === 'square'){
       const a = d.a * zoom * PX_PER_NM;
-      ctx.strokeRect(s.x - a/2, s.y - a/2, a, a);
+      const ang = __getDrawingAngleRad(d);
+      ctx.save();
+      ctx.translate(s.x, s.y);
+      if(ang) ctx.rotate(ang);
+      ctx.strokeRect(-a/2, -a/2, a, a);
+      ctx.restore();
     }
 
     // --- POLÍGONO ---
     if(d.type === 'polygon' && Array.isArray(d.pts) && d.pts.length >= 2){
       ctx.beginPath();
-      const p0 = toScreen(d.pts[0].x, d.pts[0].y);
+      const p0 = __getDrawingScreenPoint(d, d.pts[0]);
       ctx.moveTo(p0.x, p0.y);
       for(let i=1;i<d.pts.length;i++){
-        const pi = toScreen(d.pts[i].x, d.pts[i].y);
+        const pi = __getDrawingScreenPoint(d, d.pts[i]);
         ctx.lineTo(pi.x, pi.y);
       }
       ctx.closePath();
@@ -5392,10 +6129,10 @@ function drawShapes(){
     // --- RUTA ---
     if(d.type === 'route' && Array.isArray(d.pts) && d.pts.length >= 2){
       ctx.beginPath();
-      const p0 = toScreen(d.pts[0].x, d.pts[0].y);
+      const p0 = __getDrawingScreenPoint(d, d.pts[0]);
       ctx.moveTo(p0.x, p0.y);
       for(let i=1;i<d.pts.length;i++){
-        const pi = toScreen(d.pts[i].x, d.pts[i].y);
+        const pi = __getDrawingScreenPoint(d, d.pts[i]);
         ctx.lineTo(pi.x, pi.y);
       }
       ctx.stroke();
@@ -5403,13 +6140,18 @@ function drawShapes(){
 
     // --- LABEL ---
     if(d.type === 'label'){
+      const ang = __getDrawingAngleRad(d);
+      ctx.save();
+      ctx.translate(s.x, s.y);
+      if(ang) ctx.rotate(ang);
       ctx.font = 'bold 14px monospace';
       ctx.textAlign = 'center';
       ctx.textBaseline = 'middle';
       ctx.shadowColor = '#221a00';
       ctx.shadowBlur = 5;
-      ctx.fillText(d.text, s.x, s.y);
+      ctx.fillText(d.text, 0, 0);
       ctx.shadowBlur = 0;
+      ctx.restore();
     }
 
 
@@ -5417,7 +6159,9 @@ function drawShapes(){
     // Se muestra para todos los gráficos excepto Punto (solo punto) y Etiqueta (ya tiene texto).
     if(d.name && d.type!=='label' && (d.type!=='point' || d.showName)){
       let nx=d.x, ny=d.y;
-      if((d.type==='line' || d.type==='arwy') && d.ex!==undefined){ nx=(d.x+d.ex)/2; ny=(d.y+d.ey)/2; }
+      if((d.type==='line' || d.type==='arwy') && d.ex!==undefined){
+        const mid = __getDrawingAnchorWorld(d); nx=mid.x; ny=mid.y;
+      }
       else if(d.type==='route' && Array.isArray(d.pts) && d.pts.length>=2){
         try{ const c=polyCentroid(d.pts); nx=c.x; ny=c.y; }catch(_){}
       }
@@ -5475,7 +6219,23 @@ function drawShapes(){
       const s = toScreen(tool.a.x, tool.a.y);
       const e = toScreen(tool.b.x, tool.b.y);
 
-      if(tool.tool === 'line' || tool.tool === 'arwy'){
+      if(tool.tool === 'cap'){
+        const straightHalfPx = 7.5 * zoom * PX_PER_NM;
+        const halfWidthPx = 2.5 * zoom * PX_PER_NM;
+        ctx.save();
+        ctx.setLineDash([4,4]);
+        ctx.strokeStyle = '#4da3ff';
+        ctx.lineWidth = 1.2;
+        ctx.beginPath();
+        ctx.moveTo(s.x - straightHalfPx, s.y - halfWidthPx);
+        ctx.lineTo(s.x + straightHalfPx, s.y - halfWidthPx);
+        ctx.arc(s.x + straightHalfPx, s.y, halfWidthPx, -Math.PI/2, Math.PI/2, false);
+        ctx.lineTo(s.x - straightHalfPx, s.y + halfWidthPx);
+        ctx.arc(s.x - straightHalfPx, s.y, halfWidthPx, Math.PI/2, -Math.PI/2, false);
+        ctx.closePath();
+        ctx.stroke();
+        ctx.restore();
+      } else if(tool.tool === 'line' || tool.tool === 'arwy'){
         ctx.beginPath();
         ctx.moveTo(s.x, s.y);
         ctx.lineTo(e.x, e.y);
@@ -5577,7 +6337,7 @@ function pickShape(wx, wy){
   const tol = 10/(zoom*PX_PER_NM);
   for(let i = (st.drawings||[]).length - 1; i >= 0; i--){
     const d = st.drawings[i];
-    if(!d) continue;
+    if(!d || isDrawingHiddenLocal(d.id)) continue;
 
     if(d.type === 'line' && d.ex!==undefined){
       const dx = d.ex - d.x, dy = d.ey - d.y;
@@ -5612,6 +6372,7 @@ function pickShape(wx, wy){
     else if(d.type==='square') hr = ((d.a||0)/2);
     else if(d.type==='label') hr = (20/zoom);
     else if(d.type==='bullseye') hr = (12/zoom);
+    else if(__isCapDrawing(d)) hr = Math.max((((typeof d.legLenNM === 'number' && isFinite(d.legLenNM)) ? d.legLenNM : (d.type==='cap_l' ? 50 : (d.type==='cap_s' ? 16 : 15))) / 2), (((typeof d.widthNM === 'number' && isFinite(d.widthNM)) ? d.widthNM : (d.type==='cap_l' ? 10 : (d.type==='cap_s' ? 8 : 5))) / 2));
     if(Math.hypot(wx-(d.x||0), wy-(d.y||0)) < hr + tol) return d.id;
   }
   return null;
@@ -5648,8 +6409,9 @@ function __hitDrawingPx(d, px, py, tolPx){
   }
 
   if((d.type==='line' || d.type==='arwy') && d.ex!==undefined){
-    const e = toScreen(d.ex, d.ey);
-    return __distPointToSegPx(px,py,s.x,s.y,e.x,e.y) <= tolPx;
+    const a0 = __getDrawingScreenPoint(d, {x:d.x, y:d.y});
+    const e = __getDrawingScreenPoint(d, {x:d.ex, y:d.ey});
+    return __distPointToSegPx(px,py,a0.x,a0.y,e.x,e.y) <= tolPx;
   }
 
   if(d.type==='circle' && d.r!==undefined){
@@ -5660,12 +6422,12 @@ function __hitDrawingPx(d, px, py, tolPx){
 
   if(d.type==='square' && d.a!==undefined){
     const half = (d.a * zoom * PX_PER_NM)/2;
-    const dx = Math.abs(px - s.x), dy = Math.abs(py - s.y);
-    return (dx <= half + tolPx && dy <= half + tolPx);
+    const local = __drawingLocalScreenPoint(d, px, py);
+    return (Math.abs(local.x) <= half + tolPx && Math.abs(local.y) <= half + tolPx);
   }
 
   if(d.type==='polygon' && Array.isArray(d.pts) && d.pts.length>=3){
-    const poly = d.pts.map(p=>toScreen(p.x,p.y));
+    const poly = d.pts.map(p=>__getDrawingScreenPoint(d, p));
     if(__pointInPolyPx(px,py,poly)) return true;
     let best=1e9;
     for(let i=0;i<poly.length;i++){
@@ -5678,7 +6440,7 @@ function __hitDrawingPx(d, px, py, tolPx){
     let best=1e9;
     for(let i=0;i<d.pts.length;i++){
       const a=d.pts[i], b=d.pts[(i+1)%d.pts.length];
-      const A=toScreen(a.x,a.y), B=toScreen(b.x,b.y);
+      const A=__getDrawingScreenPoint(d, a), B=__getDrawingScreenPoint(d, b);
       const dd=__distPointToSegPx(px,py,A.x,A.y,B.x,B.y);
       if(dd<best) best=dd;
     }
@@ -5689,7 +6451,7 @@ function __hitDrawingPx(d, px, py, tolPx){
     let best=1e9;
     for(let i=0;i<d.pts.length-1;i++){
       const a=d.pts[i], b=d.pts[i+1];
-      const A=toScreen(a.x,a.y), B=toScreen(b.x,b.y);
+      const A=__getDrawingScreenPoint(d, a), B=__getDrawingScreenPoint(d, b);
       const dd=__distPointToSegPx(px,py,A.x,A.y,B.x,B.y);
       if(dd<best) best=dd;
     }
@@ -5704,6 +6466,15 @@ function __hitDrawingPx(d, px, py, tolPx){
     return false;
   }
 
+  if(__isCapDrawing(d)){
+    const { straightHalfPx, halfWidthPx } = __capGeometryPx(d);
+    const local = __capLocalPointPx(d, px, py);
+    const inCenter = Math.abs(local.x) <= straightHalfPx && Math.abs(local.y) <= halfWidthPx + tolPx;
+    const dLeft = Math.hypot(local.x + straightHalfPx, local.y);
+    const dRight = Math.hypot(local.x - straightHalfPx, local.y);
+    return inCenter || dLeft <= (halfWidthPx + tolPx) || dRight <= (halfWidthPx + tolPx);
+  }
+
   if(d.type==='label'){
     try{
       ctx.save();
@@ -5712,9 +6483,8 @@ function __hitDrawingPx(d, px, py, tolPx){
       const w = ctx.measureText(t).width;
       const h = 16;
       ctx.restore();
-      const left = s.x - w/2 - tolPx, right = s.x + w/2 + tolPx;
-      const top = s.y - h/2 - tolPx, bottom = s.y + h/2 + tolPx;
-      return px>=left && px<=right && py>=top && py<=bottom;
+      const local = __drawingLocalScreenPoint(d, px, py);
+      return (Math.abs(local.x) <= (w/2 + tolPx) && Math.abs(local.y) <= (h/2 + tolPx));
     }catch(_){
       return Math.hypot(px-s.x, py-s.y) <= (10 + tolPx);
     }
@@ -5743,13 +6513,23 @@ function __hitDrawingPerimeterPx(d, px, py, tolPx){
 
   if(d.type==='square' && d.a!==undefined){
     const half = (d.a * zoom * PX_PER_NM)/2;
-    const L = s.x - half, R = s.x + half, T = s.y - half, B = s.y + half;
-    if(px < L - tolPx || px > R + tolPx || py < T - tolPx || py > B + tolPx) return false;
-    const d1 = __distPointToSegPx(px,py,L,T,R,T);
-    const d2 = __distPointToSegPx(px,py,R,T,R,B);
-    const d3 = __distPointToSegPx(px,py,R,B,L,B);
-    const d4 = __distPointToSegPx(px,py,L,B,L,T);
+    const local = __drawingLocalScreenPoint(d, px, py);
+    if(Math.abs(local.x) > half + tolPx || Math.abs(local.y) > half + tolPx) return false;
+    const d1 = __distPointToSegPx(local.x,local.y,-half,-half,half,-half);
+    const d2 = __distPointToSegPx(local.x,local.y,half,-half,half,half);
+    const d3 = __distPointToSegPx(local.x,local.y,half,half,-half,half);
+    const d4 = __distPointToSegPx(local.x,local.y,-half,half,-half,-half);
     return Math.min(d1,d2,d3,d4) <= tolPx;
+  }
+
+  if(__isCapDrawing(d)){
+    const { straightHalfPx, halfWidthPx } = __capGeometryPx(d);
+    const local = __capLocalPointPx(d, px, py);
+    const dt = __distPointToSegPx(local.x,local.y,-straightHalfPx,-halfWidthPx,straightHalfPx,-halfWidthPx);
+    const db = __distPointToSegPx(local.x,local.y,straightHalfPx,halfWidthPx,-straightHalfPx,halfWidthPx);
+    const dl = Math.abs(Math.hypot(local.x + straightHalfPx, local.y) - halfWidthPx);
+    const dr = Math.abs(Math.hypot(local.x - straightHalfPx, local.y) - halfWidthPx);
+    return Math.min(dt,db,dl,dr) <= tolPx;
   }
 
   if((d.type==='polygon' || d.type==='route') && Array.isArray(d.pts) && d.pts.length>=2){
@@ -5757,12 +6537,12 @@ function __hitDrawingPerimeterPx(d, px, py, tolPx){
     const closed = d.type==='polygon' && d.pts.length >= 3;
     const n = d.pts.length;
     for(let i=0;i<n-1;i++){
-      const A = toScreen(d.pts[i].x,d.pts[i].y), B = toScreen(d.pts[i+1].x,d.pts[i+1].y);
+      const A = __getDrawingScreenPoint(d, d.pts[i]), B = __getDrawingScreenPoint(d, d.pts[i+1]);
       const dd = __distPointToSegPx(px,py,A.x,A.y,B.x,B.y);
       if(dd < best) best = dd;
     }
     if(closed){
-      const A = toScreen(d.pts[n-1].x,d.pts[n-1].y), B = toScreen(d.pts[0].x,d.pts[0].y);
+      const A = __getDrawingScreenPoint(d, d.pts[n-1]), B = __getDrawingScreenPoint(d, d.pts[0]);
       const dd = __distPointToSegPx(px,py,A.x,A.y,B.x,B.y);
       if(dd < best) best = dd;
     }
@@ -5924,6 +6704,7 @@ addEventListener('blur', ()=>{ __dDown = false; __eDown = false; __etaDrag = nul
       __ctx.innerHTML = `
         <button class="ctxItem" data-act="rename">Cambiar nombre</button>
         <button class="ctxItem" data-act="color">Cambiar color</button>
+        <button class="ctxItem" data-act="capAngle">Ángulo gráfico</button>
         <button class="ctxItem" data-act="width">Grosor de línea</button>
         <button class="ctxItem" data-act="delete">Eliminar gráfico</button>
         <input id="drawingColorPicker" type="color"
@@ -5945,6 +6726,29 @@ addEventListener('blur', ()=>{ __dDown = false; __eDown = false; __etaDrag = nul
   return;
 }
 
+
+      if(act==='capAngle' && d){
+        if(!__canRotateDrawing(d)){
+          hideCtx();
+          return;
+        }
+        const cur = __getDrawingAngleDeg(d);
+        const hint = 'Ángulo del gráfico (grados). 0 = orientación base/original del gráfico. Desde ahí recién rota.';
+        const raw = prompt(hint, String(cur));
+        if(raw !== null){
+          const v = Number(String(raw).replace(',', '.'));
+          if(Number.isFinite(v)){
+            d.angleDeg = ((v % 360) + 360) % 360;
+            if(typeof repaintNav==='function') repaintNav();
+            if(typeof repaintAlt==='function') repaintAlt();
+            if(typeof repaintPairs==='function') repaintPairs();
+            try{ if(window.__saveLocalDrawingsSoon) window.__saveLocalDrawingsSoon(); }catch(_){ }
+            if(window._SETCA_SYNC && typeof window._SETCA_SYNC.push==='function') window._SETCA_SYNC.push();
+          }
+        }
+        hideCtx();
+        return;
+      }
 
       if(act==='width' && d){
         // Mostrar paleta de grosores
@@ -5991,6 +6795,7 @@ addEventListener('blur', ()=>{ __dDown = false; __eDown = false; __etaDrag = nul
         const d = id ? __findDrawingById(id) : null;
         if(d){
           d.color = __picker.value;
+          if(__isCapDrawing(d)) d.lineColor = __picker.value;
           // Para puntos, si no tenían dotColor explícito, igualamos al color elegido
           if(d.type==='point' && !d.dotColor) d.dotColor = __picker.value;
         }
@@ -6061,6 +6866,7 @@ function ensurePalette(){
         const d = __ctxTargetId ? __findDrawingById(__ctxTargetId) : null;
         if(d){
           d.color = color;
+          if(__isCapDrawing(d)) d.lineColor = color;
           if(d.type==='point' && !d.dotColor) d.dotColor = color;
         }
         if(typeof repaintNav==='function') repaintNav();
@@ -6209,6 +7015,9 @@ function showWPal(clientX, clientY){
     m.style.display = 'block';
     m.style.left = '0px';
     m.style.top  = '0px';
+    const cur = id ? __findDrawingById(id) : null;
+    const angleBtn = m.querySelector('[data-act="capAngle"]');
+    if(angleBtn) angleBtn.style.display = (__canRotateDrawing(cur) ? 'block' : 'none');
     const rect = m.getBoundingClientRect();
     const x = Math.min(window.innerWidth - rect.width - pad, Math.max(pad, clientX));
     const y = Math.min(window.innerHeight - rect.height - pad, Math.max(pad, clientY));
@@ -6457,7 +7266,7 @@ addEventListener('mouseup',()=>{
     const pts = tool.poly.slice(0);
     const c = polyCentroid(pts);
     const id='D-'+Math.random().toString(36).slice(2,6).toUpperCase();
-    st.drawings.push({ownerSide:(window.__SETCA_getCurrentSide ? window.__SETCA_getCurrentSide() : 'neutral'),visibility:'global',id,type:tool.tool,x:c.x,y:c.y,pts,lw:0.6});
+    st.drawings.push({ownerSide:(window.__SETCA_getCurrentSide ? window.__SETCA_getCurrentSide() : 'neutral'),visibility:'global',createdBy:(window.__SETCA_getCurrentDrawingCreator ? window.__SETCA_getCurrentDrawingCreator() : 'sinNombre'),id,type:tool.tool,x:c.x,y:c.y,pts,lw:0.6});
     ensureDrawingName(st.drawings[st.drawings.length-1]);
     st.selectedDrawing = id;
     try{ if(window.renderDrawingScopePanel) window.renderDrawingScopePanel(); }catch(_){}
@@ -6479,28 +7288,34 @@ addEventListener('mouseup',()=>{
     let created = false;
 
     if(tool.tool==='point'){
-      st.drawings.push({ownerSide:(window.__SETCA_getCurrentSide ? window.__SETCA_getCurrentSide() : 'neutral'),visibility:'global',id,type:'point',x:a.x,y:a.y}); created = true;
+      st.drawings.push({ownerSide:(window.__SETCA_getCurrentSide ? window.__SETCA_getCurrentSide() : 'neutral'),visibility:'global',createdBy:(window.__SETCA_getCurrentDrawingCreator ? window.__SETCA_getCurrentDrawingCreator() : 'sinNombre'),id,type:'point',x:a.x,y:a.y}); created = true;
 } else if(tool.tool==='line'){
-      st.drawings.push({ownerSide:(window.__SETCA_getCurrentSide ? window.__SETCA_getCurrentSide() : 'neutral'),visibility:'global',id,type:'line',x:a.x,y:a.y,ex:b.x,ey:b.y,lw:0.6}); created = true;
+      st.drawings.push({ownerSide:(window.__SETCA_getCurrentSide ? window.__SETCA_getCurrentSide() : 'neutral'),visibility:'global',createdBy:(window.__SETCA_getCurrentDrawingCreator ? window.__SETCA_getCurrentDrawingCreator() : 'sinNombre'),id,type:'line',x:a.x,y:a.y,ex:b.x,ey:b.y,lw:0.6}); created = true;
       ensureDrawingName(st.drawings[st.drawings.length-1]);
     } else if(tool.tool==='arwy'){
-      st.drawings.push({ownerSide:(window.__SETCA_getCurrentSide ? window.__SETCA_getCurrentSide() : 'neutral'),visibility:'global',id,type:'arwy',x:a.x,y:a.y,ex:b.x,ey:b.y,lw:0.4}); created = true;
+      st.drawings.push({ownerSide:(window.__SETCA_getCurrentSide ? window.__SETCA_getCurrentSide() : 'neutral'),visibility:'global',createdBy:(window.__SETCA_getCurrentDrawingCreator ? window.__SETCA_getCurrentDrawingCreator() : 'sinNombre'),id,type:'arwy',x:a.x,y:a.y,ex:b.x,ey:b.y,lw:0.4}); created = true;
       ensureDrawingName(st.drawings[st.drawings.length-1]);
     } else if(tool.tool==='circle'){
       const r=Math.hypot(b.x-a.x,b.y-a.y);
-      st.drawings.push({ownerSide:(window.__SETCA_getCurrentSide ? window.__SETCA_getCurrentSide() : 'neutral'),visibility:'global',id,type:'circle',x:a.x,y:a.y,r,lw:0.6}); created = true;
+      st.drawings.push({ownerSide:(window.__SETCA_getCurrentSide ? window.__SETCA_getCurrentSide() : 'neutral'),visibility:'global',createdBy:(window.__SETCA_getCurrentDrawingCreator ? window.__SETCA_getCurrentDrawingCreator() : 'sinNombre'),id,type:'circle',x:a.x,y:a.y,r,lw:0.6}); created = true;
       ensureDrawingName(st.drawings[st.drawings.length-1]);
     } else if(tool.tool==='square'){
       const side=Math.max(Math.abs(b.x-a.x),Math.abs(b.y-a.y));
       const cx=a.x+(b.x-a.x)/2, cy=a.y+(b.y-a.y)/2;
-      st.drawings.push({ownerSide:(window.__SETCA_getCurrentSide ? window.__SETCA_getCurrentSide() : 'neutral'),visibility:'global',id,type:'square',x:cx,y:cy,a:side,lw:0.6}); created = true;
+      st.drawings.push({ownerSide:(window.__SETCA_getCurrentSide ? window.__SETCA_getCurrentSide() : 'neutral'),visibility:'global',createdBy:(window.__SETCA_getCurrentDrawingCreator ? window.__SETCA_getCurrentDrawingCreator() : 'sinNombre'),id,type:'square',x:cx,y:cy,a:side,lw:0.6}); created = true;
       ensureDrawingName(st.drawings[st.drawings.length-1]);
     } else if(tool.tool==='bullseye'){
-      st.drawings.push({ownerSide:(window.__SETCA_getCurrentSide ? window.__SETCA_getCurrentSide() : 'neutral'),visibility:'global',id,type:'bullseye',x:a.x,y:a.y,lw:0.6}); created = true;
+      st.drawings.push({ownerSide:(window.__SETCA_getCurrentSide ? window.__SETCA_getCurrentSide() : 'neutral'),visibility:'global',createdBy:(window.__SETCA_getCurrentDrawingCreator ? window.__SETCA_getCurrentDrawingCreator() : 'sinNombre'),id,type:'bullseye',x:a.x,y:a.y,lw:0.6}); created = true;
+      ensureDrawingName(st.drawings[st.drawings.length-1]);
+    } else if(tool.tool==='cap_l'){
+      st.drawings.push({ownerSide:(window.__SETCA_getCurrentSide ? window.__SETCA_getCurrentSide() : 'neutral'),visibility:'global',createdBy:(window.__SETCA_getCurrentDrawingCreator ? window.__SETCA_getCurrentDrawingCreator() : 'sinNombre'),id,type:'cap_l',x:a.x,y:a.y,legLenNM:50,widthNM:10,angleDeg:0,color:'#4da3ff',lineColor:'#4da3ff',lw:0.9,name:''}); created = true;
+      ensureDrawingName(st.drawings[st.drawings.length-1]);
+    } else if(tool.tool==='cap_s'){
+      st.drawings.push({ownerSide:(window.__SETCA_getCurrentSide ? window.__SETCA_getCurrentSide() : 'neutral'),visibility:'global',createdBy:(window.__SETCA_getCurrentDrawingCreator ? window.__SETCA_getCurrentDrawingCreator() : 'sinNombre'),id,type:'cap_s',x:a.x,y:a.y,legLenNM:16,widthNM:8,angleDeg:0,color:'#4da3ff',lineColor:'#4da3ff',lw:0.9,name:''}); created = true;
       ensureDrawingName(st.drawings[st.drawings.length-1]);
     } else if(tool.tool==='label'){
       const text=prompt('Texto de etiqueta:');
-      if(text){ st.drawings.push({ownerSide:(window.__SETCA_getCurrentSide ? window.__SETCA_getCurrentSide() : 'neutral'),visibility:'global',id,type:'label',x:a.x,y:a.y,text}); created = true;
+      if(text){ st.drawings.push({ownerSide:(window.__SETCA_getCurrentSide ? window.__SETCA_getCurrentSide() : 'neutral'),visibility:'global',createdBy:(window.__SETCA_getCurrentDrawingCreator ? window.__SETCA_getCurrentDrawingCreator() : 'sinNombre'),id,type:'label',x:a.x,y:a.y,text}); created = true;
         ensureDrawingName(st.drawings[st.drawings.length-1]);
       }
     }
@@ -6593,7 +7408,7 @@ addEventListener('mouseup',()=>{
       const x = p.x, y = p.y;
       const id='D-'+Math.random().toString(36).slice(2,10).toUpperCase();
       // Punto por coordenadas: usar "+" para diferenciarlo visualmente, renombrable
-      st.drawings.push({ownerSide:(window.__SETCA_getCurrentSide ? window.__SETCA_getCurrentSide() : 'neutral'),visibility:'global',id,type:'point',x,y,dotColor:'rgba(255,255,255,0.85)',showName:true,marker:'plus',plusSize:4.5,plusWidth:1.2});
+      st.drawings.push({ownerSide:(window.__SETCA_getCurrentSide ? window.__SETCA_getCurrentSide() : 'neutral'),visibility:'global',createdBy:(window.__SETCA_getCurrentDrawingCreator ? window.__SETCA_getCurrentDrawingCreator() : 'sinNombre'),id,type:'point',x,y,dotColor:'rgba(255,255,255,0.85)',showName:true,marker:'plus',plusSize:4.5,plusWidth:1.2});
       try{ if(typeof ensureDrawingName==='function') ensureDrawingName(st.drawings[st.drawings.length-1]); }catch(_){}
       st.selectedDrawing=id;
       try{ if(window.renderDrawingScopePanel) window.renderDrawingScopePanel(); }catch(_){}
@@ -6878,7 +7693,8 @@ function isAwacsPlane(p){
 function normalizePlaneRole(role){
   const rv = String(role || '').trim();
   if(rv === 'Civilian') return 'Commercial';
-  if(rv === 'Commercial' || rv === 'Friend' || rv === 'Neutral' || rv === 'Boogey' || rv === 'Bandit' || rv === 'Hostile') return rv;
+  if(rv === 'Desconocido') return 'Unknown';
+  if(rv === 'Commercial' || rv === 'Friend' || rv === 'Neutral' || rv === 'Boogey' || rv === 'Bandit' || rv === 'Hostile' || rv === 'Unknown') return rv;
   return 'Neutral';
 }
 function getRoleUiColor(role){
@@ -6889,7 +7705,8 @@ function getRoleUiColor(role){
     Neutral:'#35ff79',
     Boogey:'#ffe44d',
     Bandit:'#ff9a3d',
-    Hostile:'#ff4d4d'
+    Hostile:'#ff4d4d',
+    Unknown:'#9aa0a6'
   })[rv] || '#35ff79';
 }
 function getPlaneRoleOptionsHtml(selectedRole){
@@ -6900,21 +7717,70 @@ function getPlaneRoleOptionsHtml(selectedRole){
     ['Neutral','Neutral'],
     ['Boogey','Boogey'],
     ['Bandit','Bandit'],
-    ['Hostile','Hostile']
+    ['Hostile','Hostile'],
+    ['Unknown','Unknown']
   ].map(([val,label])=>`<option${rv===val?' selected':''}>${label}</option>`).join('');
+}
+function nextUnknownCallsign(){
+  const planes = (window.st && Array.isArray(st.planes)) ? st.planes : [];
+  const used = new Set();
+  planes.forEach(pp=>{
+    const nm = String((pp && pp.name) || '').trim().toUpperCase();
+    if(nm) used.add(nm);
+  });
+  let seq = Math.max(1, Number((st && st._unknownSeq) || 1) || 1);
+  for(let i=0;i<100000;i++,seq++){
+    const candidate = 'NN' + String(seq).padStart(3,'0');
+    if(!used.has(candidate)){
+      if(st) st._unknownSeq = seq + 1;
+      return candidate;
+    }
+  }
+  return 'NN999';
+}
+function syncPlaneRoleState(p){
+  if(!p || !st || !st.roles) return 'Neutral';
+  const rv = normalizePlaneRole(st.roles[p.id] || 'Neutral');
+  const prev = normalizePlaneRole(p._setcaPrevRole || rv);
+  if(rv === 'Unknown'){
+    if(prev !== 'Unknown'){
+      p._setcaRoleRestoreName = String((p.name ?? p.id ?? '') || '').trim() || String(p.id || '');
+    }
+    const curName = String((p.name ?? '') || '').trim();
+    if(!/^NN\d{3,}$/i.test(curName)){
+      p.name = nextUnknownCallsign();
+    }
+  }else if(prev === 'Unknown'){
+    const restore = String((p._setcaRoleRestoreName ?? '') || '').trim();
+    if(restore){
+      p.name = restore;
+    }else if(/^NN\d{3,}$/i.test(String((p.name ?? '') || '').trim())){
+      p.name = String(p.id || '');
+    }
+  }
+  p._setcaPrevRole = rv;
+  return rv;
+}
+function applyPlaneRoleChange(p, nextRole){
+  if(!p || !st || !st.roles) return normalizePlaneRole(nextRole);
+  const rv = normalizePlaneRole(nextRole);
+  st.roles[p.id] = rv;
+  syncPlaneRoleState(p);
+  return rv;
 }
 function applyVuelosRoleVisual(roleSelect, tr, role, centerBtn){
   const rv = normalizePlaneRole(role);
   if(tr) tr.dataset.role = rv;
   if(centerBtn){
     centerBtn.style.background = getRoleUiColor(rv);
+    centerBtn.textContent = rv === 'Unknown' ? '×' : '';
+    centerBtn.classList.toggle('isUnknown', rv === 'Unknown');
     centerBtn.title = `Centrar radar en este avión · ${rv}`;
   }
   if(!roleSelect) return;
   roleSelect.value = rv;
-  roleSelect.style.color = getRoleUiColor(rv);
-  roleSelect.classList.remove('roleCommercial','roleFriend','roleNeutral','roleBoogey','roleBandit','roleHostile');
-  const cls = rv==='Commercial' ? 'roleCommercial' : rv==='Friend' ? 'roleFriend' : rv==='Boogey' ? 'roleBoogey' : rv==='Bandit' ? 'roleBandit' : rv==='Hostile' ? 'roleHostile' : 'roleNeutral';
+  roleSelect.classList.remove('roleCommercial','roleFriend','roleNeutral','roleBoogey','roleBandit','roleHostile','roleUnknown');
+  const cls = rv==='Commercial' ? 'roleCommercial' : rv==='Friend' ? 'roleFriend' : rv==='Boogey' ? 'roleBoogey' : rv==='Bandit' ? 'roleBandit' : rv==='Hostile' ? 'roleHostile' : rv==='Unknown' ? 'roleUnknown' : 'roleNeutral';
   roleSelect.classList.add(cls);
   roleSelect.title = 'Rol: ' + rv;
 }
@@ -6952,10 +7818,11 @@ function repaintVuelos(){
     if(navName && navName.value !== (plane.name||'')) navName.value = plane.name || '';
 
     const navRole = document.getElementById('role-'+id);
-    const roleVal = normalizePlaneRole(st.roles[id] || 'Neutral');
+    const roleVal = syncPlaneRoleState(plane);
     if(navRole){
       if(navRole.value !== roleVal) navRole.value = roleVal;
-      navRole.style.color = getRoleUiColor(roleVal);
+      navRole.style.color = '#000';
+      navRole.style.background = '#fff';
     }
 
     const navXpdr = document.getElementById('xpdr-'+id);
@@ -6989,7 +7856,7 @@ function repaintVuelos(){
     tr.dataset.id = p.id;
 
     const xpdr = getPlaneXpdr(p);
-    const roleVal = normalizePlaneRole(st.roles[p.id] || 'Neutral');
+    const roleVal = syncPlaneRoleState(p);
 
     tr.innerHTML = `
       <td>
@@ -7041,12 +7908,19 @@ function repaintVuelos(){
     });
 
     nameInput.addEventListener('input', e=>{
+      if(normalizePlaneRole(st.roles[p.id] || 'Neutral') === 'Unknown'){
+        e.target.value = String(p.name || '');
+        return;
+      }
       p.name = e.target.value;
       syncPlaneEditsToNav(p);   // sincroniza panel de navegación (si el avión está seleccionado)
       repaintAlt();             // sincroniza lista/alt panel que usa nombre
       // El data block se actualiza en el render loop leyendo p.name
     });
-    nameInput.addEventListener('change', ()=>{
+    nameInput.addEventListener('change', e=>{
+      if(normalizePlaneRole(st.roles[p.id] || 'Neutral') === 'Unknown'){
+        e.target.value = String(p.name || '');
+      }
       // Re-render solo cuando termina edición para refrescar labels dependientes (ej. objetivos)
       repaintNav();
     });
@@ -7067,10 +7941,12 @@ function repaintVuelos(){
     });
 
     roleSelect.addEventListener('change', e=>{
-      const newRole = normalizePlaneRole(e.target.value || 'Neutral');
-      st.roles[p.id] = newRole;
+      const newRole = applyPlaneRoleChange(p, e.target.value || 'Neutral');
       applyVuelosRoleVisual(roleSelect, tr, newRole, centerBtn);
+      nameInput.value = String(p.name || '');
       syncPlaneEditsToNav(p);
+      repaintNav();
+      repaintAlt();
       // El data block y etiquetas se actualizan automáticamente con el estado global
     });
 
@@ -7173,7 +8049,15 @@ function repaintNav(){
     });
 
     // Nombre
-    c.querySelector('#nm-'+id).onchange=e=>{p.name=e.target.value; repaintAlt(); repaintVuelos();};
+    c.querySelector('#nm-'+id).onchange=e=>{
+      if(normalizePlaneRole(st.roles[id] || 'Neutral') === 'Unknown'){
+        e.target.value = String(p.name || '');
+        return;
+      }
+      p.name=e.target.value;
+      repaintAlt();
+      repaintVuelos();
+    };
 
     // Transponder (4 cifras)
     const xpdrInput = c.querySelector('#xpdr-'+id);
@@ -7284,14 +8168,19 @@ function repaintNav(){
 
     // Rol (estado global)
     const role=c.querySelector('#role-'+id); 
-    role.value=normalizePlaneRole(st.roles[id]||'Neutral'); 
-    role.style.color = getRoleUiColor(role.value);
+    role.value=syncPlaneRoleState(p); 
+    role.style.color = '#000';
+    role.style.background = '#fff';
     role.onchange=e=>{
-      const rv = normalizePlaneRole(e.target.value);
+      const rv = applyPlaneRoleChange(p, e.target.value);
       e.target.value = rv;
-      e.target.style.color = getRoleUiColor(rv);
-      st.roles[id]=rv;
+      e.target.style.color = '#000';
+      e.target.style.background = '#fff';
+      const nmInput = c.querySelector('#nm-'+id);
+      if(nmInput) nmInput.value = String(p.name || '');
       repaintVuelos();
+      repaintAlt();
+      repaintNav();
     };
 
     // Objetivo
@@ -7380,6 +8269,9 @@ function loop(ts){
   const planningMode = !!(window.__SETCA_isPlanningMode && window.__SETCA_isPlanningMode());
   if(!planningMode){ st.elapsed = performance.now() - st.t0; telTick += dt; if(telTick>5){logTel(); telTick=0;} }
   if(!planningMode){ st.planes.forEach(p=>updatePlane(p,dt)); updateMissiles(dt); updatePairs(); sweepDetect(dt); }
+  if(!planningMode && !(st && st.localPause)){
+    try{ __refreshLocalDelaySnapshot(false); }catch(_){ }
+  }
   else if(planningMode){
     st.planes.forEach(p=>{
       if(!p) return;
@@ -7402,7 +8294,10 @@ try{
 }catch(e){}
 
   const __liveState = st;
-  const __renderState = (__liveState.localPause && __liveState.pauseSnapshot) ? __liveState.pauseSnapshot : __liveState;
+  const __delayActive = [1,3,5].includes(Number(__liveState.localDisplayDelaySec)) && __liveState.localDelaySnapshot;
+  const __renderState = (__liveState.localPause && __liveState.pauseSnapshot)
+    ? __liveState.pauseSnapshot
+    : (__delayActive ? __liveState.localDelaySnapshot : __liveState);
   if(__renderState !== __liveState) st = __renderState;
   try{
     ctx.clearRect(0,0,W,H);
@@ -7452,16 +8347,32 @@ $('#start').onclick=()=>{
     __clearLocalPauseSnapshot();
   }
   if(!st.t0) st.t0 = performance.now(); else st.t0 = performance.now() - st.elapsed;
+  __refreshLocalDelaySnapshot(true);
   __setLocalPauseUI();
 };
 $('#pause').onclick = ()=>{
   if(window.__SETCA_isPlanningMode && window.__SETCA_isPlanningMode()) return;
   st.localPause = !st.localPause;
   if(st.localPause) __captureLocalPauseSnapshot();
-  else __clearLocalPauseSnapshot();
+  else { __clearLocalPauseSnapshot(); __refreshLocalDelaySnapshot(true); }
   __setLocalPauseUI();
   try{ if(document.getElementById('navReport') && document.getElementById('navReport').style.display==='block' && typeof renderNavReport === 'function') renderNavReport(); }catch(_){ }
 };
+const __delaySel = $('#localDelaySelect');
+if(__delaySel){
+  __delaySel.onchange = e=>{
+    const next = [0,1,3,5].includes(Number(e.target.value)) ? Number(e.target.value) : 0;
+    st.localDisplayDelaySec = next;
+    if(next > 0){
+      __refreshLocalDelaySnapshot(true);
+    }else{
+      __clearLocalDelaySnapshot();
+    }
+    if(window.__saveLocalPrefs) window.__saveLocalPrefs();
+    if(window.__updateLocalUI) window.__updateLocalUI();
+    flash(__delaySel);
+  };
+}
 $('#toggleLabels').onclick = ()=>{
   // 0 = normal (data block), 1 = solo nombre, 2 = sin etiquetas, 3 = radar analógico
   st.labelMode = (st.labelMode + 1) % 4;
@@ -7473,7 +8384,7 @@ $('#toggleLabels').onclick = ()=>{
   if(!btn) return;
 
   if(st.labelMode===0){
-    btn.textContent = '🧷 Etiquetas';
+    btn.textContent = '🧷 Etiq.';
     btn.style.opacity = '1';
   } else if(st.labelMode===1){
     btn.textContent = '🧷 Solo nombre';
@@ -7833,6 +8744,18 @@ $('#addTanker').onclick=()=>{
   // Tanker con parámetros de avión comercial (plataforma grande)
   __spawnEdgeAircraft({idPrefix:'TNK',namePrefix:'TANKER',tipo:'Tanker',spd:760,turn:1.3,altMin:22000,altVar:10000,role:'Friend'});
   repaintPlanesList(); repaintNav(); repaintPairs(); repaintAlt(); repaintVuelos(); flash($('#addTanker'));
+};
+$('#addUnknown').onclick=()=>{
+  const __before = Array.isArray(st.planes) ? st.planes.length : 0;
+  __spawnEdgeAircraft({idPrefix:'UNK',namePrefix:'TRK',tipo:'Desconocido',spd:760,turn:2.4,altMin:18000,altVar:18000,role:'Unknown'});
+  const __newUnknown = Array.isArray(st.planes) ? st.planes.slice(__before) : [];
+  __newUnknown.forEach(p=>{
+    if(!p) return;
+    p.tipo = 'Desconocido';
+    applyPlaneRoleChange(p, 'Unknown');
+  });
+  repaintPlanesList(); repaintNav(); repaintPairs(); repaintAlt(); repaintVuelos();
+  flash($('#addUnknown'));
 };
 $('#toggleAwacsCov').onclick=()=>{
   st.showAwacsCoverage = !st.showAwacsCoverage;
@@ -9299,6 +10222,70 @@ const __delBtn=document.getElementById('delDraw'); if(__delBtn) __delBtn.onclick
 
 
 <script>
+function __normalizeDrawingCreatorName(v){
+  const t = String(v || '').trim();
+  return t || '';
+}
+function getCurrentDrawingCreator(){
+  try{
+    const access = window.__setcaAccess || null;
+    const direct = __normalizeDrawingCreatorName(access && (access.callsign || access.name));
+    if(direct) return direct;
+  }catch(_){ }
+  try{
+    const live = __normalizeDrawingCreatorName(window.__setcaUsername || window.username || localStorage.getItem('setca_username'));
+    if(live) return live;
+  }catch(_){ }
+  return 'sinNombre';
+}
+window.__SETCA_getCurrentDrawingCreator = getCurrentDrawingCreator;
+function getDrawingCreatorName(d){
+  const raw = d && (d.createdBy || d.creator || d.author || d.created_by);
+  const clean = __normalizeDrawingCreatorName(raw);
+  return clean || 'Legado';
+}
+function canCurrentUserDeleteDrawing(d){
+  if(!d) return false;
+  const creator = getDrawingCreatorName(d);
+  if(!creator || creator === 'Legado') return false;
+  return creator === getCurrentDrawingCreator();
+}
+function __drawingHiddenKey(){
+  try{
+    const access = window.__setcaAccess || {};
+    const room = String(access.room || 'local').trim() || 'local';
+    const me = getCurrentDrawingCreator();
+    return `setca_hidden_drawings_${room}_${me}`;
+  }catch(_){
+    return 'setca_hidden_drawings_local';
+  }
+}
+function __getHiddenDrawingIds(){
+  if(!window.__setcaHiddenDrawingIds){
+    let arr = [];
+    try{ arr = JSON.parse(localStorage.getItem(__drawingHiddenKey()) || '[]'); }catch(_){ arr = []; }
+    window.__setcaHiddenDrawingIds = new Set(Array.isArray(arr) ? arr.map(v=>String(v)) : []);
+  }
+  return window.__setcaHiddenDrawingIds;
+}
+function __saveHiddenDrawingIds(){
+  try{ localStorage.setItem(__drawingHiddenKey(), JSON.stringify(Array.from(__getHiddenDrawingIds()))); }catch(_){ }
+}
+function isDrawingHiddenLocal(id){
+  if(!id) return false;
+  return __getHiddenDrawingIds().has(String(id));
+}
+function setDrawingHiddenLocal(id, hidden){
+  if(!id) return;
+  const sid = String(id);
+  const set = __getHiddenDrawingIds();
+  if(hidden) set.add(sid); else set.delete(sid);
+  __saveHiddenDrawingIds();
+  try{ if(typeof repaint === 'function') repaint(); }catch(_){ }
+  try{ if(typeof repaintNav === 'function') repaintNav(); }catch(_){ }
+  try{ if(typeof repaintAlt === 'function') repaintAlt(); }catch(_){ }
+  try{ if(typeof renderDrawingScopePanel === 'function') renderDrawingScopePanel(); }catch(_){ }
+}
 function ensureDrawingName(d){
   if(!d) return;
   if(Object.prototype.hasOwnProperty.call(d, 'name')){
@@ -9314,7 +10301,7 @@ function ensureDrawingName(d){
     }
   }
   if(d.name !== undefined) return;
-  const base = {circle:'Círculo', line:'Línea', route:'Ruta', arwy:'ARWY', point:'Punto', square:'Cuadrado', bullseye:'Bullseye', label:'Etiqueta', polygon:'Polígono'}[d.type] || 'Gráfico';
+  const base = {circle:'Círculo', line:'Línea', route:'Ruta', arwy:'ARWY', point:'Punto', square:'Cuadrado', bullseye:'Bullseye', cap:'CAP Hipódromo', cap_l:'CAP L', cap_s:'CAP S', label:'Etiqueta', polygon:'Polígono'}[d.type] || 'Gráfico';
   let count = 1;
   if(window.st && Array.isArray(st.drawings)){
     count = st.drawings.filter(x => x && x.type === d.type).length;
@@ -9325,7 +10312,7 @@ function getDrawingDisplayName(d){
   if(!d) return 'Sin nombre';
   const t = (typeof d.name === 'string') ? d.name.trim() : '';
   if(t) return t;
-  const typeLabel = {circle:'Círculo', line:'Línea', route:'Ruta', arwy:'ARWY', point:'Punto', square:'Cuadrado', bullseye:'Bullseye', label:'Etiqueta', polygon:'Polígono'}[d.type] || 'Gráfico';
+  const typeLabel = {circle:'Círculo', line:'Línea', route:'Ruta', arwy:'ARWY', point:'Punto', square:'Cuadrado', bullseye:'Bullseye', cap:'CAP Hipódromo', cap_l:'CAP L', cap_s:'CAP S', label:'Etiqueta', polygon:'Polígono'}[d.type] || 'Gráfico';
   return `${typeLabel} ${d.id || ''}`.trim();
 }
 function persistDrawingMetaChanges(){
@@ -9365,12 +10352,19 @@ function deleteDrawingById(id){
   if(!window.st || !Array.isArray(st.drawings) || !id) return false;
   const d = st.drawings.find(x=>x && x.id===id);
   if(!d) return false;
+  if(!canCurrentUserDeleteDrawing(d)){
+    alert('Solo el creador puede eliminar este gráfico.');
+    return false;
+  }
   const label = getDrawingDisplayName(d);
-  if(!window.confirm(`¿Eliminar este dibujo?
+  const creator = getDrawingCreatorName(d);
+  if(!window.confirm(`¿Eliminar este gráfico?
 
-${label}`)) return false;
+${label}
+Creador: ${creator}`)) return false;
   st.drawings = st.drawings.filter(x=>x && x.id !== id);
   if(st.selectedDrawing === id) st.selectedDrawing = null;
+  setDrawingHiddenLocal(id, false);
   persistDrawingMetaChanges();
   renderDrawingScopePanel();
   return true;
@@ -9390,7 +10384,7 @@ function renderDrawingScopePanel(){
   const arr = (window.st && Array.isArray(st.drawings)) ? st.drawings.slice() : [];
   count.textContent = String(arr.length);
   if(!arr.length){
-    list.innerHTML = '<div class="drawingScopeEmpty">Sin dibujos todavía.</div>';
+    list.innerHTML = '<div class="drawingScopeEmpty">Sin gráficos todavía.</div>';
     return;
   }
   arr.sort((a,b)=>{
@@ -9401,8 +10395,12 @@ function renderDrawingScopePanel(){
   list.innerHTML = '';
   arr.forEach(d=>{
     if(!d) return;
+    const hidden = isDrawingHiddenLocal(d.id);
+    const canDelete = canCurrentUserDeleteDrawing(d);
+    const creator = getDrawingCreatorName(d);
+
     const row = document.createElement('div');
-    row.className = 'drawingScopeItem' + (st.selectedDrawing===d.id ? ' isSelected' : '');
+    row.className = 'drawingScopeItem' + (st.selectedDrawing===d.id ? ' isSelected' : '') + (hidden ? ' isHiddenLocal' : '');
     row.dataset.id = d.id;
 
     const selectRow = ()=>{
@@ -9411,20 +10409,31 @@ function renderDrawingScopePanel(){
     };
     row.addEventListener('click', selectRow);
 
+    const meta = document.createElement('div');
+    meta.className = 'drawingScopeMeta';
+    meta.addEventListener('click', (ev)=>{
+      ev.stopPropagation();
+      selectRow();
+    });
+
     const name = document.createElement('span');
     name.className = 'drawingScopeName';
     name.textContent = getDrawingDisplayName(d);
     name.title = getDrawingDisplayName(d);
-    name.addEventListener('click', (ev)=>{
-      ev.stopPropagation();
-      selectRow();
-    });
+
+    const creatorEl = document.createElement('span');
+    creatorEl.className = 'drawingScopeCreator';
+    creatorEl.textContent = `Creador: ${creator}`;
+    creatorEl.title = creatorEl.textContent;
+
+    meta.appendChild(name);
+    meta.appendChild(creatorEl);
 
     const centerBtn = document.createElement('button');
     centerBtn.type = 'button';
     centerBtn.className = 'drawingScopeActionBtn drawingScopeCenterBtn focusable';
     centerBtn.textContent = '◉';
-    centerBtn.title = 'Centrar dibujo';
+    centerBtn.title = 'Centrar gráfico';
     centerBtn.setAttribute('aria-label', centerBtn.title);
     centerBtn.addEventListener('click', (ev)=>{
       ev.preventDefault();
@@ -9432,33 +10441,68 @@ function renderDrawingScopePanel(){
       centerDrawingById(d.id);
     });
 
-    const scopeBtn = document.createElement('button');
-    scopeBtn.type = 'button';
-    scopeBtn.className = 'drawingScopeActionBtn drawingScopeScopeBtn focusable' + ((d.visibility === 'local') ? ' isLocal' : '');
-    scopeBtn.textContent = (d.visibility === 'local') ? '👁 L' : '👁 G';
-    scopeBtn.title = (d.visibility === 'local') ? 'Cambiar a GLOBAL' : 'Cambiar a LOCAL';
-    scopeBtn.setAttribute('aria-label', scopeBtn.title);
-    scopeBtn.addEventListener('click', (ev)=>{
+    const hideBtn = document.createElement('button');
+    hideBtn.type = 'button';
+    hideBtn.className = 'drawingScopeActionBtn drawingScopeHideBtn focusable' + (hidden ? ' isHidden' : '');
+    hideBtn.textContent = hidden ? '🙈' : '👁';
+    hideBtn.title = hidden ? 'Mostrar solo en esta pantalla' : 'Ocultar solo en esta pantalla';
+    hideBtn.setAttribute('aria-label', hideBtn.title);
+    hideBtn.addEventListener('click', (ev)=>{
       ev.preventDefault();
       ev.stopPropagation();
-      setDrawingVisibility(d.id, (d.visibility === 'local') ? 'global' : 'local');
+      setDrawingHiddenLocal(d.id, !hidden);
+    });
+
+    const globalBtn = document.createElement('button');
+    globalBtn.type = 'button';
+    globalBtn.className = 'drawingScopeActionBtn drawingScopeGLBtn focusable isGlobal ' + ((((d && d.visibility) === 'local') ? '' : 'isActive'));
+    globalBtn.textContent = 'G';
+    globalBtn.title = canDelete
+      ? 'G = Global. Sincroniza este gráfico con todos.'
+      : 'Solo el creador puede marcar este gráfico como Global';
+    globalBtn.setAttribute('aria-label', globalBtn.title);
+    globalBtn.disabled = !canDelete;
+    globalBtn.addEventListener('click', (ev)=>{
+      ev.preventDefault();
+      ev.stopPropagation();
+      if(!canDelete) return;
+      setDrawingVisibility(d.id, 'global');
+    });
+
+    const localBtn = document.createElement('button');
+    localBtn.type = 'button';
+    localBtn.className = 'drawingScopeActionBtn drawingScopeGLBtn focusable isLocal ' + ((((d && d.visibility) === 'local') ? 'isActive' : ''));
+    localBtn.textContent = 'L';
+    localBtn.title = canDelete
+      ? 'L = Local. Solo se ve en esta computadora.'
+      : 'Solo el creador puede marcar este gráfico como Local';
+    localBtn.setAttribute('aria-label', localBtn.title);
+    localBtn.disabled = !canDelete;
+    localBtn.addEventListener('click', (ev)=>{
+      ev.preventDefault();
+      ev.stopPropagation();
+      if(!canDelete) return;
+      setDrawingVisibility(d.id, 'local');
     });
 
     const deleteBtn = document.createElement('button');
     deleteBtn.type = 'button';
     deleteBtn.className = 'drawingScopeActionBtn drawingScopeDeleteBtn focusable';
     deleteBtn.textContent = '🗑';
-    deleteBtn.title = 'Eliminar dibujo';
+    deleteBtn.title = canDelete ? 'Eliminar gráfico' : 'Solo el creador puede eliminar';
     deleteBtn.setAttribute('aria-label', deleteBtn.title);
+    deleteBtn.disabled = !canDelete;
     deleteBtn.addEventListener('click', (ev)=>{
       ev.preventDefault();
       ev.stopPropagation();
-      deleteDrawingById(d.id);
+      if(canDelete) deleteDrawingById(d.id);
     });
 
-    row.appendChild(name);
+    row.appendChild(meta);
     row.appendChild(centerBtn);
-    row.appendChild(scopeBtn);
+    row.appendChild(hideBtn);
+    row.appendChild(globalBtn);
+    row.appendChild(localBtn);
     row.appendChild(deleteBtn);
     list.appendChild(row);
   });
@@ -9469,6 +10513,9 @@ window.setDrawingVisibility = setDrawingVisibility;
 window.setDrawingName = setDrawingName;
 window.centerDrawingById = centerDrawingById;
 window.deleteDrawingById = deleteDrawingById;
+window.isDrawingHiddenLocal = isDrawingHiddenLocal;
+window.setDrawingHiddenLocal = setDrawingHiddenLocal;
+window.getDrawingCreatorName = getDrawingCreatorName;
 </script>
 
 
@@ -10333,9 +11380,11 @@ window.deleteDrawingById = deleteDrawingById;
         <button type="button" id="gateEnterBtn" class="btn focusable">Ingresar</button>
       </div>
       <button type="button" id="gatePlanningBtn" class="btn focusable ghost" title="Abre el mapa en modo de planificación local, sin sincronización ni movimiento.">🗺️ Planning tool</button>
+      <button type="button" id="gateFreePlayBtn" class="btn focusable ghost" title="Abre un modo local para practicar libremente, sin sincronización ni clave general.">🎮 FREE PLAY</button>
       <button type="button" id="gateCancelEdit" class="btn mini focusable" style="display:none;">Cancelar</button>
     </div>
     <div class="setca-gate-planning-note">Modo local: permite planear, crear, exportar e importar escenarios sin sincronización, sin centro de mando, sin emparejamientos, con panel de navegación activo y con aeronaves inmóviles.</div>
+    <div class="setca-gate-freeplay-note">FREE PLAY local: abre el mapa sin clave general, sin nube y sin afectar salas. Muestra solo Gestor de Unidades, Aviones, Panel de Navegación, Vuelos y Emparejamientos.</div>
   </div>
 </div>
 
@@ -10723,9 +11772,18 @@ body.setca-access-locked .app{
   padding-left:10px;
   padding-right:10px;
 }
+#gateFreePlayBtn{
+  grid-column:1 / -1;
+  width:100%;
+  min-width:0;
+  justify-self:stretch;
+  font-size:12px;
+  padding-left:14px;
+  padding-right:14px;
+}
 #gateCancelEdit{
   grid-column:3;
-  grid-row:2;
+  grid-row:3;
   justify-self:end;
 }
 #gateEnterBtn{
@@ -10741,6 +11799,7 @@ body.setca-access-locked .app{
   }
   #gateRefreshRooms,
   #gatePlanningBtn,
+  #gateFreePlayBtn,
   #gateCancelEdit{
     width:100%;
     min-width:0;
@@ -10757,7 +11816,8 @@ body.setca-access-locked .app{
   }
 }
 #gateEnterBtn.ready,
-#gatePlanningBtn.ready{
+#gatePlanningBtn.ready,
+#gateFreePlayBtn.ready{
   background:rgba(255,209,102,.22)!important;
   border-color:#ffd166!important;
   color:#ffe08a!important;
@@ -10769,6 +11829,12 @@ body.setca-access-locked .app{
   font-size:11px;
   line-height:1.35;
   color:#9fd5a7;
+}
+.setca-gate-freeplay-note{
+  margin-top:6px;
+  font-size:11px;
+  line-height:1.35;
+  color:#9fd9ff;
 }
 .setca-export-import-row{
   grid-template-columns:repeat(3,minmax(0,1fr));
@@ -10790,6 +11856,24 @@ body.setca-planning-mode #stateChip{
 }
 body.setca-planning-mode #simstate{
   color:#ffd166 !important;
+}
+body.setca-freeplay-mode #pCmd,
+body.setca-freeplay-mode #pAlt,
+body.setca-freeplay-mode #pDraw,
+body.setca-freeplay-mode #pGTC,
+body.setca-freeplay-mode #pAlerts,
+body.setca-freeplay-mode #reportBtn,
+body.setca-freeplay-mode #reportPartialBtn,
+body.setca-freeplay-mode #salasBtn,
+body.setca-freeplay-mode #refreshBtn{
+  display:none !important;
+}
+body.setca-freeplay-mode #stateChip{
+  border-color:#7edbff !important;
+  color:#7edbff !important;
+}
+body.setca-freeplay-mode #simstate{
+  color:#7edbff !important;
 }
 
 #setcaAccessChip{
@@ -11080,6 +12164,8 @@ window.setcaLeaveToMain = async function(){
     try{ sessionStorage.removeItem('setca_session_start'); }catch(_){ }
     try{ delete window.__setcaAccess; }catch(_){ }
     try{ delete window.__SETCA_PLANNING_BOOT; }catch(_){ }
+    try{ delete window.__SETCA_FREEPLAY_BOOT; }catch(_){ }
+    try{ delete window.__SETCA_LOCALONLY_BOOT; }catch(_){ }
     try{ location.hash = ''; }catch(_){ }
     const cleanUrl = String(location.pathname || '') + String(location.search || '');
     location.href = cleanUrl || location.href.split('#')[0];
@@ -11820,7 +12906,7 @@ document.querySelectorAll('#pCmdBody .btn').forEach(btn=>{
     const btn2 = document.getElementById('delDraw');
 
     function typeLabel(t){
-      return ({line:'Línea',route:'Ruta',arwy:'ARWY',circle:'Círculo',polygon:'Polígono',square:'Cuadrado',point:'Punto',bullseye:'Bullseye',label:'Etiqueta'}[t] || t || 'Gráfico');
+      return ({line:'Línea',route:'Ruta',arwy:'ARWY',circle:'Círculo',polygon:'Polígono',square:'Cuadrado',point:'Punto',bullseye:'Bullseye',cap:'CAP Hipódromo',cap_l:'CAP L',cap_s:'CAP S',label:'Etiqueta'}[t] || t || 'Gráfico');
     }
 
     function refreshList(pickId){
@@ -13391,6 +14477,7 @@ document.querySelectorAll('#pCmdBody .btn').forEach(btn=>{
               <option value="Boogey">Boogey</option>
               <option value="Bandit">Bandit</option>
               <option value="Hostile">Hostile</option>
+              <option value="Unknown">Unknown</option>
             </select>
           </label>
           <label class="ctxFld">
@@ -13524,7 +14611,11 @@ document.querySelectorAll('#pCmdBody .btn').forEach(btn=>{
     if(turnIn) turnIn.value = String(Number(p.turn||0).toFixed(1));
     if(callsignIn) callsignIn.value = String((p.name ?? p.callsign ?? p.id ?? '') || '');
     if(tipoIn) tipoIn.value = String((p.tipo ?? p.tipoAeronave ?? p.planeType ?? '') || '');
-    if(roleSel) roleSel.value = normalizePlaneRole(roleVal);
+    if(roleSel){
+      roleSel.value = normalizePlaneRole(roleVal);
+      roleSel.style.background = '#fff';
+      roleSel.style.color = '#000';
+    }
     if(iffIn) iffIn.value = String(getPlaneXpdr(p) || '');
     if(missileSel) missileSel.value = String(p.ctxMissileType || 'AMRAAM');
   }
@@ -13559,7 +14650,12 @@ document.querySelectorAll('#pCmdBody .btn').forEach(btn=>{
     if(Number.isFinite(turnVal)) p.turn = Math.max(0, turnVal);
     if(callsignVal) p.name = callsignVal; else p.name = String(p.id || '');
     p.tipo = tipoVal;
-    if(st && st.roles) st.roles[p.id] = normalizePlaneRole(roleVal);
+    if(normalizePlaneRole(roleVal) === 'Unknown'){
+      applyPlaneRoleChange(p, roleVal);
+      if(callsignIn) callsignIn.value = String(p.name || '');
+    }else{
+      if(st && st.roles) applyPlaneRoleChange(p, roleVal);
+    }
     setPlaneXpdr(p, iffVal);
     if(iffIn && iffIn.value !== iffVal) iffIn.value = iffVal;
     p.ctxMissileType = missileVal || 'AMRAAM';
@@ -14833,6 +15929,7 @@ import { getDatabase, ref, get, set } from "https://www.gstatic.com/firebasejs/1
   const enterBtn = document.getElementById('gateEnterBtn');
   const refreshRoomsBtn = document.getElementById('gateRefreshRooms');
   const planningBtn = document.getElementById('gatePlanningBtn');
+  const freePlayBtn = document.getElementById('gateFreePlayBtn');
   const cancelEditBtn = document.getElementById('gateCancelEdit');
 
   const roleSelect = document.getElementById('gateRole');
@@ -14904,14 +16001,16 @@ import { getDatabase, ref, get, set } from "https://www.gstatic.com/firebasejs/1
       role: String(a.role || 'default'),
       callsign: String(a.callsign || '').trim(),
       room: String(a.room || currentHashRoom()).trim() || currentHashRoom(),
-      planning: !!a.planning
+      planning: !!a.planning,
+      freeplay: !!a.freeplay
     };
   }
   window.__SETCA_getCurrentSide = function(){ return 'neutral'; };
   window.__SETCA_resolveSpawnRole = function(base){
     const raw = String(base || '').trim();
     if(raw === 'Civilian') return 'Commercial';
-    if(raw === 'Commercial' || raw === 'Friend' || raw === 'Neutral' || raw === 'Boogey' || raw === 'Bandit' || raw === 'Hostile') return raw;
+    if(raw === 'Desconocido') return 'Unknown';
+    if(raw === 'Commercial' || raw === 'Friend' || raw === 'Neutral' || raw === 'Boogey' || raw === 'Bandit' || raw === 'Hostile' || raw === 'Unknown') return raw;
     return 'Friend';
   };
   function baseCanSeePlane(){
@@ -15028,6 +16127,10 @@ import { getDatabase, ref, get, set } from "https://www.gstatic.com/firebasejs/1
       planningBtn.disabled = !callsignReady;
       planningBtn.classList.toggle('ready', callsignReady);
     }
+    if(freePlayBtn){
+      freePlayBtn.disabled = !callsignReady;
+      freePlayBtn.classList.toggle('ready', callsignReady);
+    }
     enterBtn.disabled = !roomReady;
     enterBtn.classList.toggle('ready', roomReady);
 
@@ -15114,19 +16217,25 @@ import { getDatabase, ref, get, set } from "https://www.gstatic.com/firebasejs/1
       chip.innerHTML = `<strong>PLANNING TOOL</strong> · ${roleToLabel(access.role)} · ${access.callsign} · LOCAL`;
       return;
     }
+    if(access && access.freeplay){
+      chip.innerHTML = `<strong>FREE PLAY</strong> · ${roleToLabel(access.role)} · ${access.callsign} · LOCAL`;
+      return;
+    }
     chip.innerHTML = `<strong>${roleToLabel(access.role)}</strong> · ${access.callsign} · ${roomLabel(access.room)}`;
   }
 
   function applyRoleAccess(access){
     const planning = !!(access && access.planning);
+    const freeplay = !!(access && access.freeplay);
     body.classList.toggle('setca-planning-mode', planning);
-    const mode = planning ? 'default' : (access.role === 'odi' ? 'odi' : access.role === 'odt' ? 'odt' : access.role === 'observer' ? 'observer' : 'default');
+    body.classList.toggle('setca-freeplay-mode', freeplay);
+    const mode = (planning || freeplay) ? 'default' : (access.role === 'odi' ? 'odi' : access.role === 'odt' ? 'odt' : access.role === 'observer' ? 'observer' : 'default');
     if(typeof window.__SETCA_applyRoleMode === 'function'){
       window.__SETCA_applyRoleMode(mode);
     }
-    const isInstructor = planning ? true : (String(access.role || 'default') === 'default');
+    const isInstructor = (planning || freeplay) ? true : (String(access.role || 'default') === 'default');
     body.classList.add('setca-role-locked');
-    body.setAttribute('data-setca-role', planning ? 'planning' : String(access.role || 'default'));
+    body.setAttribute('data-setca-role', freeplay ? 'freeplay' : (planning ? 'planning' : String(access.role || 'default')));
     const ids = ['alumnoBtn','odtBtn','observerBtn'];
     ids.forEach(id=>{
       const btn = document.getElementById(id);
@@ -15136,7 +16245,7 @@ import { getDatabase, ref, get, set } from "https://www.gstatic.com/firebasejs/1
       btn.style.opacity = '0';
       btn.style.pointerEvents = 'none';
       btn.style.display = 'none';
-      btn.title = planning ? 'Modo local de planificación activo.' : ('Rol fijado al ingresar: ' + roleToLabel(access.role));
+      btn.title = planning ? 'Modo local de planificación activo.' : (freeplay ? 'Modo FREE PLAY local activo.' : ('Rol fijado al ingresar: ' + roleToLabel(access.role)));
     });
     const salasBtn = document.getElementById('salasBtn');
     if(salasBtn){
@@ -15146,20 +16255,27 @@ import { getDatabase, ref, get, set } from "https://www.gstatic.com/firebasejs/1
       salasBtn.style.opacity = showAccessBtn ? '' : '0';
       salasBtn.style.pointerEvents = showAccessBtn ? '' : 'none';
       salasBtn.style.display = showAccessBtn ? '' : 'none';
-      salasBtn.title = planning ? 'Planning tool local: sin sala ni sincronización.' : (showAccessBtn ? (salasBtn.dataset.setcaTitle || 'Cambiar acceso / sala') : 'Acceso oculto para Instructor');
+      salasBtn.title = planning ? 'Planning tool local: sin sala ni sincronización.' : (freeplay ? 'FREE PLAY local: sin sala ni sincronización.' : (showAccessBtn ? (salasBtn.dataset.setcaTitle || 'Cambiar acceso / sala') : 'Acceso oculto para Instructor'));
     }
     const unitMgr = document.getElementById('pUnitMgr');
     if(unitMgr){
       const showUnitMgr = isInstructor;
       unitMgr.style.display = showUnitMgr ? '' : 'none';
     }
-    if(planning){
+    if(planning || freeplay){
       try{
-        st.paused = true;
         const chip = document.getElementById('stateChip');
         const simst = document.getElementById('simstate');
-        if(chip) chip.textContent = 'Planning local';
-        if(simst) simst.textContent = 'PLAN';
+        if(planning){
+          st.paused = true;
+          if(chip) chip.textContent = 'Planning local';
+          if(simst) simst.textContent = 'PLAN';
+        }else if(freeplay){
+          st.paused = false;
+          st.t0 = performance.now() - (Number(st.elapsed || 0) || 0);
+          if(chip) chip.textContent = 'Free Play local';
+          if(simst) simst.textContent = 'FREE PLAY';
+        }
       }catch(_){ }
     }
   }
@@ -15338,7 +16454,8 @@ import { getDatabase, ref, get, set } from "https://www.gstatic.com/firebasejs/1
       role: String(access.role || 'default'),
       callsign: String(access.callsign || '').trim(),
       room: String(access.room || currentHashRoom()).trim() || currentHashRoom(),
-      planning: !!access.planning
+      planning: !!access.planning,
+      freeplay: !!access.freeplay
     };
     try{ localStorage.setItem('setca_username', window.__setcaAccess.callsign); }catch(_){ }
     try{ window.__setcaUsername = window.__setcaAccess.callsign; }catch(_){ }
@@ -15425,6 +16542,33 @@ import { getDatabase, ref, get, set } from "https://www.gstatic.com/firebasejs/1
       callsign: gateState.callsign.trim(),
       room: currentHashRoom(),
       planning: true,
+      freeplay: false,
+      ts: Date.now()
+    };
+    saveSession(access);
+    try{ localStorage.setItem('setca_username', access.callsign); }catch(_){ }
+    location.reload();
+  }
+
+  function handleFreePlayEnter(){
+    setError('');
+    safeSetGateState({
+      callsign: callsignInput.value.trim(),
+      createRoom: createRoomInput.value,
+      createPassword: createPasswordInput.value
+    });
+    updateGateUI();
+
+    if(!gateState.role){ setError('Debes elegir un rol para FREE PLAY.'); return; }
+    if(gateState.callsign.trim().length < 2){ setError('Debes ingresar un callsign válido para FREE PLAY.'); return; }
+
+    const access = {
+      side: 'neutral',
+      role: String(gateState.role || 'default'),
+      callsign: gateState.callsign.trim(),
+      room: 'free-play-local',
+      planning: false,
+      freeplay: true,
       ts: Date.now()
     };
     saveSession(access);
@@ -15468,6 +16612,7 @@ import { getDatabase, ref, get, set } from "https://www.gstatic.com/firebasejs/1
       callsign: gateState.callsign.trim(),
       room: chosenRoom,
       planning: false,
+      freeplay: false,
       ts: Date.now()
     };
     saveSession(access);
@@ -15481,6 +16626,7 @@ import { getDatabase, ref, get, set } from "https://www.gstatic.com/firebasejs/1
     editMode = !!isEdit;
     cancelEditBtn.style.display = editMode ? '' : 'none';
     if(body.classList.contains('setca-planning-mode')) body.classList.remove('setca-planning-mode');
+    if(body.classList.contains('setca-freeplay-mode')) body.classList.remove('setca-freeplay-mode');
     gate.classList.add('open');
     gate.setAttribute('aria-hidden', 'false');
     body.classList.add('setca-access-locked');
@@ -15520,6 +16666,7 @@ import { getDatabase, ref, get, set } from "https://www.gstatic.com/firebasejs/1
   refreshRoomsBtn.addEventListener('click', ()=>{ fetchRooms(); });
   enterBtn.addEventListener('click', ()=>{ handleEnter().catch(err=>{ console.error(err); setError('No se pudo completar el ingreso.'); }); });
   if(planningBtn){ planningBtn.addEventListener('click', ()=>{ try{ handlePlanningEnter(); }catch(err){ console.error(err); setError('No se pudo abrir Planning tool.'); } }); }
+  if(freePlayBtn){ freePlayBtn.addEventListener('click', ()=>{ try{ handleFreePlayEnter(); }catch(err){ console.error(err); setError('No se pudo abrir FREE PLAY.'); } }); }
   cancelEditBtn.addEventListener('click', ()=>{ closeGateFromEdit(); });
 
   addEventListener('keydown', (e)=>{
@@ -15531,7 +16678,7 @@ import { getDatabase, ref, get, set } from "https://www.gstatic.com/firebasejs/1
   }, true);
 
   const saved = loadSession();
-  if(saved && (saved.planning || String(saved.room || '') === currentHashRoom())){
+  if(saved && (saved.planning || saved.freeplay || String(saved.room || '') === currentHashRoom())){
     unlockWithAccess(saved);
   }else{
     clearSession();
@@ -16381,6 +17528,32 @@ import { getDatabase, ref, get, set } from "https://www.gstatic.com/firebasejs/1
   }catch(_){ }
 })();
 </script>
+<script>
+(function(){
+  const btn = document.getElementById('drawingScopeOpenBtn');
+  const modal = document.getElementById('drawingScopeModal');
+  const closeBtn = document.getElementById('closeDrawingScopeModal');
+  if(!btn || !modal) return;
+  const openModal = ()=>{
+    modal.style.display = 'block';
+    modal.style.left = '12px';
+    modal.style.right = 'auto';
+    modal.style.top = '74px';
+    modal.style.bottom = '14px';
+    modal.setAttribute('aria-hidden', 'false');
+    try{ if(typeof renderDrawingScopePanel === 'function') renderDrawingScopePanel(); }catch(_){ }
+  };
+  const closeModal = ()=>{
+    modal.style.display = 'none';
+    modal.setAttribute('aria-hidden', 'true');
+  };
+  btn.addEventListener('click', openModal);
+  if(closeBtn) closeBtn.addEventListener('click', closeModal);
+  addEventListener('keydown', (ev)=>{
+    if(ev.key === 'Escape' && modal.style.display === 'block') closeModal();
+  });
+})();
+</script>
 </body>
 </html>
-BY WALLACE / PERU
+BY WALLACE
