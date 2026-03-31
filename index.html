@@ -1,4 +1,4 @@
-ESTE SIMULADOR SE ENCUENTRA EN FASE DE PRUEBA - PUEDEN OCURRIR ERRORES DURANTE EL FUNCIONAMIENTO 2.6.3
+ESTE SIMULADOR SE ENCUENTRA EN FASE DE PRUEBA - PUEDEN OCURRIR ERRORES DURANTE EL FUNCIONAMIENTO 2.5.2 040326
 <!DOCTYPE html>
 <html lang="es">
 <head>
@@ -110,6 +110,101 @@ document.getElementById('cancelDelete').onclick = ()=>{
     return { aircraft, dart };
   }
 
+  const __SETCA_SYNC_STAGING = Object.freeze({
+    planeAddMs: 3000,
+    missileAddMs: 900,
+    remoteApplyMs: 180,
+    planePanelRefreshMs: 650
+  });
+  window.__SETCA_SYNC_STAGING = __SETCA_SYNC_STAGING;
+  let __setcaStageTimer = null;
+  let __setcaPlanePanelRefreshTimer = null;
+
+  function __setcaStageNow(){ return Date.now(); }
+
+  function __setcaMarkSyncStaged(item, delayMs){
+    if(!item || typeof item !== 'object' || __localOnlyMode) return item;
+    const due = __setcaStageNow() + Math.max(0, Number.isFinite(+delayMs) ? +delayMs : 0);
+    try{
+      Object.defineProperty(item, '__syncAfter', {
+        value: Math.max(Number(item.__syncAfter || 0) || 0, due),
+        writable: true,
+        configurable: true,
+        enumerable: false
+      });
+    }catch(_){
+      item.__syncAfter = Math.max(Number(item.__syncAfter || 0) || 0, due);
+    }
+    __setcaScheduleStageFlush();
+    return item;
+  }
+
+  function __setcaSyncIsMature(item, nowTs){
+    const at = Number(item && item.__syncAfter || 0) || 0;
+    return !at || at <= (Number.isFinite(+nowTs) ? +nowTs : __setcaStageNow());
+  }
+
+  function __setcaNextStageDueFromState(src){
+    const s = (src && typeof src === 'object') ? src : null;
+    if(!s) return 0;
+    let nextDue = 0;
+    ['planes','missiles'].forEach(key=>{
+      const arr = Array.isArray(s[key]) ? s[key] : [];
+      arr.forEach(item=>{
+        const at = Number(item && item.__syncAfter || 0) || 0;
+        if(at && (!nextDue || at < nextDue)) nextDue = at;
+      });
+    });
+    return nextDue;
+  }
+
+  function __setcaScheduleStageFlush(){
+    if(__localOnlyMode) return false;
+    const due = __setcaNextStageDueFromState(window.st || {});
+    if(__setcaStageTimer){
+      clearTimeout(__setcaStageTimer);
+      __setcaStageTimer = null;
+    }
+    if(!due) return false;
+    const wait = Math.max(0, due - __setcaStageNow());
+    __setcaStageTimer = setTimeout(()=>{
+      __setcaStageTimer = null;
+      try{
+        if(window._SETCA_SYNC && typeof window._SETCA_SYNC.pushNow === 'function') window._SETCA_SYNC.pushNow();
+        else if(window._SETCA_SYNC && typeof window._SETCA_SYNC.push === 'function') window._SETCA_SYNC.push();
+      }catch(e){
+        console.warn('Staged sync flush error:', e);
+      }finally{
+        const next = __setcaNextStageDueFromState(window.st || {});
+        if(next) __setcaScheduleStageFlush();
+      }
+    }, wait);
+    return true;
+  }
+
+  function __setcaPlaneStructureSig(planes, roles){
+    const arr = Array.isArray(planes) ? planes : [];
+    const map = (roles && typeof roles === 'object') ? roles : {};
+    return JSON.stringify(arr.map(p=>{
+      if(!p || typeof p !== 'object') return [''];
+      const pid = String(p.id || '');
+      return [pid, String(p.name || ''), String(p.tipo || ''), String(p.xpdr || ''), String(map[pid] || '')];
+    }));
+  }
+
+  function __setcaSchedulePlanePanelRefresh(delayMs){
+    const wait = Math.max(120, Number.isFinite(+delayMs) ? +delayMs : __SETCA_SYNC_STAGING.planePanelRefreshMs);
+    if(__setcaPlanePanelRefreshTimer) return true;
+    __setcaPlanePanelRefreshTimer = setTimeout(()=>{
+      __setcaPlanePanelRefreshTimer = null;
+      try{ repaintPlanesList && repaintPlanesList(); }catch(_){}
+      try{ repaintNav && repaintNav(); }catch(_){}
+      try{ repaintAlt && repaintAlt(); }catch(_){}
+      try{ repaintStudent && repaintStudent(); }catch(_){}
+    }, wait);
+    return true;
+  }
+
   async function pushStateToCloud(local) {
     if (__localOnlyMode) return false;
     if (!local) return;
@@ -126,14 +221,22 @@ document.getElementById('cancelDelete').onclick = ()=>{
 
         // ⚠️ LOCAL ONLY (no sync): Data Block offsets (tagDx/tagDy/dataBlock), unidades, predicción
         // Enviamos a la nube el estado compartido, pero sin esas preferencias locales.
-        const planesClean = Array.isArray(snap.planes) ? snap.planes.map(p=>{
+        const syncNow = __setcaStageNow();
+        const planesClean = Array.isArray(snap.planes) ? snap.planes.filter(p=>__setcaSyncIsMature(p, syncNow)).map(p=>{
           if(!p || typeof p !== 'object') return p;
           const q = {...p};
           delete q.tagDx;
           delete q.tagDy;
           delete q.dataBlock; // drag Z+click solo local por equipo/usuario
+          delete q.__syncAfter;
           return q;
         }) : snap.planes;
+        const missilesClean = Array.isArray(snap.missiles) ? snap.missiles.filter(m=>__setcaSyncIsMature(m, syncNow)).map(m=>{
+          if(!m || typeof m !== 'object') return m;
+          const q = {...m};
+          delete q.__syncAfter;
+          return q;
+        }) : (Array.isArray(snap.missiles) ? snap.missiles : []);
 
         const payload = {
           planes: planesClean,
@@ -141,7 +244,7 @@ document.getElementById('cancelDelete').onclick = ()=>{
           drawings: Array.isArray(snap.drawings) ? snap.drawings.filter(d=>!(d && d.visibility === 'local')).map(d=>__normalizeDrawingScope(__clonePlain(d))) : snap.drawings,
           gtc: Array.isArray(snap.gtc) ? snap.gtc : [],
           pairs: Array.isArray(snap.pairs) ? snap.pairs : [],
-          missiles: Array.isArray(snap.missiles) ? snap.missiles : [],
+          missiles: missilesClean,
           impactMarks: Array.isArray(snap.impactMarks) ? snap.impactMarks : [],
           missileStats: __normalizeMissileStats(snap.missileStats),
           windKmh: Number.isFinite(+snap.windKmh) ? +snap.windKmh : 0,
@@ -151,6 +254,7 @@ document.getElementById('cancelDelete').onclick = ()=>{
         };
 
         await set(stateRef, payload);
+        __setcaScheduleStageFlush();
       }while(__pushQueued);
     }finally{
       __pushInFlight = false;
@@ -223,6 +327,7 @@ let __setcaLastAppliedRemoteTs = 0;
       const remoteStamp = Number(v.lastUpdate || 0);
       const force = !!(opts && opts.force);
       if(!force && remoteStamp && __setcaLastAppliedRemoteTs && remoteStamp < __setcaLastAppliedRemoteTs) return false;
+      const prevPlaneStructureSig = __setcaPlaneStructureSig(st.planes, st.roles);
 
       const stripRemoteLocalPlane = (p)=>{
         if(!p || typeof p !== "object") return p;
@@ -231,6 +336,7 @@ let __setcaLastAppliedRemoteTs = 0;
         delete q.tagDx;
         delete q.tagDy;
         delete q.dataBlock;
+        delete q.__syncAfter;
         return q;
       };
 
@@ -283,7 +389,12 @@ let __setcaLastAppliedRemoteTs = 0;
       }
 
       if (Array.isArray(v.missiles)) {
-        const nextMissiles = __setcaMergeRemoteArray(st.missiles, v.missiles, { prefix:'missile' });
+        const nextMissiles = __setcaMergeRemoteArray(st.missiles, v.missiles.map(m=>{
+          if(!m || typeof m !== 'object') return m;
+          const q = {...m};
+          delete q.__syncAfter;
+          return q;
+        }), { prefix:'missile' });
         missilesChanged = !__setcaSameArrayRefs(st.missiles, nextMissiles);
         if(missilesChanged) st.missiles = nextMissiles;
       }
@@ -317,11 +428,15 @@ let __setcaLastAppliedRemoteTs = 0;
         try{ if(typeof draw === 'function') draw(); }catch(_){ }
       }
 
-      if(planesChanged || rolesChanged || drawingsChanged || windChanged){
+      const planesStructuralChanged = (__setcaPlaneStructureSig(st.planes, st.roles) !== prevPlaneStructureSig);
+
+      if(planesStructuralChanged || rolesChanged || drawingsChanged || windChanged){
         repaintPlanesList && repaintPlanesList();
         repaintNav && repaintNav();
         repaintAlt && repaintAlt();
         repaintStudent && repaintStudent();
+      }else if(planesChanged){
+        __setcaSchedulePlanePanelRefresh(__SETCA_SYNC_STAGING.planePanelRefreshMs);
       }
       if(pairsChanged || planesChanged || rolesChanged){
         repaintPairs && repaintPairs();
@@ -339,7 +454,7 @@ let __setcaLastAppliedRemoteTs = 0;
     } catch(e){ console.warn("Apply remote state error:", e); return false; }
   }
 
-  const __SETCA_REMOTE_APPLY_DELAY_MS = 90;
+  const __SETCA_REMOTE_APPLY_DELAY_MS = (__SETCA_SYNC_STAGING && __SETCA_SYNC_STAGING.remoteApplyMs) || 180;
   let __setcaRemoteStateQueued = null;
   let __setcaRemoteApplyTimer = null;
 
@@ -4863,7 +4978,7 @@ function spawnFormation(key){
     case 'CHAMPAGNE': planes = GenForm.CHAMPAGNE(center); break;
     default: planes = GenForm.LINEABREAST2(center); break;
   }
-  planes.forEach(p=>{ st.planes.push(p); st.roles[p.id] = Math.random()>.5?'Friend':'Bandit'; });
+  planes.forEach(p=>{ st.planes.push(p); try{ if(typeof __setcaMarkSyncStaged === 'function') __setcaMarkSyncStaged(p, (__SETCA_SYNC_STAGING && __SETCA_SYNC_STAGING.planeAddMs) || 3000); }catch(_){} st.roles[p.id] = Math.random()>.5?'Friend':'Bandit'; });
   repaintPlanesList(); repaintNav(); repaintAlt(); repaintVuelos();
 }
 
@@ -5476,6 +5591,7 @@ function launch(launcherId,targetId,type){
   st.missileStats = __normalizeMissileStats(st.missileStats);
   st.missileStats.aircraft += 1;
   st.missiles.push(missile);
+  try{ if(typeof __setcaMarkSyncStaged === 'function') __setcaMarkSyncStaged(missile, (__SETCA_SYNC_STAGING && __SETCA_SYNC_STAGING.missileAddMs) || 900); }catch(_){ }
   logEvent(`LANZAMIENTO: ${L.name} lanzó ${missile.name} a ${__entityName(TRef, targetId)}`);
 }
 function __registerMissileImpact(target, missile, targetKind='plane'){
@@ -8668,6 +8784,7 @@ function __spawnEdgeAircraft(cfg){
     tagDx:12,tagDy:-6
   };
   st.planes.push(p);
+  try{ if(typeof __setcaMarkSyncStaged === 'function') __setcaMarkSyncStaged(p, (__SETCA_SYNC_STAGING && __SETCA_SYNC_STAGING.planeAddMs) || 3000); }catch(_){ }
   st.roles[id]=(window.__SETCA_resolveSpawnRole ? window.__SETCA_resolveSpawnRole(cfg.role || cfg.tipo || '') : (cfg.role || 'Friend'));
 }
 
@@ -8693,6 +8810,7 @@ function __spawnInlandAircraft(cfg){
     tagDx:12,tagDy:-6
   };
   st.planes.push(p);
+  try{ if(typeof __setcaMarkSyncStaged === 'function') __setcaMarkSyncStaged(p, (__SETCA_SYNC_STAGING && __SETCA_SYNC_STAGING.planeAddMs) || 3000); }catch(_){ }
   st.roles[id]=(window.__SETCA_resolveSpawnRole ? window.__SETCA_resolveSpawnRole(cfg.role || cfg.tipo || '') : (cfg.role || 'Friend'));
 }
 
@@ -8715,7 +8833,7 @@ $('#addFighter').onclick=()=>{
     tipo:'Caza',
     tagDx:12,tagDy:-6
   };
-  st.planes.push(p); st.roles[id]=(window.__SETCA_resolveSpawnRole ? window.__SETCA_resolveSpawnRole('fighter') : (Math.random()>.5?'Friend':'Bandit')); repaintPlanesList(); repaintNav(); repaintPairs(); repaintAlt(); repaintVuelos(); flash($('#addFighter'));
+  st.planes.push(p); try{ if(typeof __setcaMarkSyncStaged === 'function') __setcaMarkSyncStaged(p, (__SETCA_SYNC_STAGING && __SETCA_SYNC_STAGING.planeAddMs) || 3000); }catch(_){ } st.roles[id]=(window.__SETCA_resolveSpawnRole ? window.__SETCA_resolveSpawnRole('fighter') : (Math.random()>.5?'Friend':'Bandit')); repaintPlanesList(); repaintNav(); repaintPairs(); repaintAlt(); repaintVuelos(); flash($('#addFighter'));
 };
 $('#addCom').onclick=()=>{
   // Parámetros de avión comercial (jet)
@@ -8836,11 +8954,18 @@ requestAnimationFrame(()=>{ repaintPlanesList(); repaintNav(); repaintStudent();
   window.flushSync = flushSync;
 
   // Conectar con los botones principales
-  ['#addFighter','#addCom','#addTrans','#addHeli','#addAwacs','#addTanker','#delLast','#pause','#start'].forEach(id=>{
+  ['#addFighter','#addCom','#addTrans','#addHeli','#addAwacs','#addTanker','#addUnknown','#delLast','#pause','#start'].forEach(id=>{
     const el = document.querySelector(id);
     if(el){
       const orig = el.onclick;
-      el.onclick = (e)=>{ const r = orig(e); scheduleSync(__SETCA_SYNC_CLICK_MS); return r; };
+      el.onclick = (e)=>{
+        const r = orig(e);
+        const __delay = (id && /^#add/.test(id))
+          ? (((window.__SETCA_SYNC_STAGING && window.__SETCA_SYNC_STAGING.planeAddMs) || 3000) + 60)
+          : __SETCA_SYNC_CLICK_MS;
+        scheduleSync(__delay);
+        return r;
+      };
     }
   });
 
@@ -14919,7 +15044,7 @@ function gtcLaunchMissile(u){
     st.missileStats.dart += 1;
     const id = 'gtcm_' + Date.now().toString(36) + '_' + Math.random().toString(36).slice(2,6);
     const name = gtcNextDartName(u.missileCode || u.shortLabel || 'DART');
-    st.missiles.push({
+    const __setcaLocalMissile = {
       id,
       name,
       launcher: u.id,
@@ -14938,7 +15063,9 @@ function gtcLaunchMissile(u){
       rangeKM: maxRNm * NM2KM,
       maxAltFt: maxHFt,
       status: 'fly'
-    });
+    };
+    st.missiles.push(__setcaLocalMissile);
+    try{ if(typeof __setcaMarkSyncStaged === 'function') __setcaMarkSyncStaged(__setcaLocalMissile, (__SETCA_SYNC_STAGING && __SETCA_SYNC_STAGING.missileAddMs) || 900); }catch(_){ }
     try{ logEvent(`LANZAMIENTO: ${(u.name||u.label||'LANZADOR')} -> ${(T.name||pid)} (${name})`); }catch(_){ }
   }catch(e){}
 }
@@ -17556,4 +17683,3 @@ import { getDatabase, ref, get, set } from "https://www.gstatic.com/firebasejs/1
 </script>
 </body>
 </html>
-BY WALLACE
