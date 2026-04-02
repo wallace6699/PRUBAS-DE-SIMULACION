@@ -1,4 +1,4 @@
-ESTE SIMULADOR SE ENCUENTRA EN FASE DE PRUEBA - PUEDEN OCURRIR ERRORES DURANTE EL FUNCIONAMIENTO 2.6.4
+ESTE SIMULADOR SE ENCUENTRA EN FASE DE PRUEBA - PUEDEN OCURRIR ERRORES DURANTE EL FUNCIONAMIENTO 2.5.2 040326
 <!DOCTYPE html>
 <html lang="es">
 <head>
@@ -1788,6 +1788,44 @@ body[data-setca-role="observer"] #pUnitMgr{
   white-space:nowrap;
 }
 
+.config-pop{
+  position:fixed;
+  top:calc(var(--setca-header-h,72px) + 8px);
+  right:14px;
+  width:min(300px, calc(100vw - 24px));
+  display:none;
+  z-index:9500;
+  border:1px solid rgba(148,178,207,.18);
+  border-radius:11px;
+  background:rgba(10,16,24,.96);
+  box-shadow:0 12px 30px rgba(0,0,0,.34);
+  backdrop-filter:blur(8px);
+  color:#eaf3ff;
+  overflow:hidden;
+}
+.config-pop.open{display:block;}
+.config-pop-head{display:flex;align-items:center;justify-content:space-between;padding:8px 10px;border-bottom:1px solid rgba(148,178,207,.14);font-weight:700;letter-spacing:.15px;font-size:12px;}
+.config-pop-head button{min-width:26px;height:26px;padding:0;border-radius:7px;}
+.config-pop-body{padding:8px;display:flex;flex-direction:column;gap:6px;}
+.config-pop .btn.mini{min-height:26px;height:26px;padding:0 8px;font-size:11px;border-radius:7px;}
+.config-card{border:1px solid rgba(148,178,207,.10);border-radius:9px;padding:8px;background:rgba(255,255,255,.025);display:flex;flex-direction:column;gap:6px;}
+.config-card-title{font-size:11px;font-weight:800;color:#cddcf0;letter-spacing:.2px;text-transform:uppercase;line-height:1;}
+.config-card .cmd-row-2{justify-content:flex-start;gap:6px;flex-wrap:wrap;}
+.config-card .pred-inline{justify-content:flex-start;flex:0 1 auto;gap:6px;}
+.config-pop [data-label-field].label-on{
+  background:linear-gradient(180deg, rgba(255,223,92,.98), rgba(245,194,43,.96));
+  color:#1b1502 !important;
+  border-color:rgba(255,214,64,.98);
+  box-shadow:0 0 0 1px rgba(255,214,64,.18), inset 0 1px 0 rgba(255,255,255,.30);
+}
+.config-pop [data-label-field].label-on:hover{
+  filter:brightness(1.03);
+}
+.config-pop [data-label-field]{
+  transition:background .14s ease, color .14s ease, border-color .14s ease, box-shadow .14s ease, transform .14s ease;
+}
+.config-pop-note{display:none !important;}
+
 .coord-grid{
   display:grid;
   gap:8px;
@@ -2729,7 +2767,7 @@ body[data-setca-role="observer"] #pUnitMgr{
       <option value="5">5 s</option>
     </select>
   </label>
-<button id="toggleLabels" class="btn focusable">🧷 Etiq.</button>
+<button id="toggleLabels" class="btn focusable" style="display:none" aria-hidden="true">🧷 Etiq.</button>
   <button id="reportBtn" class="btn focusable">📝 Rep. táctico</button>
   <button id="navBtn" class="btn focusable">🧭 NAV</button>
 
@@ -2757,10 +2795,10 @@ body[data-setca-role="observer"] #pUnitMgr{
           </div>
         </div>
 
-        <div class="group">
+        <div class="group" id="radarAptoGroup" style="display:none;">
           <div class="group-title">Radar</div>
           <div class="btn-grid small radar3">
-            <button id="toggleAirports" class="btn mini focusable">APTO</button>
+            <button id="toggleAirports" class="btn mini focusable">Aeropuerto</button>
           </div>
         </div>
 
@@ -2771,7 +2809,7 @@ body[data-setca-role="observer"] #pUnitMgr{
             <div class="pred-inline">
               <span class="chip">Pred</span>
               <button id="predMinus" class="btn mini focusable">-</button>
-              <span id="predVal" class="pill">5</span>
+              <span id="predVal" class="pill">0</span>
               <button id="predPlus" class="btn mini focusable">+</button>
             </div>
           </div>
@@ -3226,7 +3264,8 @@ let st={
   windKmh:0, windDir:0,
   sweep:false, sweepAng:0, sweepSpd:24,
   showHalos:false,
-  predMin:5,
+  predMin:0,
+  localPlaneFocusHalo:null,
   mode:'digital',
   missiles:[],
   splashes:[],
@@ -3315,6 +3354,72 @@ window.__saveLocalDrawingsSoon = __saveLocalDrawingsSoon;
 window.__hydrateLocalDrawingsIntoState = __hydrateLocalDrawingsIntoState;
 
 let __localPrefs = __lsLoad(__PREF_KEY, {});
+// Predicción siempre inicia en 0 al abrir esta vista.
+if(__localPrefs && typeof __localPrefs === 'object') __localPrefs.predMin = 0;
+const __SETCA_LABEL_FIELDS_DEFAULT = Object.freeze({
+  callsign:true,
+  tipo:false,
+  xpdr:false,
+  alt:true,
+  spd:false,
+  hdg:false,
+  pulsae:false
+});
+function __setcaNormalizeLabelFields(src){
+  const out = {...__SETCA_LABEL_FIELDS_DEFAULT};
+  if(src && typeof src === 'object'){
+    Object.keys(__SETCA_LABEL_FIELDS_DEFAULT).forEach(k=>{
+      if(typeof src[k] === 'boolean') out[k] = !!src[k];
+    });
+  }
+  return out;
+}
+const __SETCA_LABEL_FIELDS = __setcaNormalizeLabelFields(__localPrefs.labelFields);
+try{ if(__localPrefs && __localPrefs.labelFields && typeof __localPrefs.labelFields === 'object' && Object.prototype.hasOwnProperty.call(__localPrefs.labelFields,'role')){ delete __localPrefs.labelFields.role; } }catch(_){ }
+window.__SETCA_getLocalLabelFields = ()=> ({...__SETCA_LABEL_FIELDS});
+window.__SETCA_toggleLocalLabelField = (key)=>{
+  if(!Object.prototype.hasOwnProperty.call(__SETCA_LABEL_FIELDS, key)) return;
+  __SETCA_LABEL_FIELDS[key] = !__SETCA_LABEL_FIELDS[key];
+  __localPrefs.labelFields = {...__SETCA_LABEL_FIELDS};
+  if(typeof window.__saveLocalPrefs === 'function') window.__saveLocalPrefs();
+  if(typeof window.__updateLocalUI === 'function') window.__updateLocalUI();
+  try{ repaintNav && repaintNav(); }catch(_){ }
+};
+window.__SETCA_setLabelModeLocal = (mode)=>{
+  const next = Number.isFinite(+mode) ? Math.max(0, Math.min(3, (+mode|0))) : 0;
+  st.labelMode = next;
+  st.showLabels = (next===0 || next===1);
+  __localPrefs.labelMode = next;
+  if(typeof window.__saveLocalPrefs === 'function') window.__saveLocalPrefs();
+  if(typeof window.__updateLocalUI === 'function') window.__updateLocalUI();
+  try{ repaintNav && repaintNav(); }catch(_){ }
+};
+function __setcaClampVisualScale(v, fallback){
+  const base = Number.isFinite(+fallback) ? +fallback : 1;
+  const n = Number.isFinite(+v) ? +v : base;
+  return Math.max(0.6, Math.min(1.8, n));
+}
+const __SETCA_VISUAL = {
+  planeScale: __setcaClampVisualScale(__localPrefs.planeScale, 1),
+  dbScale: __setcaClampVisualScale(__localPrefs.dbScale, 1)
+};
+window.__SETCA_getPlaneVisualUserScale = ()=> __setcaClampVisualScale(__SETCA_VISUAL.planeScale, 1);
+window.__SETCA_getDbVisualUserScale = ()=> __setcaClampVisualScale(__SETCA_VISUAL.dbScale, 1);
+window.__SETCA_formatVisualScalePct = (v)=> `${Math.round(__setcaClampVisualScale(v,1)*100)}%`;
+window.__SETCA_setLocalVisualScale = (kind, next)=>{
+  const key = (kind === 'db') ? 'dbScale' : 'planeScale';
+  const curr = __setcaClampVisualScale(__SETCA_VISUAL[key], 1);
+  const clamped = __setcaClampVisualScale(next, curr);
+  if(Math.abs(clamped - curr) < 0.001) return curr;
+  __SETCA_VISUAL[key] = clamped;
+  __localPrefs[key] = clamped;
+  if(typeof window.__saveLocalPrefs === 'function') window.__saveLocalPrefs();
+  if(typeof window.__updateLocalUI === 'function') window.__updateLocalUI();
+  try{ repaintPlanesList && repaintPlanesList(); }catch(_){ }
+  try{ renderPairList && renderPairList(); }catch(_){ }
+  try{ repaintNavCards && repaintNavCards(); }catch(_){ }
+  return clamped;
+};
 let __tagOffsets = __lsLoad(__TAG_KEY, {});
 let __localDrawings = __lsLoad(__DRAW_LOCAL_KEY, []);
 let __tagSaveT = null;
@@ -3348,10 +3453,14 @@ window.__applyLocalTagOffsets = ()=>{
 window.__saveLocalPrefs = ()=>{
   __localPrefs.metric = !!st.metric;
   __localPrefs.altUnit = (st.altUnit === 'm') ? 'm' : 'ft';
-  __localPrefs.predMin = Math.max(0, Math.min(60, (st.predMin|0)));
   __localPrefs.mode = (st.mode || 'digital');
   __localPrefs.showAwacsCoverage = !!st.showAwacsCoverage;
   __localPrefs.localDisplayDelaySec = [0,1,3,5].includes(Number(st.localDisplayDelaySec)) ? Number(st.localDisplayDelaySec) : 0;
+  __localPrefs.predMin = Math.max(0, Math.min(60, Number.isFinite(+st.predMin) ? (+st.predMin|0) : 0));
+  __localPrefs.labelMode = Number.isFinite(+st.labelMode) ? Math.max(0, Math.min(3, (+st.labelMode|0))) : 0;
+  __localPrefs.labelFields = {...__SETCA_LABEL_FIELDS};
+  __localPrefs.planeScale = __setcaClampVisualScale(__SETCA_VISUAL.planeScale, 1);
+  __localPrefs.dbScale = __setcaClampVisualScale(__SETCA_VISUAL.dbScale, 1);
   if(typeof __NAV_STORE !== 'undefined' && __NAV_STORE){
     __localPrefs.navZoom = Math.max(1, Math.min(40, Number.isFinite(+(__NAV_STORE.view && __NAV_STORE.view.zoom)) ? +__NAV_STORE.view.zoom : 1));
     __localPrefs.navPanX = Number.isFinite(+(__NAV_STORE.view && __NAV_STORE.view.panX)) ? +__NAV_STORE.view.panX : 0;
@@ -3397,21 +3506,52 @@ window.__updateLocalUI = ()=>{
       ? `Actualiza esta vista local por saltos cada ${delayVal} segundo${delayVal===1?'':'s'}`
       : 'Actualización continua local';
   }
+
+  const planeScaleVal = document.getElementById('planeScaleVal');
+  if(planeScaleVal) planeScaleVal.textContent = window.__SETCA_formatVisualScalePct(window.__SETCA_getPlaneVisualUserScale());
+  const dbScaleVal = document.getElementById('dbScaleVal');
+  if(dbScaleVal) dbScaleVal.textContent = window.__SETCA_formatVisualScalePct(window.__SETCA_getDbVisualUserScale());
+
+  ['0','1','2','3'].forEach(v=>{
+    const btn = document.querySelector(`[data-label-mode="${v}"]`);
+    if(btn) btn.classList.toggle('hi', Number(st.labelMode||0) === Number(v));
+  });
+  Object.entries(__SETCA_LABEL_FIELDS).forEach(([k,v])=>{
+    const btn = document.querySelector(`[data-label-field="${k}"]`);
+    if(btn){
+      btn.classList.remove('hi');
+      btn.classList.toggle('label-on', !!v);
+      btn.setAttribute('aria-pressed', v ? 'true' : 'false');
+      btn.title = v ? 'Encendido' : 'Apagado';
+    }
+  });
 };
 
 // Aplicar preferencias locales al iniciar (antes de que se pinten los paneles)
 (function __applyLocalPrefsNow(){
   if(typeof __localPrefs.metric === 'boolean') st.metric = __localPrefs.metric;
   if(__localPrefs.altUnit === 'm' || __localPrefs.altUnit === 'ft') st.altUnit = __localPrefs.altUnit;
-  if(Number.isFinite(__localPrefs.predMin)) st.predMin = Math.max(0, Math.min(60, (__localPrefs.predMin|0)));
+  st.predMin = 0;
+  st.labelMode = Number.isFinite(+__localPrefs.labelMode) ? Math.max(0, Math.min(3, (+__localPrefs.labelMode|0))) : 0;
+  st.showLabels = (st.labelMode===0 || st.labelMode===1);
+  Object.assign(__SETCA_LABEL_FIELDS, __setcaNormalizeLabelFields(__localPrefs.labelFields));
   if(typeof __localPrefs.mode === 'string' && __localPrefs.mode) st.mode = __localPrefs.mode;
   if(typeof __localPrefs.showAwacsCoverage === 'boolean') st.showAwacsCoverage = __localPrefs.showAwacsCoverage;
   if([0,1,3,5].includes(Number(__localPrefs.localDisplayDelaySec))) st.localDisplayDelaySec = Number(__localPrefs.localDisplayDelaySec);
+  __SETCA_VISUAL.planeScale = __setcaClampVisualScale(__localPrefs.planeScale, 1);
+  __SETCA_VISUAL.dbScale = __setcaClampVisualScale(__localPrefs.dbScale, 1);
   if(window.__hydrateLocalDrawingsIntoState) window.__hydrateLocalDrawingsIntoState();
 })();
 window.addEventListener('DOMContentLoaded', ()=>{
   if(window.__applyLocalTagOffsets) window.__applyLocalTagOffsets();
   if(window.__updateLocalUI) window.__updateLocalUI();
+  const labelsBtn = document.getElementById('toggleLabels');
+  if(labelsBtn){
+    labelsBtn.style.display = 'none';
+    labelsBtn.setAttribute('aria-hidden','true');
+  }
+  const legacyGroup = document.getElementById('pCmdLabelsGroup');
+  if(legacyGroup) legacyGroup.style.display = 'none';
   if(window.__hydrateLocalDrawingsIntoState) window.__hydrateLocalDrawingsIntoState();
   if(window.renderDrawingScopePanel) window.renderDrawingScopePanel();
 });
@@ -5010,222 +5150,181 @@ cvs.addEventListener('touchend', ()=>{ __touchPan = null; });
 function resize(){W=$('#center').clientWidth;H=$('#center').clientHeight;cvs.width=W;cvs.height=H;CX=W/2;CY=H/2; if(typeof window.__resizeDbOverlay==='function') window.__resizeDbOverlay();}
 addEventListener('resize',resize);resize();
 
-/* ===== Fixed-screen Data Block overlay (independiente del zoom) ===== */
+/* ===== Data Block renderizado en el radar (tamaño ajustable local desde Config) ===== */
 (function(){
-  const center = document.getElementById('center');
-  const radar = document.getElementById('radar');
-  if(!center || !radar) return;
+  try{
+    const oldOverlay = document.getElementById('dbOverlay');
+    if(oldOverlay && oldOverlay.parentNode) oldOverlay.parentNode.removeChild(oldOverlay);
+    const oldOverlayDom = document.getElementById('dbOverlayDom');
+    if(oldOverlayDom && oldOverlayDom.parentNode) oldOverlayDom.parentNode.removeChild(oldOverlayDom);
+    const oldStyle = document.getElementById('dbOverlayDomStyle');
+    if(oldStyle && oldStyle.parentNode) oldStyle.parentNode.removeChild(oldStyle);
+  }catch(_){ }
 
-  let overlay = document.getElementById('dbOverlay');
-  if(!overlay){
-    overlay = document.createElement('canvas');
-    overlay.id = 'dbOverlay';
-    overlay.setAttribute('aria-hidden','true');
-    overlay.style.position = 'absolute';
-    overlay.style.left = '0';
-    overlay.style.top = '0';
-    overlay.style.width = '100%';
-    overlay.style.height = '100%';
-    overlay.style.pointerEvents = 'none';
-    overlay.style.zIndex = '4';
-    center.appendChild(overlay);
-  }
-
-  let overlayDom = document.getElementById('dbOverlayDom');
-  if(!overlayDom){
-    overlayDom = document.createElement('div');
-    overlayDom.id = 'dbOverlayDom';
-    overlayDom.setAttribute('aria-hidden','true');
-    overlayDom.style.position = 'absolute';
-    overlayDom.style.left = '0';
-    overlayDom.style.top = '0';
-    overlayDom.style.width = '100%';
-    overlayDom.style.height = '100%';
-    overlayDom.style.pointerEvents = 'none';
-    overlayDom.style.zIndex = '5';
-    center.appendChild(overlayDom);
-  }
-
-  if(!document.getElementById('dbOverlayDomStyle')){
-    const style = document.createElement('style');
-    style.id = 'dbOverlayDomStyle';
-    style.textContent = `
-      #dbOverlayDom{overflow:hidden}
-      .db-overlay-item{
-        position:absolute;
-        box-sizing:border-box;
-        padding:0;
-        margin:0;
-        zoom:1 !important;
-        font-family:ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
-        font-size:11px;
-        line-height:13px;
-        letter-spacing:0;
-        -webkit-font-smoothing:none;
-        text-rendering:geometricPrecision;
-        white-space:nowrap;
-      }
-      .db-overlay-box{
-        border:1px solid rgba(255,255,255,0.8);
-        background:rgba(3,7,10,0.18);
-      }
-      .db-overlay-box.emergency{border-color:rgba(255,90,90,0.95)}
-      .db-overlay-row{display:flex;align-items:center;justify-content:space-between;height:13px;padding:0 4px}
-      .db-overlay-row-left{justify-content:flex-start}
-      .db-overlay-name{font-size:11px;line-height:13px}
-      .db-overlay-xpdr,.db-overlay-val{font-size:11px;line-height:13px;color:#eaffea}
-      .db-overlay-be{font-size:9px;line-height:11px;color:#ffe066;padding:1px 4px 0 4px}
-      .db-overlay-name-only{
-        border:none !important;
-        background:transparent !important;
-        color:#eaffea;
-        font-size:11px;
-        line-height:13px;
-        padding:0 2px;
-      }
-    `;
-    document.head.appendChild(style);
-  }
-
-  const octx = overlay.getContext('2d');
-  window.__dbOverlayCanvas = overlay;
-  window.__dbOverlayCtx = octx;
-  window.__dbOverlayDom = overlayDom;
   window.__dbOverlayItems = [];
   window.__SETCA_pushDbOverlayItem = function(item){
     if(!item || item.hidden) return;
     window.__dbOverlayItems.push(item);
   };
+  window.__resizeDbOverlay = function(){};
 
-  function esc(v){
-    return String(v ?? '').replace(/[&<>"']/g, ch => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[ch]));
+  function drawConnector(ax, ay, bx, by, scale){
+    ctx.save();
+    ctx.strokeStyle = 'rgba(255,255,255,0.62)';
+    ctx.lineWidth = Math.max(0.6, 0.8 * Math.max(scale, 0.45));
+    ctx.beginPath();
+    ctx.moveTo(ax, ay);
+    ctx.lineTo(bx + 4*scale, by + 4*scale);
+    ctx.stroke();
+    ctx.restore();
   }
 
-  window.__resizeDbOverlay = function(){
-    const w = radar.clientWidth || radar.width || 0;
-    const h = radar.clientHeight || radar.height || 0;
-    if(!w || !h) return;
-    overlay.width = w;
-    overlay.height = h;
-    overlay.style.width = w + 'px';
-    overlay.style.height = h + 'px';
-    overlayDom.style.width = w + 'px';
-    overlayDom.style.height = h + 'px';
-  };
-
-  function ensureNode(id){
-    const key = 'dbi_' + String(id || '').replace(/[^a-zA-Z0-9_-]/g, '_');
-    let node = document.getElementById(key);
-    if(!node){
-      node = document.createElement('div');
-      node.id = key;
-      node.className = 'db-overlay-item';
-      overlayDom.appendChild(node);
-    }
-    return node;
-  }
-
-  function drawConnector(ax, ay, bx, by){
-    octx.save();
-    octx.setTransform(1,0,0,1,0,0);
-    octx.strokeStyle = 'rgba(255,255,255,0.6)';
-    octx.lineWidth = 0.7;
-    octx.beginPath();
-    octx.moveTo(ax, ay);
-    octx.lineTo(bx + 4, by + 4);
-    octx.stroke();
-    octx.restore();
-  }
-
-  function drawItem(d, activeIds){
+  function drawDbItem(d){
     if(!d) return;
-    const pad = 4, step = 13, minW = 86;
-    const boxFont = '11px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace';
+
+    const pad = 3;
+    const rowH = 11;
+    const minW = 78;
+    const boxFont = '10px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace';
     const beFont = '9px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace';
-    const name = String(d.callsignTipoDb || d.name || '');
-    const xpdr = String(d.xpdrCode || '');
-    const beText = String(d.beText || '');
 
-    octx.save();
-    octx.setTransform(1,0,0,1,0,0);
-    octx.font = boxFont;
-    const nameW = octx.measureText(name).width;
-    const xpdrW = octx.measureText(xpdr).width;
-    octx.font = beFont;
-    const beW = beText ? octx.measureText(beText).width : 0;
-    octx.restore();
+    const fields = (d.visibleFields && typeof d.visibleFields === 'object') ? d.visibleFields : __SETCA_LABEL_FIELDS;
+    const neutralInfoColor = '#eaffea';
+    const topSegments = [];
+    if(fields.callsign && d.callsignText) topSegments.push({ text: String(d.callsignText), font: boxFont, color: d.color || neutralInfoColor });
+    if(fields.tipo && d.tipoText) topSegments.push({ text: String(d.tipoText), font: boxFont, color: d.color || neutralInfoColor });
+    if(fields.xpdr && d.xpdrText) topSegments.push({ text: String(d.xpdrText), font: boxFont, color: neutralInfoColor });
+    const topLine = topSegments.map(seg=>seg.text).join(' · ');
 
-    const w = Math.max(minW, Math.ceil(Math.max(nameW + xpdrW + 18, beW + 10)));
-    const h = beText ? 66 : 53;
-    const ax = Math.round(d.anchorX || 0), ay = Math.round(d.anchorY || 0);
-    const bx = Math.round(d.bx || 0), by = Math.round(d.by || 0);
-    const z = Number.isFinite(+window.zoom) ? +window.zoom : 1;
-    const dbScale = Math.max(0.2, Math.min(1, z));
-    const hitW = Math.max(1, Math.round(w * dbScale));
-    const hitH = Math.max(1, Math.round(h * dbScale));
+    const lineItems = [];
+    if(topSegments.length) lineItems.push({ segments: topSegments, text: topLine, font: boxFont, color: d.color || neutralInfoColor });
+    if(fields.alt && d.altText) lineItems.push({ text: String(d.altText), font: boxFont, color: neutralInfoColor });
+    if(fields.spd && d.spdText) lineItems.push({ text: String(d.spdText), font: boxFont, color: neutralInfoColor });
+    if(fields.hdg && d.hdgText) lineItems.push({ text: String(d.hdgText), font: boxFont, color: neutralInfoColor });
+    if(fields.pulsae && d.beText) lineItems.push({ text: String(d.beText), font: beFont, color: '#ffe066' });
 
-    if(d.planeRef){
-      d.planeRef.__dbBoxW = hitW;
-      d.planeRef.__dbBoxH = hitH;
-      d.planeRef.__dbBoxTop = -11;
-      d.planeRef.__dbScale = dbScale;
-    }
+    const soloName = String(d.callsignText || d.name || '');
+    const ax = Math.round(d.anchorX || 0);
+    const ay = Math.round(d.anchorY || 0);
+    const bx = Math.round(d.bx || 0);
+    const by = Math.round(d.by || 0);
 
-    drawConnector(ax, ay, bx, by);
-
-    const node = ensureNode(d.id || Math.random().toString(36).slice(2));
-    activeIds.add(node.id);
-    node.style.display = 'block';
-    node.style.left = bx + 'px';
-    node.style.top = (by - 11) + 'px';
-    node.style.width = w + 'px';
-    node.style.height = h + 'px';
-    node.style.color = d.color || '#eaffea';
-    node.style.setProperty('transform-origin', 'top left', 'important');
-    node.style.setProperty('transform', `scale(${dbScale})`, 'important');
+    const currentZoom = Number.isFinite(+window.zoom) ? +window.zoom : 1;
+    const dbScale = getTacticalVisualScale(currentZoom) * ((typeof window.__SETCA_getDbVisualUserScale === 'function') ? window.__SETCA_getDbVisualUserScale() : 1);
 
     if(Number(d.mode) === 1){
-      node.className = 'db-overlay-item db-overlay-name-only';
-      node.style.width = 'auto';
-      node.style.height = '13px';
-      node.style.top = by + 'px';
-      node.style.setProperty('transform-origin', 'top left', 'important');
-      node.style.setProperty('transform', `scale(${dbScale})`, 'important');
-      node.innerHTML = esc(String(d.name || ''));
+      const nameOnly = soloName || topLine || String(d.name || '');
+      const labelW = Math.max(20, Math.ceil((String(nameOnly).length * 7 + 4) * dbScale));
+      const labelH = Math.max(8, Math.ceil(13 * dbScale));
       if(d.planeRef){
-        const estW = Math.max(20, Math.ceil((String(d.name || '').length * 7 + 4) * dbScale));
-        d.planeRef.__dbBoxW = estW;
-        d.planeRef.__dbBoxH = Math.max(8, Math.ceil(13 * dbScale));
+        d.planeRef.__dbBoxW = labelW;
+        d.planeRef.__dbBoxH = labelH;
         d.planeRef.__dbBoxTop = 0;
+        d.planeRef.__dbScale = dbScale;
+      }
+      ctx.save();
+      ctx.translate(bx, by);
+      ctx.scale(dbScale, dbScale);
+      ctx.fillStyle = d.color || '#eaffea';
+      ctx.font = boxFont;
+      ctx.textAlign = 'left';
+      ctx.textBaseline = 'top';
+      ctx.fillText(nameOnly, 0, 0);
+      ctx.restore();
+      return;
+    }
+
+    if(!lineItems.length){
+      if(d.planeRef){
+        d.planeRef.__dbBoxW = 0;
+        d.planeRef.__dbBoxH = 0;
+        d.planeRef.__dbBoxTop = 0;
+        d.planeRef.__dbScale = dbScale;
       }
       return;
     }
 
-    node.className = 'db-overlay-item db-overlay-box' + (d.emergency ? ' emergency' : '');
-    node.innerHTML = `
-      <div class="db-overlay-row">
-        <span class="db-overlay-name">${esc(name)}</span>
-        <span class="db-overlay-xpdr">${esc(xpdr)}</span>
-      </div>
-      <div class="db-overlay-row db-overlay-row-left"><span class="db-overlay-val">${esc(String(d.altText || ''))}</span></div>
-      <div class="db-overlay-row db-overlay-row-left"><span class="db-overlay-val">${esc(String(d.spdText || ''))}</span></div>
-      <div class="db-overlay-row db-overlay-row-left"><span class="db-overlay-val">${esc(String(d.hdgText || ''))}</span></div>
-      ${beText ? `<div class="db-overlay-be">${esc(beText)}</div>` : ''}
-    `;
+    ctx.save();
+    let widest = minW;
+    lineItems.forEach(item=>{
+      if(Array.isArray(item.segments) && item.segments.length){
+        let rowWidth = pad*2;
+        item.segments.forEach((seg, idx)=>{
+          ctx.font = seg.font || item.font || boxFont;
+          rowWidth += ctx.measureText(seg.text || '').width;
+          if(idx < item.segments.length - 1){
+            ctx.font = item.font || boxFont;
+            rowWidth += ctx.measureText(' · ').width;
+          }
+        });
+        widest = Math.max(widest, Math.ceil(rowWidth));
+      }else{
+        ctx.font = item.font;
+        widest = Math.max(widest, Math.ceil(ctx.measureText(item.text).width + pad*2));
+      }
+    });
+    ctx.restore();
+
+    const baseW = widest;
+    const baseH = Math.max(18, pad*2 + lineItems.length*rowH);
+    const hitW = Math.max(1, Math.round(baseW * dbScale));
+    const hitH = Math.max(1, Math.round(baseH * dbScale));
+    const boxX = bx;
+    const boxY = by - 10*dbScale;
+
+    if(d.planeRef){
+      d.planeRef.__dbBoxW = hitW;
+      d.planeRef.__dbBoxH = hitH;
+      d.planeRef.__dbBoxTop = Math.round(-10*dbScale);
+      d.planeRef.__dbScale = dbScale;
+    }
+
+    drawConnector(ax, ay, boxX, boxY, dbScale);
+
+    ctx.save();
+    ctx.translate(boxX, boxY);
+    ctx.scale(dbScale, dbScale);
+    ctx.textAlign = 'left';
+    ctx.textBaseline = 'top';
+    ctx.lineJoin = 'round';
+    ctx.lineCap = 'round';
+
+    ctx.strokeStyle = 'rgba(255,255,255,0)';
+    ctx.lineWidth = 1;
+
+    let y = 0;
+    lineItems.forEach(item=>{
+      if(Array.isArray(item.segments) && item.segments.length){
+        let x = pad;
+        item.segments.forEach((seg, idx)=>{
+          ctx.font = seg.font || item.font || boxFont;
+          ctx.fillStyle = seg.color || item.color || neutralInfoColor;
+          ctx.fillText(seg.text || '', x, y);
+          x += ctx.measureText(seg.text || '').width;
+          if(idx < item.segments.length - 1){
+            ctx.font = item.font || boxFont;
+            ctx.fillStyle = neutralInfoColor;
+            const sep = ' · ';
+            ctx.fillText(sep, x, y);
+            x += ctx.measureText(sep).width;
+          }
+        });
+      }else{
+        ctx.font = item.font;
+        ctx.fillStyle = item.color;
+        ctx.fillText(item.text, pad, y);
+      }
+      y += rowH;
+    });
+
+    ctx.restore();
   }
 
   window.__renderDbOverlay = function(){
-    if(!overlay.width || !overlay.height) window.__resizeDbOverlay();
-    octx.clearRect(0,0,overlay.width,overlay.height);
-    const activeIds = new Set();
-    for(const item of (window.__dbOverlayItems || [])) drawItem(item, activeIds);
-    Array.from(overlayDom.children).forEach(node=>{
-      if(!activeIds.has(node.id)) node.style.display = 'none';
-    });
-    window.__dbOverlayItems.length = 0;
+    const items = window.__dbOverlayItems || [];
+    for(let i=0;i<items.length;i++) drawDbItem(items[i]);
+    items.length = 0;
   };
-
-  window.__resizeDbOverlay();
 })();
 
 /* ===== Timer UI ===== */
@@ -5316,6 +5415,7 @@ cvs.addEventListener('mousemove',e=>{const r=cvs.getBoundingClientRect();const x
 
 function toScreen(x,y){return {x:CX+offX+x*zoom*PX_PER_NM,y:CY+offY+y*zoom*PX_PER_NM};}
 function toWorld(px,py){return {x:(px-CX-offX)/(zoom*PX_PER_NM),y:(py-CY-offY)/(zoom*PX_PER_NM)};}
+function getTacticalVisualScale(z){ return 1; }
 
 /* ===== Analógico: detección por haz ===== */
 function normDeg(a){
@@ -5511,23 +5611,58 @@ function drawPlane(p){
   }
   const role=syncPlaneRoleState(p);
   const color=getRoleUiColor(role);
-  p.ghosts.forEach((g,i)=>{const sg=toScreen(g.x,g.y);const op=(i+1)/p.ghosts.length*.35;ctx.fillStyle=`rgba(179,0,255,${op})`;ctx.fillRect(sg.x-1,sg.y-1,2,2);});
+  const visualScale = getTacticalVisualScale(zoom);
+  const planeVisualScale = ((typeof window.__SETCA_getPlaneVisualUserScale === 'function') ? window.__SETCA_getPlaneVisualUserScale() : 1) * visualScale;
+  const ghostSize = 2 * planeVisualScale;
+  const unknownHalf = 3.4 * planeVisualScale;
+  const symbolRadius = 2.6 * planeVisualScale;
+  const symbolStroke = Math.max(0.8, 1 * planeVisualScale);
+  const speedForLead = Math.max(0, Number.isFinite(+p.spd) ? +p.spd : 0);
+  // Proyección frontal más compacta: aprox. la mitad del largo anterior,
+  // pero con una diferencia más clara entre velocidades lentas y rápidas.
+  const headingLen = (()=>{
+    const minLen = 4 * planeVisualScale;
+    const maxLen = 12 * planeVisualScale;
+    const len = minLen + Math.min(maxLen - minLen, (speedForLead / 125) * planeVisualScale);
+    return Math.max(minLen, Math.min(maxLen, len));
+  })();
+  const headingStroke = Math.max(0.8, 1 * planeVisualScale);
+  p.ghosts.forEach((g,i)=>{const sg=toScreen(g.x,g.y);const op=(i+1)/p.ghosts.length*.35;ctx.fillStyle=`rgba(179,0,255,${op})`;ctx.fillRect(sg.x-ghostSize/2,sg.y-ghostSize/2,ghostSize,ghostSize);});
   if(role === 'Unknown'){
     ctx.save();
     ctx.strokeStyle = color;
-    ctx.lineWidth = 1.6;
+    ctx.lineWidth = Math.max(1.1, 1.6 * planeVisualScale);
     ctx.beginPath();
-    ctx.moveTo(s.x-4, s.y-4);
-    ctx.lineTo(s.x+4, s.y+4);
-    ctx.moveTo(s.x+4, s.y-4);
-    ctx.lineTo(s.x-4, s.y+4);
+    ctx.moveTo(s.x-unknownHalf, s.y-unknownHalf);
+    ctx.lineTo(s.x+unknownHalf, s.y+unknownHalf);
+    ctx.moveTo(s.x+unknownHalf, s.y-unknownHalf);
+    ctx.lineTo(s.x-unknownHalf, s.y+unknownHalf);
     ctx.stroke();
     ctx.restore();
   }else{
-    ctx.save();ctx.beginPath();ctx.arc(s.x,s.y,3,0,2*Math.PI);ctx.fillStyle=color;ctx.fill();ctx.lineWidth=1;ctx.strokeStyle='rgba(0,0,0,0.55)';ctx.stroke();ctx.restore();
+    ctx.save();ctx.beginPath();ctx.arc(s.x,s.y,symbolRadius,0,2*Math.PI);ctx.fillStyle=color;ctx.fill();ctx.lineWidth=symbolStroke;ctx.strokeStyle='rgba(0,0,0,0.55)';ctx.stroke();ctx.restore();
   }
-  const lr=(p.hdg-90)*Math.PI/180;ctx.beginPath();ctx.moveTo(s.x,s.y);ctx.lineTo(s.x+Math.cos(lr)*25,s.y+Math.sin(lr)*25);ctx.strokeStyle=color;ctx.lineWidth=.8;ctx.stroke();
-  if(st.predMin>0){const t=st.predMin*60,nmps=(p.spd/NM2KM)/3600;const d=nmps*t;const ex=p.x+Math.cos(lr)*d,ey=p.y+Math.sin(lr)*d;const se=toScreen(ex,ey);ctx.setLineDash([4,5]);ctx.strokeStyle=color;ctx.lineWidth=.75;ctx.beginPath();ctx.moveTo(s.x,s.y);ctx.lineTo(se.x,se.y);ctx.stroke();ctx.setLineDash([]);}
+  const lr=(p.hdg-90)*Math.PI/180;ctx.beginPath();ctx.moveTo(s.x,s.y);ctx.lineTo(s.x+Math.cos(lr)*headingLen,s.y+Math.sin(lr)*headingLen);ctx.strokeStyle=color;ctx.lineWidth=headingStroke;ctx.stroke();
+  if(st.predMin>0){
+    const tSec = st.predMin * 60;
+    const nmps = (Math.max(0, Number.isFinite(+p.spd) ? +p.spd : 0) / NM2KM) / 3600;
+    const dNm = nmps * tSec;
+    const ex = p.x + Math.cos(lr) * dNm;
+    const ey = p.y + Math.sin(lr) * dNm;
+    const se = toScreen(ex, ey);
+    const startX = s.x + Math.cos(lr) * Math.max(headingLen + 1.5, 5);
+    const startY = s.y + Math.sin(lr) * Math.max(headingLen + 1.5, 5);
+    ctx.save();
+    ctx.setLineDash([3, 3]);
+    ctx.strokeStyle = color;
+    ctx.lineWidth = Math.max(0.8, 1 * planeVisualScale);
+    ctx.globalAlpha = 0.95;
+    ctx.beginPath();
+    ctx.moveTo(startX, startY);
+    ctx.lineTo(se.x, se.y);
+    ctx.stroke();
+    ctx.restore();
+  }
   const __dbFont = '11px monospace';
   const __dbBeFont = '9px monospace';
   const __dbPad = 4;
@@ -5545,23 +5680,25 @@ function drawPlane(p){
 
     const bx = Math.round(__dbAnchorX + p.tagDx);
     const by = Math.round(__dbAnchorY + p.tagDy);
-    const xpdrCode = getPlaneXpdr(p);
     const __beText = (typeof window.__SETCA_BE_getTextForPlane === 'function') ? (window.__SETCA_BE_getTextForPlane(p) || '') : '';
     const altText = st.metric ? `${(p.alt*FT2M|0)} m` : `${p.alt|0} ft`;
     const spdText = st.metric ? `${p.spd.toFixed(0)} km/h` : `${(p.spd*KMH2KTS).toFixed(0)} kts`;
     const hdgText = `${String(p.hdg|0).padStart(3,'0')}°`;
+    const labelFields = (typeof window.__SETCA_getLocalLabelFields === 'function') ? window.__SETCA_getLocalLabelFields() : {...__SETCA_LABEL_FIELDS_DEFAULT};
     if(typeof window.__SETCA_pushDbOverlayItem === 'function'){
       window.__SETCA_pushDbOverlayItem({
         id: p.id,
         planeRef: p,
         mode: st.labelMode,
         name: p.name,
-        callsignTipoDb,
-        xpdrCode,
+        callsignText: callsignDb,
+        tipoText: tipoDb,
+        xpdrText: String(p.xpdr || '').trim(),
         beText: __beText,
         altText,
         spdText,
         hdgText,
+        visibleFields: labelFields,
         anchorX: __dbAnchorX,
         anchorY: __dbAnchorY,
         bx,
@@ -5571,25 +5708,53 @@ function drawPlane(p){
       });
     }
   }
+  const localFocusHalo = st.localPlaneFocusHalo;
+  if(localFocusHalo && String(localFocusHalo.id||'') === String(p.id||'')){
+    const now = performance.now();
+    if(now <= (+localFocusHalo.until || 0)){
+      const remain = Math.max(0, (+localFocusHalo.until || 0) - now);
+      const life = Math.max(0, Math.min(1, remain / 2000));
+      const phase = (now % 980) / 980;
+      const easePulse = 0.5 - 0.5*Math.cos(phase*2*Math.PI);
+      const haloBase = Math.max(8, 7.5 * planeVisualScale);
+      const ringRadius = haloBase + (1.5 + easePulse*4.5) * planeVisualScale;
+      const innerRadius = Math.max(haloBase - (1.2 * planeVisualScale), 4);
+      const fade = Math.pow(life, 0.86);
+      ctx.save();
+      ctx.lineCap = 'round';
+      ctx.shadowBlur = 8 * planeVisualScale;
+      ctx.shadowColor = `rgba(255,219,92,${0.18 * fade})`;
+      ctx.strokeStyle = `rgba(255,219,92,${0.68 * fade})`;
+      ctx.lineWidth = Math.max(0.9, 1.2 * planeVisualScale);
+      ctx.beginPath(); ctx.arc(s.x, s.y, ringRadius, 0, 2*Math.PI); ctx.stroke();
+      ctx.shadowBlur = 0;
+      ctx.strokeStyle = `rgba(255,219,92,${0.22 * fade})`;
+      ctx.lineWidth = Math.max(0.8, 0.9 * planeVisualScale);
+      ctx.beginPath(); ctx.arc(s.x, s.y, innerRadius, 0, 2*Math.PI); ctx.stroke();
+      ctx.restore();
+    }else{
+      st.localPlaneFocusHalo = null;
+    }
+  }
   if(planeHasEmergencyXpdr(p)){
     const phase = (performance.now()%1200)/1200;
     const pulse = 0.5 + 0.5*Math.sin(phase*2*Math.PI);
-    const r1 = 14 + pulse*8;
-    const r2 = 22 + pulse*10;
+    const r1 = (14 + pulse*8) * planeVisualScale;
+    const r2 = (22 + pulse*10) * planeVisualScale;
     ctx.save();
     ctx.strokeStyle=`rgba(255,40,40,${0.55 + 0.35*pulse})`;
-    ctx.lineWidth=2;
+    ctx.lineWidth=Math.max(1.1, 2 * planeVisualScale);
     ctx.beginPath();ctx.arc(s.x,s.y,r1,0,2*Math.PI);ctx.stroke();
     ctx.strokeStyle=`rgba(255,40,40,${0.20 + 0.20*pulse})`;
-    ctx.lineWidth=1.4;
+    ctx.lineWidth=Math.max(0.9, 1.4 * planeVisualScale);
     ctx.beginPath();ctx.arc(s.x,s.y,r2,0,2*Math.PI);ctx.stroke();
     ctx.restore();
   }
-  if(st.sel.includes(p.id)){ctx.strokeStyle='#ffe066';ctx.strokeRect(s.x-10,s.y-10,20,20);}
+  if(st.sel.includes(p.id)){const selHalf=10*planeVisualScale;ctx.strokeStyle='#ffe066';ctx.lineWidth=Math.max(0.9,1*planeVisualScale);ctx.strokeRect(s.x-selHalf,s.y-selHalf,selHalf*2,selHalf*2);}
   if(p.jamming){
-    const t=(performance.now()%1000)/1000;const r=10+8*Math.sin(t*2*Math.PI);
+    const t=(performance.now()%1000)/1000;const r=(10+8*Math.sin(t*2*Math.PI))*planeVisualScale;
     ctx.strokeStyle='rgba(179,0,255,0.85)';ctx.beginPath();ctx.arc(s.x,s.y,r,0,2*Math.PI);ctx.stroke();
-    ctx.strokeStyle='rgba(179,0,255,0.45)';ctx.beginPath();ctx.arc(s.x,s.y,r+10,0,2*Math.PI);ctx.stroke();
+    ctx.strokeStyle='rgba(179,0,255,0.45)';ctx.beginPath();ctx.arc(s.x,s.y,r+10*planeVisualScale,0,2*Math.PI);ctx.stroke();
   }
 }
 
@@ -7460,6 +7625,7 @@ addEventListener('mouseup',e=>{
 cvs.addEventListener('mousedown',e=>{
   if(window.st && window.st.modoObservador) return;
   if(e.button!==0 || !e.altKey) return;
+  if(typeof __SETCA_canInstructorMovePlanes === 'function' && !__SETCA_canInstructorMovePlanes()) return;
   const r=cvs.getBoundingClientRect();const wx=toWorld(e.clientX-r.left,e.clientY-r.top).x;const wy=toWorld(e.clientX-r.left,e.clientY-r.top).y;
   const hit=null; // ALT: solo mover aeronaves, no dibujos if(hit){st.selectedDrawing=hit;draggingDrawing=st.drawings.find(d=>d.id===hit);dragStart={x:e.clientX,y:e.clientY};return;}
   let best=null,bd=1e9;st.planes.forEach(p=>{const d=Math.hypot(wx-p.x,wy-p.y);if(d<15/zoom && d<bd){bd=d;best=p;}});
@@ -7476,7 +7642,9 @@ addEventListener('mousemove',e=>{
   }
   dragStart={x:e.clientX,y:e.clientY};
 }
-  if(draggingPlane){const r=cvs.getBoundingClientRect();const w=toWorld(e.clientX-r.left,e.clientY-r.top);const sw=toWorld(dragStart.x-r.left,dragStart.y-r.top);draggingPlane.x+=w.x-sw.x;draggingPlane.y+=w.y-sw.y;dragStart={x:e.clientX,y:e.clientY};}
+  if(draggingPlane){
+  if(typeof __SETCA_canInstructorMovePlanes === 'function' && !__SETCA_canInstructorMovePlanes()){ draggingPlane=null; dragStart=null; return; }
+  const r=cvs.getBoundingClientRect();const w=toWorld(e.clientX-r.left,e.clientY-r.top);const sw=toWorld(dragStart.x-r.left,dragStart.y-r.top);draggingPlane.x+=w.x-sw.x;draggingPlane.y+=w.y-sw.y;dragStart={x:e.clientX,y:e.clientY};}
 });
 addEventListener('mouseup',()=>{
   const movedPlane = draggingPlane;
@@ -8080,6 +8248,38 @@ function applyPlaneRoleChange(p, nextRole){
   if(p) p._setcaPrevRole = rv;
   return rv;
 }
+function __setcaRefreshPlaneNameViews(opts){
+  const o = opts || {};
+  const plane = o.plane || null;
+  if(plane){
+    try{
+      const navName = document.getElementById('nm-' + plane.id);
+      if(navName && navName.value !== String(plane.name || '')) navName.value = String(plane.name || '');
+    }catch(_){}
+  }
+  try{ if(typeof repaintPlanesList === 'function') repaintPlanesList(); }catch(_){}
+  try{ if(typeof repaintPairs === 'function') repaintPairs(); }catch(_){}
+  try{ if(typeof repaintPairList === 'function') repaintPairList(); }catch(_){}
+  try{ if(typeof repaintAlt === 'function') repaintAlt(); }catch(_){}
+  try{ if(typeof repaintStudent === 'function') repaintStudent(); }catch(_){}
+  if(!o.skipNav){
+    try{ if(typeof repaintNav === 'function') repaintNav(); }catch(_){}
+  }
+}
+function __setcaCommitPlaneNameChange(plane, nextName, opts){
+  if(!plane) return;
+  const o = opts || {};
+  plane.name = String(nextName ?? '').trim();
+  if(!plane.name) plane.name = String(plane.id || '');
+  __setcaRefreshPlaneNameViews({ plane, skipNav: !!o.skipNav });
+  if(!o.skipSync){
+    try{
+      if(typeof flushSync === 'function') flushSync();
+      else if(window._SETCA_SYNC && typeof window._SETCA_SYNC.push === 'function') window._SETCA_SYNC.push();
+      else if(typeof scheduleSync === 'function') scheduleSync(0);
+    }catch(_){}
+  }
+}
 function __setcaNormalizeInitialPlaneCallsigns(){
   if(!window.st || !Array.isArray(st.planes)) return;
   __setcaEnsureCallsignSeed();
@@ -8222,6 +8422,7 @@ function repaintVuelos(){
       centerBtn.addEventListener('click', ()=>{
         if(!Number.isFinite(p.x) || !Number.isFinite(p.y)) return;
         centerWorld(p.x, p.y);
+        try{ __setcaPulsePlaneHalo(p.id, 2000); }catch(_){}
         try{ repaintNav(); }catch(_){}
       });
     }
@@ -8238,16 +8439,15 @@ function repaintVuelos(){
         return;
       }
       p.name = e.target.value;
-      syncPlaneEditsToNav(p);   // sincroniza panel de navegación (si el avión está seleccionado)
-      repaintAlt();             // sincroniza lista/alt panel que usa nombre
-      // El data block se actualiza en el render loop leyendo p.name
+      syncPlaneEditsToNav(p);
+      __setcaRefreshPlaneNameViews({ plane:p, skipNav:true });
     });
     nameInput.addEventListener('change', e=>{
       if(normalizePlaneRole(st.roles[p.id] || 'Neutral') === 'Unknown'){
         e.target.value = String(p.name || '');
+        return;
       }
-      // Re-render solo cuando termina edición para refrescar labels dependientes (ej. objetivos)
-      repaintNav();
+      __setcaCommitPlaneNameChange(p, e.target.value, { skipNav:false });
     });
 
     tipoInput.addEventListener('input', e=>{
@@ -8379,9 +8579,8 @@ function repaintNav(){
         e.target.value = String(p.name || '');
         return;
       }
-      p.name=e.target.value;
-      repaintAlt();
-      repaintVuelos();
+      __setcaCommitPlaneNameChange(p, e.target.value, { skipNav:false });
+      try{ if(typeof repaintVuelos==='function') repaintVuelos(); }catch(_){}
     };
 
     // Transponder (4 cifras)
@@ -8701,28 +8900,8 @@ if(__delaySel){
   };
 }
 $('#toggleLabels').onclick = ()=>{
-  // 0 = normal (data block), 1 = solo nombre, 2 = sin etiquetas, 3 = radar analógico
-  st.labelMode = (st.labelMode + 1) % 4;
-
-  // compat: algunos parches aún revisan showLabels
-  st.showLabels = (st.labelMode===0 || st.labelMode===1);
-
-  const btn = document.getElementById('toggleLabels');
-  if(!btn) return;
-
-  if(st.labelMode===0){
-    btn.textContent = '🧷 Etiq.';
-    btn.style.opacity = '1';
-  } else if(st.labelMode===1){
-    btn.textContent = '🧷 Solo nombre';
-    btn.style.opacity = '1';
-  } else if(st.labelMode===2){
-    btn.textContent = '🧷 Sin etiquetas';
-    btn.style.opacity = '0.65';
-  } else {
-    btn.textContent = '📡 Analógico';
-    btn.style.opacity = '1';
-  }
+  const configBtn = document.getElementById('configBtn');
+  if(configBtn){ configBtn.click(); return; }
 };
 $('#reportBtn').onclick=()=>{ $('#report').style.display='block'; renderReport(); };
 $('#closeReport').onclick=()=>{ $('#report').style.display='none'; };
@@ -9618,6 +9797,175 @@ requestAnimationFrame(()=>{ repaintPlanesList(); repaintNav(); repaintStudent();
       });
     }
 
+    // --- Config ---
+    let configBtn = document.getElementById('configBtn');
+    if(!configBtn){
+      configBtn = document.createElement('button');
+      configBtn.id = 'configBtn';
+      configBtn.textContent = '⚙ Config';
+      configBtn.title = 'Configuración';
+      configBtn.style.marginLeft = '6px';
+      configBtn.style.borderColor = '#4d6178';
+      configBtn.style.color = '#fff';
+      configBtn.style.background = '#14202d';
+      try{ exitBtn.insertAdjacentElement('afterend', configBtn); }
+      catch(_){ hdr.appendChild(configBtn); }
+    }
+    function ensureConfigPanel(){
+      let panel = document.getElementById('configPanel');
+      if(panel) return panel;
+      panel = document.createElement('div');
+      panel.id = 'configPanel';
+      panel.className = 'config-pop';
+      panel.innerHTML = `
+        <div class="config-pop-head">
+          <span>Configuración</span>
+          <button type="button" id="configCloseBtn" class="btn mini focusable">×</button>
+        </div>
+        <div class="config-pop-body"></div>`;
+      document.body.appendChild(panel);
+      const body = panel.querySelector('.config-pop-body');
+      try{
+        const labelsBtn = document.getElementById('toggleLabels');
+        if(labelsBtn){
+          labelsBtn.style.display = 'none';
+          labelsBtn.setAttribute('aria-hidden','true');
+        }
+        const labelsCard = document.createElement('div');
+        labelsCard.className = 'config-card';
+        labelsCard.innerHTML = `
+          <div class="config-card-title">Etiquetas de aviones</div>
+          <div class="cmd-row-2" style="gap:6px;flex-wrap:wrap;">
+            <button type="button" class="btn mini focusable" data-label-field="callsign">Callsign</button>
+            <button type="button" class="btn mini focusable" data-label-field="tipo">Tipo</button>
+            <button type="button" class="btn mini focusable" data-label-field="xpdr">IFF</button>
+            <button type="button" class="btn mini focusable" data-label-field="alt">Altura</button>
+            <button type="button" class="btn mini focusable" data-label-field="spd">Velocidad</button>
+            <button type="button" class="btn mini focusable" data-label-field="hdg">Rumbo</button>
+            <button type="button" class="btn mini focusable" data-label-field="pulsae">BE</button>
+          </div>`;
+        body.appendChild(labelsCard);
+
+        const unitGroup = Array.from(document.querySelectorAll('#pCmdBody .group')).find(g => {
+          const t = (g.querySelector('.group-title')?.textContent || '').trim().toLowerCase();
+          return t === 'unidades';
+        });
+        const metricBtn = document.getElementById('uMetric');
+        const imperialBtn = document.getElementById('uImperial');
+        if(unitGroup) unitGroup.style.display = 'none';
+        if(metricBtn || imperialBtn){
+          const unitsCard = document.createElement('div');
+          unitsCard.className = 'config-card';
+          unitsCard.innerHTML = '<div class="config-card-title">Unidades</div>';
+          const unitsRow = document.createElement('div');
+          unitsRow.className = 'cmd-row-2';
+          unitsRow.style.gap = '6px';
+          unitsRow.style.justifyContent = 'flex-start';
+          if(metricBtn) unitsRow.appendChild(metricBtn);
+          if(imperialBtn) unitsRow.appendChild(imperialBtn);
+          unitsCard.appendChild(unitsRow);
+          body.appendChild(unitsCard);
+        }
+
+        const aptoBtn = document.getElementById('toggleAirports');
+        const radarGroup = document.getElementById('radarAptoGroup');
+        if(radarGroup) radarGroup.style.display = 'none';
+        if(aptoBtn){
+          aptoBtn.textContent = 'Aeropuerto';
+          aptoBtn.title = 'Configuración de aeropuertos';
+          aptoBtn.style.display = '';
+          const airportCard = document.createElement('div');
+          airportCard.className = 'config-card';
+          airportCard.innerHTML = '<div class="config-card-title">Aeropuerto</div>';
+          airportCard.appendChild(aptoBtn);
+          body.appendChild(airportCard);
+        }
+
+        const predGroup = Array.from(document.querySelectorAll('#pCmdBody .group')).find(g => {
+          const t = (g.querySelector('.group-title')?.textContent || '').trim().toLowerCase();
+          return t === 'predicción' || t === 'prediccion';
+        });
+        if(predGroup){
+          predGroup.style.display = 'none';
+          const card = document.createElement('div');
+          card.className = 'config-card';
+          card.innerHTML = '<div class="config-card-title">Predicción local</div>';
+          const row = predGroup.querySelector('.cmd-row-2');
+          if(row){ row.style.gap = '6px'; row.style.justifyContent = 'flex-start'; card.appendChild(row); }
+          body.appendChild(card);
+        }
+        const sizeCard = document.createElement('div');
+        sizeCard.className = 'config-card';
+        sizeCard.innerHTML = `
+          <div class="config-card-title">Tamaño local</div>
+          <div class="cmd-row-2" style="align-items:center;justify-content:flex-start;gap:8px;flex-wrap:wrap;">
+            <div class="pred-inline" style="justify-content:flex-start;gap:6px;">
+              <span class="chip">Data block</span>
+              <button id="dbScaleMinus" class="btn mini focusable" type="button">-</button>
+              <span id="dbScaleVal" class="pill">100%</span>
+              <button id="dbScalePlus" class="btn mini focusable" type="button">+</button>
+            </div>
+            <div class="pred-inline" style="justify-content:flex-start;gap:6px;">
+              <span class="chip">Aviones</span>
+              <button id="planeScaleMinus" class="btn mini focusable" type="button">-</button>
+              <span id="planeScaleVal" class="pill">100%</span>
+              <button id="planeScalePlus" class="btn mini focusable" type="button">+</button>
+            </div>
+          </div>`;
+        body.appendChild(sizeCard);
+      }catch(_){ }
+      const closeBtn = panel.querySelector('#configCloseBtn');
+      if(closeBtn && !closeBtn.__setcaWired){
+        closeBtn.__setcaWired = true;
+        closeBtn.addEventListener('click', ()=> panel.classList.remove('open'));
+      }
+      if(!panel.__setcaOutsideWired){
+        panel.__setcaOutsideWired = true;
+        document.addEventListener('mousedown', (ev)=>{
+          if(!panel.classList.contains('open')) return;
+          if(panel.contains(ev.target) || configBtn.contains(ev.target)) return;
+          panel.classList.remove('open');
+        });
+        document.addEventListener('keydown', (ev)=>{
+          if(ev.key === 'Escape') panel.classList.remove('open');
+        });
+      }
+      try{ if(typeof window.__updateLocalUI === 'function') window.__updateLocalUI(); }catch(_){ }
+      return panel;
+    }
+
+    if(!configBtn.__setcaWired){
+      configBtn.__setcaWired = true;
+      configBtn.addEventListener('click', ()=>{
+        const panel = ensureConfigPanel();
+        panel.classList.toggle('open');
+        try{ if(typeof window.__updateLocalUI === 'function') window.__updateLocalUI(); }catch(_){ }
+      });
+    }
+    const __setcaStepVisualScale = (kind, delta)=>{
+      const getter = (kind === 'db') ? window.__SETCA_getDbVisualUserScale : window.__SETCA_getPlaneVisualUserScale;
+      const next = __setcaClampVisualScale(getter() + delta, 1);
+      window.__SETCA_setLocalVisualScale(kind, next);
+    };
+    document.addEventListener('click', (ev)=>{
+      const id = ev.target && ev.target.id;
+      if(id === 'dbScaleMinus'){ __setcaStepVisualScale('db', -0.1); flash(ev.target); }
+      else if(id === 'dbScalePlus'){ __setcaStepVisualScale('db', 0.1); flash(ev.target); }
+      else if(id === 'planeScaleMinus'){ __setcaStepVisualScale('plane', -0.1); flash(ev.target); }
+      else if(id === 'planeScalePlus'){ __setcaStepVisualScale('plane', 0.1); flash(ev.target); }
+      const modeBtn = ev.target && ev.target.closest ? ev.target.closest('[data-label-mode]') : null;
+      if(modeBtn){
+        window.__SETCA_setLabelModeLocal(modeBtn.getAttribute('data-label-mode'));
+        flash(modeBtn);
+      }
+      const fieldBtn = ev.target && ev.target.closest ? ev.target.closest('[data-label-field]') : null;
+      if(fieldBtn){
+        window.__SETCA_toggleLocalLabelField(fieldBtn.getAttribute('data-label-field'));
+        flash(fieldBtn);
+      }
+    }, {passive:true});
+    ensureConfigPanel();
+
     const allPanels = ['#pCmd','#pPlanes','#pNav','#pVuelos','#pPair','#pAlt','#pDraw','#pGTC','#pAlerts'];
     const odiOnlyPanels = ['#pVuelos','#pPair','#pAlt','#pAlerts'];
     const odtOnlyPanels = ['#pAlt','#pGTC','#pAlerts'];
@@ -9959,6 +10307,7 @@ requestAnimationFrame(()=>{ repaintPlanesList(); repaintNav(); repaintStudent();
           safeCall(repaintNav);
           safeCall(repaintPairs);
           safeCall(repaintPairList);
+          safeCall(repaintAlt);
           safeCall(repaintStudent);
           if(window.scheduleSync) try{ window.scheduleSync(); }catch(e){console.warn(e);}
         }
@@ -11053,7 +11402,6 @@ window.getDrawingCreatorName = getDrawingCreatorName;
       windDir: Number.isFinite(+src.windDir) ? +src.windDir : null,
       metric: (typeof src.metric === 'boolean') ? src.metric : null,
       altUnit: (src.altUnit === 'm' || src.altUnit === 'ft') ? src.altUnit : null,
-      predMin: Number.isFinite(+src.predMin) ? Math.max(0, Math.min(60, (+src.predMin|0))) : null,
       showAwacsCoverage: (typeof src.showAwacsCoverage === 'boolean') ? !!src.showAwacsCoverage : null,
       showLabels: (typeof src.showLabels === 'boolean') ? !!src.showLabels : null,
       labelMode: Number.isFinite(+src.labelMode) ? Math.max(0, Math.min(3, (+src.labelMode|0))) : null,
@@ -11101,7 +11449,6 @@ window.getDrawingCreatorName = getDrawingCreatorName;
     st.windDir = Number.isFinite(+scene.windDir) ? +scene.windDir : 0;
     if(typeof scene.metric === 'boolean') st.metric = scene.metric;
     if(scene.altUnit === 'm' || scene.altUnit === 'ft') st.altUnit = scene.altUnit;
-    if(Number.isFinite(+scene.predMin)) st.predMin = Math.max(0, Math.min(60, (+scene.predMin|0)));
     if(typeof scene.showAwacsCoverage === 'boolean') st.showAwacsCoverage = !!scene.showAwacsCoverage;
     if(typeof scene.showLabels === 'boolean') st.showLabels = !!scene.showLabels;
     if(Number.isFinite(+scene.labelMode)) st.labelMode = Math.max(0, Math.min(3, (+scene.labelMode|0)));
@@ -11319,7 +11666,6 @@ window.getDrawingCreatorName = getDrawingCreatorName;
       windDir: Number.isFinite(+st.windDir) ? +st.windDir : 0,
       metric: !!st.metric,
       altUnit: (st.altUnit === 'm') ? 'm' : 'ft',
-      predMin: Number.isFinite(+st.predMin) ? +st.predMin : 5,
       showAwacsCoverage: !!st.showAwacsCoverage,
       showLabels: !!st.showLabels,
       labelMode: Number.isFinite(+st.labelMode) ? Math.max(0, Math.min(3, (+st.labelMode|0))) : 0,
@@ -12969,8 +13315,9 @@ document.querySelectorAll('#pCmdBody .btn').forEach(btn=>{
     const s = toScreen(p.x, p.y);
     const bx = s.x + p.tagDx;
     const by = s.y + p.tagDy;
-    const w = Math.max(BOX_W, Number(p.__dbBoxW)||0);
-    const h = Math.max(BOX_H, Number(p.__dbBoxH)||0);
+    const currentScale = getTacticalVisualScale(Number.isFinite(+window.zoom) ? +window.zoom : 1);
+    const w = (Number.isFinite(+p.__dbBoxW) && (+p.__dbBoxW) > 0) ? (+p.__dbBoxW) : Math.max(1, Math.round(BOX_W * currentScale));
+    const h = (Number.isFinite(+p.__dbBoxH) && (+p.__dbBoxH) > 0) ? (+p.__dbBoxH) : Math.max(1, Math.round(BOX_H * currentScale));
     const top = Number.isFinite(p.__dbBoxTop) ? p.__dbBoxTop : BOX_TOP;
     const x0 = bx;
     const y0 = by + top;
@@ -15315,6 +15662,13 @@ function centerWorld(x,y){
   offX = -x * zoom * PX_PER_NM;
   offY = -y * zoom * PX_PER_NM;
 }
+function __setcaPulsePlaneHalo(planeId, ms=2000){
+  if(!planeId) return;
+  st.localPlaneFocusHalo = {
+    id: String(planeId),
+    until: performance.now() + Math.max(200, Number.isFinite(+ms) ? +ms : 2000)
+  };
+}
 
 function updateGtcPresetButtons(){
   try{
@@ -16566,6 +16920,11 @@ import { getDatabase, ref, get, set } from "https://www.gstatic.com/firebasejs/1
     chip.innerHTML = `<strong>${roleToLabel(access.role)}</strong> · ${access.callsign} · ${roomLabel(access.room)}`;
   }
 
+  function __SETCA_canInstructorMovePlanes(){
+    const access = window.__setcaAccess || {};
+    return String(access.role || '') === 'default';
+  }
+
   function applyRoleAccess(access){
     const planning = !!(access && access.planning);
     const freeplay = !!(access && access.freeplay);
@@ -16576,6 +16935,8 @@ import { getDatabase, ref, get, set } from "https://www.gstatic.com/firebasejs/1
       window.__SETCA_applyRoleMode(mode);
     }
     const isInstructor = (planning || freeplay) ? true : (String(access.role || 'default') === 'default');
+    try{ window.__SETCA_instructorPlaneMove = __SETCA_canInstructorMovePlanes(); }catch(_){ }
+    try{ if(window.st) st.canInstructorPlaneMove = !!window.__SETCA_instructorPlaneMove; }catch(_){ }
     body.classList.add('setca-role-locked');
     body.setAttribute('data-setca-role', freeplay ? 'freeplay' : (planning ? 'planning' : String(access.role || 'default')));
     const ids = ['alumnoBtn','odtBtn','observerBtn'];
@@ -17450,24 +17811,12 @@ import { getDatabase, ref, get, set } from "https://www.gstatic.com/firebasejs/1
 <script>
 (function(){
   const labelsBtn = document.getElementById('toggleLabels');
-  const cmdBody = document.getElementById('pCmdBody');
-  if(!labelsBtn || !cmdBody) return;
-
-  let group = document.getElementById('pCmdLabelsGroup');
-  if(!group){
-    group = document.createElement('div');
-    group.className = 'group';
-    group.id = 'pCmdLabelsGroup';
-    group.innerHTML = '<div class="group-title">Etiquetas</div><div id="pCmdLabelsWrap" class="btn-grid small"></div>';
-    cmdBody.appendChild(group);
+  const legacyGroup = document.getElementById('pCmdLabelsGroup');
+  if(labelsBtn){
+    labelsBtn.style.display = 'none';
+    labelsBtn.setAttribute('aria-hidden','true');
   }
-
-  const wrap = document.getElementById('pCmdLabelsWrap');
-  if(!wrap) return;
-  labelsBtn.classList.add('mini');
-  labelsBtn.style.marginLeft = '0';
-  labelsBtn.style.width = '100%';
-  wrap.appendChild(labelsBtn);
+  if(legacyGroup) legacyGroup.style.display = 'none';
 })();
 </script>
 
@@ -17898,4 +18247,3 @@ import { getDatabase, ref, get, set } from "https://www.gstatic.com/firebasejs/1
 </script>
 </body>
 </html>
-BY WALLACE
