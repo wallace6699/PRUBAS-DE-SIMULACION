@@ -1,4 +1,4 @@
-ESTE SIMULADOR SE ENCUENTRA EN FASE DE PRUEBA - PUEDEN OCURRIR ERRORES DURANTE EL FUNCIONAMIENTO 2.6.4 BY W
+ESTE SIMULADOR SE ENCUENTRA EN FASE DE PRUEBA - PUEDEN OCURRIR ERRORES DURANTE EL FUNCIONAMIENTO 2.6 09042026
 <!DOCTYPE html>
 <html lang="es">
 <head>
@@ -1069,7 +1069,8 @@ canvas#radar {
 #vuelosList .vuelosTable tbody tr[data-role="Commercial"] td:first-child,
 #vuelosList .vuelosTable tbody tr[data-role="Boogey"] td:first-child,
 #vuelosList .vuelosTable tbody tr[data-role="Hostile"] td:first-child,
-#vuelosList .vuelosTable tbody tr[data-role="Unknown"] td:first-child{
+#vuelosList .vuelosTable tbody tr[data-role="Unknown"] td:first-child,
+#vuelosList .vuelosTable tbody tr[data-role="Kill-confirm"] td:first-child{
   border-left:none !important;
 }
 
@@ -1121,10 +1122,16 @@ canvas#radar {
   font-weight:900;
   color:#111;
 }
-#vuelosList .vuelosTable .vuelosCenterDot.isUnknown{
+#vuelosList .vuelosTable .vuelosCenterDot.isUnknown,
+#vuelosList .vuelosTable .vuelosCenterDot.isKillConfirm{
   border-radius:2px !important;
   border-color:rgba(0,0,0,0.45) !important;
   box-shadow:0 0 5px rgba(255,255,255,0.10);
+}
+#vuelosList .vuelosTable .vuelosCenterDot.isKillConfirm{
+  color:#2b0000;
+  border-color:rgba(255,90,90,0.65) !important;
+  box-shadow:0 0 6px rgba(255,107,107,0.18);
 }
 #vuelosList .vuelosTable .vuelosCenterDot:hover{
   filter:brightness(1.08);
@@ -1191,6 +1198,9 @@ canvas#radar {
 }
 #vuelosList .vuelosTable .vuelosRoleSelect.roleUnknown{
   color:#9aa0a6;
+}
+#vuelosList .vuelosTable .vuelosRoleSelect.roleKillConfirm{
+  color:#ff6b6b;
 }
 
 #vuelosList .vuelosTable .vuelosRoleSelect,
@@ -3406,6 +3416,27 @@ const __SETCA_VISUAL = {
 window.__SETCA_getPlaneVisualUserScale = ()=> __setcaClampVisualScale(__SETCA_VISUAL.planeScale, 1);
 window.__SETCA_getDbVisualUserScale = ()=> __setcaClampVisualScale(__SETCA_VISUAL.dbScale, 1);
 window.__SETCA_formatVisualScalePct = (v)=> `${Math.round(__setcaClampVisualScale(v,1)*100)}%`;
+function __setcaClampMapOpacity(v, fallback){
+  const base = Number.isFinite(+fallback) ? +fallback : 0.8;
+  const n = Number.isFinite(+v) ? +v : base;
+  return Math.max(0.2, Math.min(1, n));
+}
+const __SETCA_MAP = { peruOpacity: __setcaClampMapOpacity(__localPrefs.peruMapOpacity, 0.8) };
+window.__SETCA_getPeruMapOpacity = ()=> __setcaClampMapOpacity(__SETCA_MAP.peruOpacity, 0.8);
+window.__SETCA_formatMapOpacityPct = (v)=> `${Math.round(__setcaClampMapOpacity(v,0.8)*100)}%`;
+window.__SETCA_setLocalPeruMapOpacity = (next)=>{
+  const curr = __setcaClampMapOpacity(__SETCA_MAP.peruOpacity, 0.8);
+  const clamped = __setcaClampMapOpacity(next, curr);
+  if(Math.abs(clamped - curr) < 0.001) return curr;
+  __SETCA_MAP.peruOpacity = clamped;
+  __localPrefs.peruMapOpacity = clamped;
+  try{ peruMapCacheKey = ''; }catch(_){ }
+  try{ rebuildPeruMapCache && rebuildPeruMapCache(); }catch(_){ }
+  if(typeof window.__saveLocalPrefs === 'function') window.__saveLocalPrefs();
+  if(typeof window.__updateLocalUI === 'function') window.__updateLocalUI();
+  return clamped;
+};
+window.__SETCA_stepLocalPeruMapOpacity = (delta)=> window.__SETCA_setLocalPeruMapOpacity((window.__SETCA_getPeruMapOpacity() || 0.8) + (Number.isFinite(+delta) ? +delta : 0));
 window.__SETCA_setLocalVisualScale = (kind, next)=>{
   const key = (kind === 'db') ? 'dbScale' : 'planeScale';
   const curr = __setcaClampVisualScale(__SETCA_VISUAL[key], 1);
@@ -3461,6 +3492,7 @@ window.__saveLocalPrefs = ()=>{
   __localPrefs.labelFields = {...__SETCA_LABEL_FIELDS};
   __localPrefs.planeScale = __setcaClampVisualScale(__SETCA_VISUAL.planeScale, 1);
   __localPrefs.dbScale = __setcaClampVisualScale(__SETCA_VISUAL.dbScale, 1);
+  __localPrefs.peruMapOpacity = __setcaClampMapOpacity(__SETCA_MAP.peruOpacity, 0.8);
   if(typeof __NAV_STORE !== 'undefined' && __NAV_STORE){
     __localPrefs.navZoom = Math.max(1, Math.min(40, Number.isFinite(+(__NAV_STORE.view && __NAV_STORE.view.zoom)) ? +__NAV_STORE.view.zoom : 1));
     __localPrefs.navPanX = Number.isFinite(+(__NAV_STORE.view && __NAV_STORE.view.panX)) ? +__NAV_STORE.view.panX : 0;
@@ -3511,6 +3543,8 @@ window.__updateLocalUI = ()=>{
   if(planeScaleVal) planeScaleVal.textContent = window.__SETCA_formatVisualScalePct(window.__SETCA_getPlaneVisualUserScale());
   const dbScaleVal = document.getElementById('dbScaleVal');
   if(dbScaleVal) dbScaleVal.textContent = window.__SETCA_formatVisualScalePct(window.__SETCA_getDbVisualUserScale());
+  const peruMapOpacityVal = document.getElementById('peruMapOpacityVal');
+  if(peruMapOpacityVal) peruMapOpacityVal.textContent = window.__SETCA_formatMapOpacityPct(window.__SETCA_getPeruMapOpacity());
 
   ['0','1','2','3'].forEach(v=>{
     const btn = document.querySelector(`[data-label-mode="${v}"]`);
@@ -3540,6 +3574,7 @@ window.__updateLocalUI = ()=>{
   if([0,1,3,5].includes(Number(__localPrefs.localDisplayDelaySec))) st.localDisplayDelaySec = Number(__localPrefs.localDisplayDelaySec);
   __SETCA_VISUAL.planeScale = __setcaClampVisualScale(__localPrefs.planeScale, 1);
   __SETCA_VISUAL.dbScale = __setcaClampVisualScale(__localPrefs.dbScale, 1);
+  __SETCA_MAP.peruOpacity = __setcaClampMapOpacity(__localPrefs.peruMapOpacity, 0.8);
   if(window.__hydrateLocalDrawingsIntoState) window.__hydrateLocalDrawingsIntoState();
 })();
 window.addEventListener('DOMContentLoaded', ()=>{
@@ -5530,6 +5565,12 @@ function updatePlaneAltitude(p,dt){
   }
 }
 function updatePlane(p,dt){
+  if(isPlaneKillConfirmed(p)){
+    if(!Number.isFinite(+p.hdg)) p.hdg = Number.isFinite(+p.tgtHdg) ? +p.tgtHdg : 0;
+    if(!Number.isFinite(+p.alt)) p.alt = Number.isFinite(+p.tgtAlt) ? +p.tgtAlt : 0;
+    if(!Number.isFinite(+p.spd)) p.spd = 0;
+    return;
+  }
   const acc=40;
   if(p.spd<p.tgtSpd) p.spd=Math.min(p.spd+acc*dt,p.tgtSpd);
   else if(p.spd>p.tgtSpd) p.spd=Math.max(p.spd-acc*dt,p.tgtSpd);
@@ -5628,22 +5669,27 @@ function drawPlane(p){
   })();
   const headingStroke = Math.max(0.8, 1 * planeVisualScale);
   p.ghosts.forEach((g,i)=>{const sg=toScreen(g.x,g.y);const op=(i+1)/p.ghosts.length*.35;ctx.fillStyle=`rgba(179,0,255,${op})`;ctx.fillRect(sg.x-ghostSize/2,sg.y-ghostSize/2,ghostSize,ghostSize);});
-  if(role === 'Unknown'){
+  const isKillConfirm = (role === 'Kill-confirm');
+  if(role === 'Unknown' || isKillConfirm){
+    const half = isKillConfirm ? Math.max(4.8 * planeVisualScale, unknownHalf + 1.2*planeVisualScale) : unknownHalf;
     ctx.save();
-    ctx.strokeStyle = color;
-    ctx.lineWidth = Math.max(1.1, 1.6 * planeVisualScale);
+    ctx.strokeStyle = isKillConfirm ? '#ff6b6b' : color;
+    ctx.lineWidth = Math.max(1.2, (isKillConfirm ? 1.9 : 1.6) * planeVisualScale);
     ctx.beginPath();
-    ctx.moveTo(s.x-unknownHalf, s.y-unknownHalf);
-    ctx.lineTo(s.x+unknownHalf, s.y+unknownHalf);
-    ctx.moveTo(s.x+unknownHalf, s.y-unknownHalf);
-    ctx.lineTo(s.x-unknownHalf, s.y+unknownHalf);
+    ctx.moveTo(s.x-half, s.y-half);
+    ctx.lineTo(s.x+half, s.y+half);
+    ctx.moveTo(s.x+half, s.y-half);
+    ctx.lineTo(s.x-half, s.y+half);
     ctx.stroke();
     ctx.restore();
   }else{
     ctx.save();ctx.beginPath();ctx.arc(s.x,s.y,symbolRadius,0,2*Math.PI);ctx.fillStyle=color;ctx.fill();ctx.lineWidth=symbolStroke;ctx.strokeStyle='rgba(0,0,0,0.55)';ctx.stroke();ctx.restore();
   }
-  const lr=(p.hdg-90)*Math.PI/180;ctx.beginPath();ctx.moveTo(s.x,s.y);ctx.lineTo(s.x+Math.cos(lr)*headingLen,s.y+Math.sin(lr)*headingLen);ctx.strokeStyle=color;ctx.lineWidth=headingStroke;ctx.stroke();
-  if(st.predMin>0){
+  const lr=(p.hdg-90)*Math.PI/180;
+  if(!isKillConfirm){
+    ctx.beginPath();ctx.moveTo(s.x,s.y);ctx.lineTo(s.x+Math.cos(lr)*headingLen,s.y+Math.sin(lr)*headingLen);ctx.strokeStyle=color;ctx.lineWidth=headingStroke;ctx.stroke();
+  }
+  if(!isKillConfirm && st.predMin>0){
     const tSec = st.predMin * 60;
     const nmps = (Math.max(0, Number.isFinite(+p.spd) ? +p.spd : 0) / NM2KM) / 3600;
     const dNm = nmps * tSec;
@@ -5815,7 +5861,7 @@ function drawAirports(){
   ctx.restore();
 }
 function drawGrid(){
-  const grd=ctx.createLinearGradient(0,0,0,H);grd.addColorStop(0,'#031106');grd.addColorStop(1,'#000');ctx.fillStyle=grd;ctx.fillRect(0,0,W,H);
+  const grd=ctx.createLinearGradient(0,0,0,H);grd.addColorStop(0,'#1c2128');grd.addColorStop(1,'#12161c');ctx.fillStyle=grd;ctx.fillRect(0,0,W,H);
   // Centro radar (Aeropuerto de referencia)
   if(st.radarCenter){
     ctx.fillStyle = 'rgba(255,224,102,.9)';
@@ -6230,8 +6276,24 @@ function rebuildPeruMapCache(){
     const lwThin  = wThinPx / sx;
     const lwGlow  = wGlowPx / sx;
 
+    const mapOpacity = (typeof window.__SETCA_getPeruMapOpacity === 'function')
+      ? window.__SETCA_getPeruMapOpacity()
+      : 0.8;
+
+    // Interior del Perú en negro semitransparente
+    c.fillStyle = `rgba(0,0,0,${(0.92 * mapOpacity).toFixed(3)})`;
+    c.beginPath();
+    for(let r=0;r<PERU_DEPT_RINGS.length;r++){ 
+      const ring = PERU_DEPT_RINGS[r];
+      if(!ring || ring.length < 4) continue;
+      c.moveTo(ring[0], ring[1]);
+      for(let i=2;i<ring.length;i+=2) c.lineTo(ring[i], ring[i+1]);
+      c.closePath();
+    }
+    c.fill();
+
     // Halo suave
-    c.strokeStyle = 'rgba(245,238,220,0.10)';
+    c.strokeStyle = `rgba(245,238,220,${(0.10 * mapOpacity).toFixed(3)})`;
     c.lineWidth = lwGlow;
     c.beginPath();
     for(let r=0;r<PERU_DEPT_RINGS.length;r++){ 
@@ -6244,7 +6306,7 @@ function rebuildPeruMapCache(){
     c.stroke();
 
     // Trazo principal
-    c.strokeStyle = 'rgba(245,238,220,0.55)';
+    c.strokeStyle = `rgba(245,238,220,${(0.55 * mapOpacity).toFixed(3)})`;
     c.lineWidth = lwThin;
     c.beginPath();
     for(let r=0;r<PERU_DEPT_RINGS.length;r++){ 
@@ -6263,7 +6325,8 @@ function rebuildPeruMapCache(){
 function drawPeruMap(){
   try{
     if(!PERU_DEPT_RINGS || !PERU_DEPT_RINGS.length) return;
-    const key = `${W}x${H}|${zoom.toFixed(4)}|${offX.toFixed(2)}|${offY.toFixed(2)}`;
+    const mapOpacity = (typeof window.__SETCA_getPeruMapOpacity === 'function') ? window.__SETCA_getPeruMapOpacity() : 0.8;
+    const key = `${W}x${H}|${zoom.toFixed(4)}|${offX.toFixed(2)}|${offY.toFixed(2)}|${mapOpacity.toFixed(2)}`;
     if(key !== peruMapCacheKey || !peruMapCache){
       peruMapCacheKey = key;
       rebuildPeruMapCache();
@@ -7628,7 +7691,11 @@ cvs.addEventListener('mousedown',e=>{
   if(typeof __SETCA_canInstructorMovePlanes === 'function' && !__SETCA_canInstructorMovePlanes()) return;
   const r=cvs.getBoundingClientRect();const wx=toWorld(e.clientX-r.left,e.clientY-r.top).x;const wy=toWorld(e.clientX-r.left,e.clientY-r.top).y;
   const hit=null; // ALT: solo mover aeronaves, no dibujos if(hit){st.selectedDrawing=hit;draggingDrawing=st.drawings.find(d=>d.id===hit);dragStart={x:e.clientX,y:e.clientY};return;}
-  let best=null,bd=1e9;st.planes.forEach(p=>{const d=Math.hypot(wx-p.x,wy-p.y);if(d<15/zoom && d<bd){bd=d;best=p;}});
+  let best=null,bd=1e9;st.planes.forEach(p=>{
+    if(isPlaneKillConfirmed(p)) return;
+    const d=Math.hypot(wx-p.x,wy-p.y);
+    if(d<15/zoom && d<bd){bd=d;best=p;}
+  });
   if(best){draggingPlane=best;dragStart={x:e.clientX,y:e.clientY};}
 });
 addEventListener('mousemove',e=>{
@@ -8171,7 +8238,8 @@ function normalizePlaneRole(role){
   const rv = String(role || '').trim();
   if(rv === 'Civilian') return 'Commercial';
   if(rv === 'Desconocido') return 'Unknown';
-  if(rv === 'Commercial' || rv === 'Friend' || rv === 'Neutral' || rv === 'Boogey' || rv === 'Bandit' || rv === 'Hostile' || rv === 'Unknown') return rv;
+  if(rv === 'Kill Confirm' || rv === 'KillConfirm' || rv === 'Kill-confirm') return 'Kill-confirm';
+  if(rv === 'Commercial' || rv === 'Friend' || rv === 'Neutral' || rv === 'Boogey' || rv === 'Bandit' || rv === 'Hostile' || rv === 'Unknown' || rv === 'Kill-confirm') return rv;
   return 'Neutral';
 }
 function getRoleUiColor(role){
@@ -8183,12 +8251,29 @@ function getRoleUiColor(role){
     Boogey:'#ffe44d',
     Bandit:'#ff9a3d',
     Hostile:'#ff4d4d',
-    Unknown:'#9aa0a6'
+    Unknown:'#9aa0a6',
+    'Kill-confirm':'#ff6b6b'
   })[rv] || '#35ff79';
+}
+function __SETCA_canUseKillConfirm(){
+  try{
+    if(typeof __SETCA_canInstructorMovePlanes === 'function') return !!__SETCA_canInstructorMovePlanes();
+  }catch(_){}
+  try{
+    const access = window.__setcaAccess || {};
+    return String(access.role || 'default') === 'default';
+  }catch(_){}
+  return false;
+}
+function isPlaneKillConfirmed(p){
+  try{
+    return !!(p && st && st.roles && normalizePlaneRole(st.roles[p.id] || '') === 'Kill-confirm');
+  }catch(_){}
+  return false;
 }
 function getPlaneRoleOptionsHtml(selectedRole){
   const rv = normalizePlaneRole(selectedRole);
-  return [
+  const items = [
     ['Commercial','Commercial'],
     ['Friend','Friend'],
     ['Neutral','Neutral'],
@@ -8196,7 +8281,9 @@ function getPlaneRoleOptionsHtml(selectedRole){
     ['Bandit','Bandit'],
     ['Hostile','Hostile'],
     ['Unknown','Unknown']
-  ].map(([val,label])=>`<option${rv===val?' selected':''}>${label}</option>`).join('');
+  ];
+  if(__SETCA_canUseKillConfirm() || rv === 'Kill-confirm') items.push(['Kill-confirm','Kill-confirm']);
+  return items.map(([val,label])=>`<option value="${val}"${rv===val?' selected':''}>${label}</option>`).join('');
 }
 function __setcaEnsureCallsignSeed(){
   if(!window.st) return 1;
@@ -8243,9 +8330,19 @@ function syncPlaneRoleState(p){
 }
 function applyPlaneRoleChange(p, nextRole){
   if(!p || !st || !st.roles) return normalizePlaneRole(nextRole);
+  const currentRole = normalizePlaneRole(st.roles[p.id] || 'Neutral');
   const rv = normalizePlaneRole(nextRole);
+  if(rv === 'Kill-confirm' && !__SETCA_canUseKillConfirm()) return currentRole;
+  if((currentRole === 'Kill-confirm' || rv === 'Kill-confirm') && !__SETCA_canUseKillConfirm()) return currentRole;
   st.roles[p.id] = rv;
   if(p) p._setcaPrevRole = rv;
+  if(rv === 'Kill-confirm'){
+    p._killConfirmedAt = Date.now();
+    p._killConfirmedBy = String(((window.__setcaAccess||{}).callsign || 'INSTRUCTOR')).trim() || 'INSTRUCTOR';
+  }else{
+    delete p._killConfirmedAt;
+    delete p._killConfirmedBy;
+  }
   return rv;
 }
 function __setcaRefreshPlaneNameViews(opts){
@@ -8298,14 +8395,15 @@ function applyVuelosRoleVisual(roleSelect, tr, role, centerBtn){
   if(tr) tr.dataset.role = rv;
   if(centerBtn){
     centerBtn.style.background = getRoleUiColor(rv);
-    centerBtn.textContent = rv === 'Unknown' ? '×' : '';
+    centerBtn.textContent = (rv === 'Unknown' || rv === 'Kill-confirm') ? '×' : '';
     centerBtn.classList.toggle('isUnknown', rv === 'Unknown');
+    centerBtn.classList.toggle('isKillConfirm', rv === 'Kill-confirm');
     centerBtn.title = `Centrar radar en este avión · ${rv}`;
   }
   if(!roleSelect) return;
   roleSelect.value = rv;
-  roleSelect.classList.remove('roleCommercial','roleFriend','roleNeutral','roleBoogey','roleBandit','roleHostile','roleUnknown');
-  const cls = rv==='Commercial' ? 'roleCommercial' : rv==='Friend' ? 'roleFriend' : rv==='Boogey' ? 'roleBoogey' : rv==='Bandit' ? 'roleBandit' : rv==='Hostile' ? 'roleHostile' : rv==='Unknown' ? 'roleUnknown' : 'roleNeutral';
+  roleSelect.classList.remove('roleCommercial','roleFriend','roleNeutral','roleBoogey','roleBandit','roleHostile','roleUnknown','roleKillConfirm');
+  const cls = rv==='Commercial' ? 'roleCommercial' : rv==='Friend' ? 'roleFriend' : rv==='Boogey' ? 'roleBoogey' : rv==='Bandit' ? 'roleBandit' : rv==='Hostile' ? 'roleHostile' : rv==='Unknown' ? 'roleUnknown' : rv==='Kill-confirm' ? 'roleKillConfirm' : 'roleNeutral';
   roleSelect.classList.add(cls);
   roleSelect.title = 'Rol: ' + rv;
 }
@@ -8466,12 +8564,21 @@ function repaintVuelos(){
     });
 
     roleSelect.addEventListener('change', e=>{
-      const newRole = applyPlaneRoleChange(p, e.target.value || 'Neutral');
+      const prevRole = normalizePlaneRole(st.roles[p.id] || 'Neutral');
+      const requestedRole = normalizePlaneRole(e.target.value || 'Neutral');
+      const newRole = applyPlaneRoleChange(p, requestedRole);
+      if(newRole !== requestedRole){
+        e.target.value = newRole;
+      }
+      if((requestedRole === 'Kill-confirm' || prevRole === 'Kill-confirm') && newRole !== requestedRole && !__SETCA_canUseKillConfirm()){
+        alert('Solo el INSTRUCTOR puede usar Kill-confirm.');
+      }
       applyVuelosRoleVisual(roleSelect, tr, newRole, centerBtn);
       nameInput.value = String(p.name || '');
       syncPlaneEditsToNav(p);
       repaintNav();
       repaintAlt();
+      try{ if(typeof repaintPlanesList==='function') repaintPlanesList(); }catch(_){}
       // El data block y etiquetas se actualizan automáticamente con el estado global
     });
 
@@ -8696,15 +8803,21 @@ function repaintNav(){
     role.style.color = '#000';
     role.style.background = '#fff';
     role.onchange=e=>{
-      const rv = applyPlaneRoleChange(p, e.target.value);
+      const prevRole = normalizePlaneRole(st.roles[id] || 'Neutral');
+      const requestedRole = normalizePlaneRole(e.target.value);
+      const rv = applyPlaneRoleChange(p, requestedRole);
       e.target.value = rv;
       e.target.style.color = '#000';
       e.target.style.background = '#fff';
+      if((requestedRole === 'Kill-confirm' || prevRole === 'Kill-confirm') && rv !== requestedRole && !__SETCA_canUseKillConfirm()){
+        alert('Solo el INSTRUCTOR puede usar Kill-confirm.');
+      }
       const nmInput = c.querySelector('#nm-'+id);
       if(nmInput) nmInput.value = String(p.name || '');
       repaintVuelos();
       repaintAlt();
       repaintNav();
+      try{ if(typeof repaintPlanesList==='function') repaintPlanesList(); }catch(_){}
     };
 
     // Objetivo
@@ -9803,7 +9916,7 @@ requestAnimationFrame(()=>{ repaintPlanesList(); repaintNav(); repaintStudent();
       configBtn = document.createElement('button');
       configBtn.id = 'configBtn';
       configBtn.textContent = '⚙ Config';
-      configBtn.title = 'Configuración';
+      configBtn.title = 'Configuración local';
       configBtn.style.marginLeft = '6px';
       configBtn.style.borderColor = '#4d6178';
       configBtn.style.color = '#fff';
@@ -9881,6 +9994,17 @@ requestAnimationFrame(()=>{ repaintPlanesList(); repaintNav(); repaintStudent();
           body.appendChild(airportCard);
         }
 
+        const mapCard = document.createElement('div');
+        mapCard.className = 'config-card';
+        mapCard.innerHTML = `
+          <div class="config-card-title">Mapa Perú</div>
+          <div class="cmd-row-2" style="align-items:center;justify-content:flex-start;gap:8px;flex-wrap:wrap;">
+            <button id="peruMapOpacityMinus" class="btn mini focusable" type="button">-</button>
+            <span id="peruMapOpacityVal" class="pill">80%</span>
+            <button id="peruMapOpacityPlus" class="btn mini focusable" type="button">+</button>
+          </div>`;
+        body.appendChild(mapCard);
+
         const predGroup = Array.from(document.querySelectorAll('#pCmdBody .group')).find(g => {
           const t = (g.querySelector('.group-title')?.textContent || '').trim().toLowerCase();
           return t === 'predicción' || t === 'prediccion';
@@ -9953,6 +10077,8 @@ requestAnimationFrame(()=>{ repaintPlanesList(); repaintNav(); repaintStudent();
       else if(id === 'dbScalePlus'){ __setcaStepVisualScale('db', 0.1); flash(ev.target); }
       else if(id === 'planeScaleMinus'){ __setcaStepVisualScale('plane', -0.1); flash(ev.target); }
       else if(id === 'planeScalePlus'){ __setcaStepVisualScale('plane', 0.1); flash(ev.target); }
+      else if(id === 'peruMapOpacityMinus'){ window.__SETCA_stepLocalPeruMapOpacity(-0.1); flash(ev.target); draw(); }
+      else if(id === 'peruMapOpacityPlus'){ window.__SETCA_stepLocalPeruMapOpacity(0.1); flash(ev.target); draw(); }
       const modeBtn = ev.target && ev.target.closest ? ev.target.closest('[data-label-mode]') : null;
       if(modeBtn){
         window.__SETCA_setLabelModeLocal(modeBtn.getAttribute('data-label-mode'));
@@ -11447,12 +11573,9 @@ window.getDrawingCreatorName = getDrawingCreatorName;
     st.pairs = Array.isArray(scene.pairs) ? cloneDeep(scene.pairs) : [];
     st.windKmh = Number.isFinite(+scene.windKmh) ? +scene.windKmh : 0;
     st.windDir = Number.isFinite(+scene.windDir) ? +scene.windDir : 0;
-    if(typeof scene.metric === 'boolean') st.metric = scene.metric;
-    if(scene.altUnit === 'm' || scene.altUnit === 'ft') st.altUnit = scene.altUnit;
+    // Preferencias de CONFIG quedan netamente locales:
+    // unidades, etiquetas, predicción, tamaños y opacidad de mapa no se importan desde escenas.
     if(typeof scene.showAwacsCoverage === 'boolean') st.showAwacsCoverage = !!scene.showAwacsCoverage;
-    if(typeof scene.showLabels === 'boolean') st.showLabels = !!scene.showLabels;
-    if(Number.isFinite(+scene.labelMode)) st.labelMode = Math.max(0, Math.min(3, (+scene.labelMode|0)));
-    else if(typeof scene.showLabels === 'boolean') st.labelMode = scene.showLabels ? 0 : 2;
     if(typeof scene.mode === 'string' && scene.mode.trim()) st.mode = String(scene.mode);
     if(scene.radarCenter && typeof scene.radarCenter === 'object') st.radarCenter = cloneDeep(scene.radarCenter);
   }
@@ -11664,12 +11787,9 @@ window.getDrawingCreatorName = getDrawingCreatorName;
       pairs: __exportList(Array.isArray(st.pairs) ? st.pairs : []),
       windKmh: Number.isFinite(+st.windKmh) ? +st.windKmh : 0,
       windDir: Number.isFinite(+st.windDir) ? +st.windDir : 0,
-      metric: !!st.metric,
-      altUnit: (st.altUnit === 'm') ? 'm' : 'ft',
       showAwacsCoverage: !!st.showAwacsCoverage,
-      showLabels: !!st.showLabels,
-      labelMode: Number.isFinite(+st.labelMode) ? Math.max(0, Math.min(3, (+st.labelMode|0))) : 0,
       mode: (typeof st.mode === 'string' && st.mode.trim()) ? String(st.mode) : 'digital',
+      // CONFIG queda local: no exportar unidades, etiquetas, predicción, tamaños ni opacidad de mapa.
       radarCenter: __cloneExportSafe(st.radarCenter || null)
     };
   }
@@ -15157,15 +15277,7 @@ document.querySelectorAll('#pCmdBody .btn').forEach(btn=>{
           </label>
           <label class="ctxFld">
             <span class="ctxLbl">Rol</span>
-            <select id="setcaPlaneCtxRole">
-              <option value="Commercial">Commercial</option>
-              <option value="Friend">Friend</option>
-              <option value="Neutral">Neutral</option>
-              <option value="Boogey">Boogey</option>
-              <option value="Bandit">Bandit</option>
-              <option value="Hostile">Hostile</option>
-              <option value="Unknown">Unknown</option>
-            </select>
+            <select id="setcaPlaneCtxRole">${getPlaneRoleOptionsHtml('Neutral')}</select>
           </label>
           <label class="ctxFld">
             <span class="ctxLbl">IFF</span>
@@ -15299,6 +15411,7 @@ document.querySelectorAll('#pCmdBody .btn').forEach(btn=>{
     if(callsignIn) callsignIn.value = String((p.name ?? p.callsign ?? p.id ?? '') || '');
     if(tipoIn) tipoIn.value = String((p.tipo ?? p.tipoAeronave ?? p.planeType ?? '') || '');
     if(roleSel){
+      roleSel.innerHTML = getPlaneRoleOptionsHtml(roleVal);
       roleSel.value = normalizePlaneRole(roleVal);
       roleSel.style.background = '#fff';
       roleSel.style.color = '#000';
@@ -15337,12 +15450,13 @@ document.querySelectorAll('#pCmdBody .btn').forEach(btn=>{
     if(Number.isFinite(turnVal)) p.turn = Math.max(0, turnVal);
     if(callsignVal) p.name = callsignVal; else p.name = String(p.id || '');
     p.tipo = tipoVal;
-    if(normalizePlaneRole(roleVal) === 'Unknown'){
-      applyPlaneRoleChange(p, roleVal);
-      if(callsignIn) callsignIn.value = String(p.name || '');
-    }else{
-      if(st && st.roles) applyPlaneRoleChange(p, roleVal);
+    const prevRoleCtx = normalizePlaneRole((st && st.roles && st.roles[p.id]) || 'Neutral');
+    const appliedRole = applyPlaneRoleChange(p, roleVal);
+    if(roleSel && roleSel.value !== appliedRole) roleSel.value = appliedRole;
+    if((roleVal === 'Kill-confirm' || prevRoleCtx === 'Kill-confirm') && appliedRole !== roleVal && !__SETCA_canUseKillConfirm()){
+      alert('Solo el INSTRUCTOR puede usar Kill-confirm.');
     }
+    if(callsignIn) callsignIn.value = String(p.name || '');
     setPlaneXpdr(p, iffVal);
     if(iffIn && iffIn.value !== iffVal) iffIn.value = iffVal;
     p.ctxMissileType = missileVal || 'AMRAAM';
@@ -16706,7 +16820,8 @@ import { getDatabase, ref, get, set } from "https://www.gstatic.com/firebasejs/1
     const raw = String(base || '').trim();
     if(raw === 'Civilian') return 'Commercial';
     if(raw === 'Desconocido') return 'Unknown';
-    if(raw === 'Commercial' || raw === 'Friend' || raw === 'Neutral' || raw === 'Boogey' || raw === 'Bandit' || raw === 'Hostile' || raw === 'Unknown') return raw;
+    if(raw === 'Kill Confirm' || raw === 'KillConfirm' || raw === 'Kill-confirm') return 'Kill-confirm';
+    if(raw === 'Commercial' || raw === 'Friend' || raw === 'Neutral' || raw === 'Boogey' || raw === 'Bandit' || raw === 'Hostile' || raw === 'Unknown' || raw === 'Kill-confirm') return raw;
     return 'Friend';
   };
   function baseCanSeePlane(){
@@ -18247,3 +18362,4 @@ import { getDatabase, ref, get, set } from "https://www.gstatic.com/firebasejs/1
 </script>
 </body>
 </html>
+by wallace
