@@ -1,4 +1,4 @@
-ESTE SIMULADOR SE ENCUENTRA EN FASE DE PRUEBA - PUEDEN OCURRIR ERRORES DURANTE EL FUNCIONAMIENTO 2.6
+ESTE SIMULADOR SE ENCUENTRA EN FASE DE PRUEBA - PUEDEN OCURRIR ERRORES DURANTE EL FUNCIONAMIENTO 2.5.2 040326
 <!DOCTYPE html>
 <html lang="es">
 <head>
@@ -241,9 +241,10 @@ document.getElementById('cancelDelete').onclick = ()=>{
         const payload = {
           planes: planesClean,
           roles: snap.roles,
+          serverPause: snap.serverPause && snap.serverPause.active ? {active:true,callsign:String(snap.serverPause.callsign||'INSTRUCTOR'),startedAt:Number(snap.serverPause.startedAt||Date.now())} : null,
           drawings: Array.isArray(snap.drawings) ? snap.drawings.filter(d=>!(d && d.visibility === 'local')).map(d=>__normalizeDrawingScope(__clonePlain(d))) : snap.drawings,
           gtc: Array.isArray(snap.gtc) ? snap.gtc : [],
-          pairs: Array.isArray(snap.pairs) ? snap.pairs : [],
+          // Emparejamientos = NETAMENTE LOCAL. No se sincronizan.
           missiles: missilesClean,
           impactMarks: Array.isArray(snap.impactMarks) ? snap.impactMarks : [],
           missileStats: __normalizeMissileStats(snap.missileStats),
@@ -342,6 +343,7 @@ let __setcaLastAppliedRemoteTs = 0;
 
       let planesChanged = false;
       let rolesChanged = false;
+      let serverPauseChanged = false;
       let drawingsChanged = false;
       let gtcChanged = false;
       let pairsChanged = false;
@@ -360,6 +362,20 @@ let __setcaLastAppliedRemoteTs = 0;
       if (v.roles) {
         rolesChanged = (__setcaSafeJson(st.roles) !== __setcaSafeJson(v.roles));
         if(rolesChanged) st.roles = v.roles;
+      }
+
+      {
+        const nextServerPause = (v.serverPause && v.serverPause.active) ? {
+          active:true,
+          callsign:String(v.serverPause.callsign || 'INSTRUCTOR'),
+          startedAt:Number(v.serverPause.startedAt || Date.now())
+        } : null;
+        serverPauseChanged = (__setcaSafeJson(st.serverPause || null) !== __setcaSafeJson(nextServerPause));
+        if(serverPauseChanged){
+          st.serverPause = nextServerPause;
+          try{ if(typeof __setLocalPauseUI === 'function') __setLocalPauseUI(); else if(typeof __setServerPauseUI === 'function') __setServerPauseUI(); }catch(_){}
+          try{ if(typeof __refreshLocalDelaySnapshot === 'function') __refreshLocalDelaySnapshot(true); }catch(_){}
+        }
       }
 
       if (v.drawings) {
@@ -382,11 +398,8 @@ let __setcaLastAppliedRemoteTs = 0;
         if(gtcChanged) st.gtc = nextGtc;
       }
 
-      if (Array.isArray(v.pairs)) {
-        const nextPairs = __setcaMergeRemoteArray(st.pairs, v.pairs, { prefix:'pair' });
-        pairsChanged = !__setcaSameArrayRefs(st.pairs, nextPairs);
-        if(pairsChanged) st.pairs = nextPairs;
-      }
+      // Emparejamientos = NETAMENTE LOCAL. Ignorar cualquier pareo remoto.
+      pairsChanged = false;
 
       if (Array.isArray(v.missiles)) {
         const nextMissiles = __setcaMergeRemoteArray(st.missiles, v.missiles.map(m=>{
@@ -424,13 +437,13 @@ let __setcaLastAppliedRemoteTs = 0;
       // Reaplicar offsets locales de Data Block (no se sincronizan)
       if (window.__applyLocalTagOffsets) window.__applyLocalTagOffsets();
 
-      if(planesChanged || rolesChanged || drawingsChanged || gtcChanged || pairsChanged || missilesChanged || impactsChanged || statsChanged || windChanged){
+      if(planesChanged || rolesChanged || serverPauseChanged || drawingsChanged || gtcChanged || pairsChanged || missilesChanged || impactsChanged || statsChanged || windChanged){
         try{ if(typeof draw === 'function') draw(); }catch(_){ }
       }
 
       const planesStructuralChanged = (__setcaPlaneStructureSig(st.planes, st.roles) !== prevPlaneStructureSig);
 
-      if(planesStructuralChanged || rolesChanged || drawingsChanged || windChanged){
+      if(planesStructuralChanged || rolesChanged || serverPauseChanged || drawingsChanged || windChanged){
         repaintPlanesList && repaintPlanesList();
         repaintNav && repaintNav();
         repaintAlt && repaintAlt();
@@ -445,12 +458,12 @@ let __setcaLastAppliedRemoteTs = 0;
       if(gtcChanged){
         try{ repaintGTC && repaintGTC(); }catch(_){ }
       }
-      if(missilesChanged || impactsChanged || statsChanged || planesChanged || rolesChanged || gtcChanged || drawingsChanged || windChanged){
+      if(missilesChanged || impactsChanged || statsChanged || planesChanged || rolesChanged || serverPauseChanged || gtcChanged || drawingsChanged || windChanged){
         try{ paintAlerts && paintAlerts(); }catch(_){ }
         try{ renderObserverStats && renderObserverStats(); }catch(_){ }
         try{ if(typeof __navRecordAll === 'function') __navRecordAll(true); }catch(_){ }
       }
-      return (planesChanged || rolesChanged || drawingsChanged || gtcChanged || pairsChanged || missilesChanged || impactsChanged || statsChanged || windChanged);
+      return (planesChanged || rolesChanged || serverPauseChanged || drawingsChanged || gtcChanged || pairsChanged || missilesChanged || impactsChanged || statsChanged || windChanged);
     } catch(e){ console.warn("Apply remote state error:", e); return false; }
   }
 
@@ -2915,8 +2928,15 @@ body[data-setca-role="observer"] #pUnitMgr{
 }
 </style>
 
+
+<style id="setca-server-pause-style">
+#setcaServerPauseBanner{position:fixed;left:50%;top:74px;transform:translateX(-50%);z-index:9500;display:none;pointer-events:none;padding:8px 14px;border-radius:999px;border:1px solid rgba(255,224,102,.55);background:rgba(12,16,24,.86);color:#ffe066;font:600 12px/1.2 system-ui,-apple-system,Segoe UI,sans-serif;letter-spacing:.02em;box-shadow:0 10px 30px rgba(0,0,0,.35);backdrop-filter:blur(6px);}
+#setcaServerPauseBanner strong{color:#fff;font-weight:700}
+</style>
 </head>
 <body class="setca-access-locked">
+<div id="setcaServerPauseBanner">El instructor <strong>INSTRUCTOR</strong> ha pausado el servidor</div>
+
 <div class="app">
 <header>
   <h1>SETCA</h1>
@@ -3428,6 +3448,7 @@ let st={
   metric:false,
   paused:false,
   localPause:false,
+  serverPause:null,
   pauseSnapshot:null,
   pauseSnapshotAt:0,
   t0:0, elapsed:0,
@@ -4124,8 +4145,62 @@ function __refreshLocalDelaySnapshot(force){
     __captureLocalDelaySnapshot();
   }
 }
+
+function __SETCA_isInstructorSession(){
+  try{ return !!(window.__setcaAccess && String(window.__setcaAccess.role || '') === 'default'); }catch(_){ return false; }
+}
+function __SETCA_isServerPaused(){
+  try{ return !!(st && st.serverPause && st.serverPause.active); }catch(_){ return false; }
+}
+function __SETCA_getInstructorCallsign(){
+  try{
+    const cs = String((window.__setcaAccess && window.__setcaAccess.callsign) || localStorage.getItem('setca_username') || 'INSTRUCTOR').trim();
+    return cs || 'INSTRUCTOR';
+  }catch(_){ return 'INSTRUCTOR'; }
+}
+function __SETCA_escapeHtml(txt){
+  return String(txt == null ? '' : txt).replace(/[&<>"']/g, m=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m]));
+}
+function __setServerPauseUI(){
+  const paused = __SETCA_isServerPaused();
+  const banner = document.getElementById('setcaServerPauseBanner');
+  const cs = String((st && st.serverPause && st.serverPause.callsign) || 'INSTRUCTOR').trim() || 'INSTRUCTOR';
+  if(banner){
+    banner.style.display = paused ? 'block' : 'none';
+    banner.innerHTML = `El instructor <strong>${__SETCA_escapeHtml(cs)}</strong> ha pausado el servidor`;
+  }
+  const chip = document.getElementById('stateChip');
+  const simst = document.getElementById('simstate');
+  const btn = document.getElementById('pause');
+  if(paused){
+    if(chip){ chip.textContent = 'Pausa servidor'; chip.style.borderColor = '#ffe066'; chip.style.color = '#ffe066'; }
+    if(simst) simst.textContent = 'PAUSA SERVIDOR';
+    if(btn && __SETCA_isInstructorSession()){
+      btn.textContent = '▶️ Reanudar servidor';
+      btn.title = 'Reanudar la misión para toda la sala';
+    }
+  }
+}
+function __toggleInstructorServerPause(){
+  if(!(window.__SETCA_isPlanningMode && window.__SETCA_isPlanningMode()) && __SETCA_isInstructorSession()){
+    if(__SETCA_isServerPaused()){
+      st.serverPause = null;
+    }else{
+      st.serverPause = { active:true, callsign:__SETCA_getInstructorCallsign(), startedAt:Date.now() };
+      if(st.localPause){ st.localPause = false; try{ __clearLocalPauseSnapshot(); }catch(_){} }
+    }
+    __setLocalPauseUI();
+    try{ if(window._SETCA_SYNC && typeof window._SETCA_SYNC.pushNow === 'function') window._SETCA_SYNC.pushNow(); else if(window._SETCA_SYNC && typeof window._SETCA_SYNC.push === 'function') window._SETCA_SYNC.push(); }catch(_){ }
+    return true;
+  }
+  return false;
+}
 function __setLocalPauseUI(){
   if(window.__SETCA_isPlanningMode && window.__SETCA_isPlanningMode()) return;
+  if(__SETCA_isServerPaused()){
+    __setServerPauseUI();
+    return;
+  }
   const paused = !!(st && st.localPause);
   const chip = document.getElementById('stateChip');
   const simst = document.getElementById('simstate');
@@ -4137,11 +4212,17 @@ function __setLocalPauseUI(){
   }
   if(simst) simst.textContent = paused ? 'PAUSA LOCAL' : 'RUN';
   if(btn){
-    btn.textContent = paused ? '▶️ Reanudar local' : '⏸️ Pausa local';
-    btn.title = paused
-      ? 'Reanudar la vista local en tiempo real'
-      : 'Congelar solo esta pantalla para analizar el momento, sin detener la nube';
+    if(__SETCA_isInstructorSession()){
+      btn.textContent = paused ? '▶️ Reanudar local' : '⏸️ Pausar servidor';
+      btn.title = 'El Instructor pausa o reanuda la misión para toda la sala';
+    }else{
+      btn.textContent = paused ? '▶️ Reanudar local' : '⏸️ Pausa local';
+      btn.title = paused
+        ? 'Reanudar la vista local en tiempo real'
+        : 'Congelar solo esta pantalla para analizar el momento, sin detener la nube';
+    }
   }
+  __setServerPauseUI();
 }
 function __drawLocalPauseOverlay(){
   if(!(st && st.localPause)) return;
@@ -4162,6 +4243,28 @@ function __drawLocalPauseOverlay(){
   ctx.restore();
 }
 
+function __drawServerPauseOverlay(){
+  try{
+    const msg = `PAUSA SERVIDOR · ${String((st.serverPause && st.serverPause.callsign) || 'INSTRUCTOR')}`;
+    ctx.save();
+    ctx.font = '600 12px system-ui, sans-serif';
+    const w = Math.ceil(ctx.measureText(msg).width + 28);
+    const h = 28;
+    const x = Math.round((W - w) / 2);
+    const y = 16;
+    ctx.fillStyle = 'rgba(12,16,24,0.82)';
+    ctx.strokeStyle = 'rgba(255,224,102,0.62)';
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    if(ctx.roundRect) ctx.roundRect(x, y, w, h, 14); else ctx.rect(x,y,w,h);
+    ctx.fill(); ctx.stroke();
+    ctx.fillStyle = '#ffe066';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(msg, W/2, y + h/2 + 0.5);
+    ctx.restore();
+  }catch(_){ }
+}
 function __navGetTimeBounds(){
   let min = Infinity, max = -Infinity;
   Object.values(__NAV_STORE.tracks || {}).forEach(track=>{
@@ -6458,7 +6561,7 @@ function repaintPairList(){
     const row=document.createElement('div'); row.className='row';
     row.innerHTML=`<span class="badge">${A?A.name:pr.a}</span> ↔ <span class="badge">${B?B.name:pr.b}</span>
       <button class="mini btn focusable" data-i="${idx}">Quitar</button>`;
-    const btn=row.querySelector('button'); btn.onclick=()=>{ st.pairs.splice(idx,1); repaintPairList(); if(typeof flushSync==='function') flushSync(); else if(typeof scheduleSync==='function') scheduleSync(0); };
+    const btn=row.querySelector('button'); btn.onclick=()=>{ st.pairs.splice(idx,1); repaintPairList(); try{ repaintPairs && repaintPairs(); }catch(_){ } try{ draw && draw(); }catch(_){ } };
     list.appendChild(row);
   });
 }
@@ -9137,8 +9240,9 @@ let lastTS=0,accFPS=0,frames=0;
 function loop(ts){
   const dt=Math.max(0,(ts-lastTS)/1000); lastTS=ts;
   const planningMode = !!(window.__SETCA_isPlanningMode && window.__SETCA_isPlanningMode());
-  if(!planningMode){ st.elapsed = performance.now() - st.t0; telTick += dt; if(telTick>5){logTel(); telTick=0;} }
-  if(!planningMode){ st.planes.forEach(p=>updatePlane(p,dt)); updateMissiles(dt); updatePairs(); sweepDetect(dt); }
+  const serverPaused = __SETCA_isServerPaused();
+  if(!planningMode && !serverPaused){ st.elapsed = performance.now() - st.t0; telTick += dt; if(telTick>5){logTel(); telTick=0;} }
+  if(!planningMode && !serverPaused){ st.planes.forEach(p=>updatePlane(p,dt)); updateMissiles(dt); updatePairs(); sweepDetect(dt); }
   if(!planningMode && !(st && st.localPause)){
     try{ __refreshLocalDelaySnapshot(false); }catch(_){ }
   }
@@ -9206,6 +9310,7 @@ try{
     if(st !== __liveState) st = __liveState;
   }
   if(st.localPause) __drawLocalPauseOverlay();
+  if(__SETCA_isServerPaused()) __drawServerPauseOverlay();
   accFPS+=dt;frames++;if(accFPS>=0.5){fpsEl.textContent=String(Math.round(frames/accFPS));accFPS=0;frames=0;}
   requestAnimationFrame(loop);
 }
@@ -9214,6 +9319,7 @@ requestAnimationFrame(loop);
 /* ===== Wire buttons ===== */
 $('#start').onclick=()=>{
   if(window.__SETCA_isPlanningMode && window.__SETCA_isPlanningMode()) return;
+  if(__SETCA_isInstructorSession() && __SETCA_isServerPaused()){ st.serverPause = null; __setLocalPauseUI(); try{ if(window._SETCA_SYNC && typeof window._SETCA_SYNC.pushNow === 'function') window._SETCA_SYNC.pushNow(); }catch(_){} }
   if(st.localPause){
     st.localPause = false;
     __clearLocalPauseSnapshot();
@@ -9224,6 +9330,7 @@ $('#start').onclick=()=>{
 };
 $('#pause').onclick = ()=>{
   if(window.__SETCA_isPlanningMode && window.__SETCA_isPlanningMode()) return;
+  if(__toggleInstructorServerPause()) return;
   st.localPause = !st.localPause;
   if(st.localPause) __captureLocalPauseSnapshot();
   else { __clearLocalPauseSnapshot(); __refreshLocalDelaySnapshot(true); }
@@ -9629,16 +9736,16 @@ $('#doPair').onclick=()=>{
     if(!ex){
       st.pairs.push({a,b});
       repaintPairList();
-      if(typeof flushSync==='function') flushSync();
-      else if(typeof scheduleSync==='function') scheduleSync(0);
+      try{ repaintPairs && repaintPairs(); }catch(_){ }
+      try{ draw && draw(); }catch(_){ }
     } else alert('Ya emparejados.');
   } else alert('Seleccione dos distintos.');
 };
 $('#unPair').onclick=()=>{
   st.pairs=[];
   repaintPairList();
-  if(typeof flushSync==='function') flushSync();
-  else if(typeof scheduleSync==='function') scheduleSync(0);
+  try{ repaintPairs && repaintPairs(); }catch(_){ }
+  try{ draw && draw(); }catch(_){ }
 };
 /* Online (beta) code removed per user request */
 /* ===== Inicialización ===== */
@@ -18655,6 +18762,177 @@ import { getDatabase, ref, get, set } from "https://www.gstatic.com/firebasejs/1
   });
 })();
 </script>
+
+<style>
+body.setca-observer-readonly-strict #vuelosList .vuelosNameInput,
+body.setca-observer-readonly-strict #vuelosList .vuelosTipoInput,
+body.setca-observer-readonly-strict #vuelosList .vuelosRoleSelect,
+body.setca-observer-readonly-strict #vuelosList .vuelosM1Input,
+body.setca-observer-readonly-strict #vuelosList .vuelosXpdrInput,
+body.setca-observer-readonly-strict #navCards input,
+body.setca-observer-readonly-strict #navCards select,
+body.setca-observer-readonly-strict #pairA,
+body.setca-observer-readonly-strict #pairB,
+body.setca-observer-readonly-strict #doPair,
+body.setca-observer-readonly-strict #unPair{
+  opacity:.62 !important;
+  cursor:not-allowed !important;
+}
+</style>
+<script>
+(function(){
+  if(window.__SETCA_OBSERVER_STRICT_READONLY_PATCH__) return;
+  window.__SETCA_OBSERVER_STRICT_READONLY_PATCH__ = true;
+
+  const cvs = document.getElementById('radar');
+  const EDITABLE_SELECTOR = [
+    '#vuelosList .vuelosNameInput',
+    '#vuelosList .vuelosTipoInput',
+    '#vuelosList .vuelosRoleSelect',
+    '#vuelosList .vuelosM1Input',
+    '#vuelosList .vuelosXpdrInput',
+    '#navCards input',
+    '#navCards select',
+    '#pairA',
+    '#pairB',
+    '#doPair',
+    '#unPair'
+  ].join(',');
+
+  function consume(e){
+    if(!e) return;
+    try{ e.preventDefault && e.preventDefault(); }catch(_){ }
+    try{ e.stopImmediatePropagation ? e.stopImmediatePropagation() : e.stopPropagation && e.stopPropagation(); }catch(_){ }
+  }
+  function isObserverStrict(){
+    try{
+      const accessRole = String(((window.__setcaAccess||{}).role || '')).toLowerCase();
+      if(accessRole === 'observer') return true;
+    }catch(_){ }
+    try{
+      const bodyRole = String(document.body && document.body.getAttribute('data-setca-role') || '').toLowerCase();
+      if(bodyRole === 'observer') return true;
+    }catch(_){ }
+    try{ if(window.st && st.modoObservador) return true; }catch(_){ }
+    return false;
+  }
+  window.__SETCA_isObserverReadOnly = isObserverStrict;
+
+  function hideObserverEditUi(){
+    ['setcaPlaneCtx','setcaWaypointEditor','setcaGtcCtx'].forEach(id=>{
+      try{
+        const el = document.getElementById(id);
+        if(el) el.style.display = 'none';
+      }catch(_){ }
+    });
+  }
+
+  function planeHitAtClient(clientX, clientY){
+    try{
+      if(!cvs || !window.st || !Array.isArray(st.planes) || typeof toScreen !== 'function') return null;
+      const r = cvs.getBoundingClientRect();
+      const px = clientX - r.left;
+      const py = clientY - r.top;
+      if(px < 0 || py < 0 || px > r.width || py > r.height) return null;
+      let best = null, bestD = 1e9;
+      const th = 12;
+      for(const p of st.planes){
+        if(!p || p._hit) continue;
+        const s = toScreen(p.x||0, p.y||0);
+        const d = Math.hypot((s.x||0) - px, (s.y||0) - py);
+        if(d <= th && d < bestD){ bestD = d; best = p; }
+      }
+      return best;
+    }catch(_){ return null; }
+  }
+
+  function syncObserverReadOnlyUi(){
+    const locked = isObserverStrict();
+    document.body.classList.toggle('setca-observer-readonly-strict', locked);
+    const nodes = document.querySelectorAll(EDITABLE_SELECTOR);
+    nodes.forEach(el=>{
+      try{
+        if(!el.dataset.setcaObsOrigDisabled) el.dataset.setcaObsOrigDisabled = el.disabled ? '1' : '0';
+        if(typeof el.readOnly === 'boolean' && !el.dataset.setcaObsOrigReadonly) el.dataset.setcaObsOrigReadonly = el.readOnly ? '1' : '0';
+        const origDisabled = el.dataset.setcaObsOrigDisabled === '1';
+        const origReadonly = el.dataset.setcaObsOrigReadonly === '1';
+        if(el.tagName === 'SELECT' || el.tagName === 'BUTTON'){
+          el.disabled = locked || origDisabled;
+        }else{
+          el.disabled = origDisabled;
+          el.readOnly = locked || origReadonly;
+        }
+      }catch(_){ }
+    });
+    if(locked) hideObserverEditUi();
+  }
+
+  document.addEventListener('mousedown', (e)=>{
+    if(!isObserverStrict()) return;
+    const t = e.target;
+    if(t && t.closest && t.closest(EDITABLE_SELECTOR)){
+      syncObserverReadOnlyUi();
+      try{ t.blur && t.blur(); }catch(_){ }
+      consume(e);
+      return;
+    }
+    if(cvs && (t === cvs || (t && t.closest && t.closest('#radar')))){
+      if(e.button === 2 && planeHitAtClient(e.clientX, e.clientY)){
+        hideObserverEditUi();
+        consume(e);
+      }
+    }
+  }, true);
+
+  ['beforeinput','input','change'].forEach(type=>{
+    document.addEventListener(type, (e)=>{
+      if(!isObserverStrict()) return;
+      const t = e.target;
+      if(!t || !t.closest || !t.closest(EDITABLE_SELECTOR)) return;
+      syncObserverReadOnlyUi();
+      consume(e);
+      try{ t.blur && t.blur(); }catch(_){ }
+    }, true);
+  });
+
+  document.addEventListener('click', (e)=>{
+    if(!isObserverStrict()) return;
+    const btn = e.target && e.target.closest ? e.target.closest('#navCards button, #vuelosList button:not(.vuelosCenterDot), #doPair, #unPair') : null;
+    if(!btn) return;
+    hideObserverEditUi();
+    consume(e);
+  }, true);
+
+  document.addEventListener('contextmenu', (e)=>{
+    if(!isObserverStrict()) return;
+    const t = e.target;
+    if(cvs && (t === cvs || (t && t.closest && t.closest('#radar')))){
+      if(planeHitAtClient(e.clientX, e.clientY)){
+        hideObserverEditUi();
+        consume(e);
+      }
+    }
+  }, true);
+
+  document.addEventListener('dblclick', (e)=>{
+    if(!isObserverStrict()) return;
+    const t = e.target;
+    if(cvs && (t === cvs || (t && t.closest && t.closest('#radar')))){
+      if(planeHitAtClient(e.clientX, e.clientY)){
+        hideObserverEditUi();
+        consume(e);
+      }
+    }
+  }, true);
+
+  setInterval(syncObserverReadOnlyUi, 700);
+  addEventListener('focus', syncObserverReadOnlyUi, true);
+  addEventListener('blur', syncObserverReadOnlyUi, true);
+  addEventListener('resize', syncObserverReadOnlyUi, {passive:true});
+  setTimeout(syncObserverReadOnlyUi, 0);
+  setTimeout(syncObserverReadOnlyUi, 400);
+})();
+</script>
+
 </body>
 </html>
-by wallace
