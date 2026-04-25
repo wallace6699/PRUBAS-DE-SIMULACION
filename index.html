@@ -1,4 +1,4 @@
-ESTE SIMULADOR SE ENCUENTRA EN FASE DE PRUEBA - PUEDEN OCURRIR ERRORES DURANTE EL FUNCIONAMIENTO 2.5.2 040326
+ESTE SIMULADOR SE ENCUENTRA EN FASE DE PRUEBA - PUEDEN OCURRIR ERRORES DURANTE EL FUNCIONAMIENTO 2.6
 <!DOCTYPE html>
 <html lang="es">
 <head>
@@ -85,6 +85,59 @@ document.getElementById('cancelDelete').onclick = ()=>{
   const __freePlayMode = !!(window.__SETCA_FREEPLAY_BOOT || (window.__SETCA_isFreePlayMode && window.__SETCA_isFreePlayMode()));
   const __localOnlyMode = !!(window.__SETCA_LOCALONLY_BOOT || (window.__SETCA_isLocalOnlyMode && window.__SETCA_isLocalOnlyMode()));
   let currentUID = null;
+
+  function __SETCA_cleanContingenciesForSync(src){
+    const now = Date.now();
+    const out = { delayLag:{}, fadeLost:{}, displayFailure:{} };
+    try{
+      const map = src && src.delayLag && typeof src.delayLag === 'object' ? src.delayLag : {};
+      Object.keys(map).forEach(id=>{
+        const e = map[id];
+        if(!e || typeof e !== 'object') return;
+        const until = Number(e.until || 0);
+        if(until <= now) return;
+        out.delayLag[String(id)] = {
+          planeId:String(id),
+          until,
+          startedAt:Number(e.startedAt || now),
+          seconds:Number(e.seconds || Math.max(1, Math.ceil((until-now)/1000))),
+          x:Number(e.x), y:Number(e.y), hdg:Number(e.hdg), alt:Number(e.alt), spd:Number(e.spd),
+          by:String(e.by || '')
+        };
+      });
+      const fadeMap = src && src.fadeLost && typeof src.fadeLost === 'object' ? src.fadeLost : {};
+      Object.keys(fadeMap).forEach(id=>{
+        const e = fadeMap[id];
+        if(!e || typeof e !== 'object') return;
+        const until = Number(e.until || 0);
+        if(until <= now) return;
+        out.fadeLost[String(id)] = {
+          planeId:String(id),
+          until,
+          startedAt:Number(e.startedAt || now),
+          seconds:Number(e.seconds || Math.max(1, Math.ceil((until-now)/1000))),
+          by:String(e.by || '')
+        };
+      });
+      const displayMap = src && src.displayFailure && typeof src.displayFailure === 'object' ? src.displayFailure : {};
+      Object.keys(displayMap).forEach(key=>{
+        const e = displayMap[key];
+        if(!e || typeof e !== 'object') return;
+        const until = Number(e.until || 0);
+        if(until <= now) return;
+        const callsign = String(e.callsign || key || '').trim();
+        if(!callsign) return;
+        out.displayFailure[callsign.toUpperCase()] = {
+          callsign,
+          until,
+          startedAt:Number(e.startedAt || now),
+          seconds:Number(e.seconds || Math.max(1, Math.ceil((until-now)/1000))),
+          by:String(e.by || '')
+        };
+      });
+    }catch(_){ }
+    return out;
+  }
 
   if(!__localOnlyMode){
     signInAnonymously(auth).catch(console.error);
@@ -228,6 +281,18 @@ document.getElementById('cancelDelete').onclick = ()=>{
           delete q.tagDx;
           delete q.tagDy;
           delete q.dataBlock; // drag Z+click solo local por equipo/usuario
+          // V+click flight-planner waypoints/rutas = PRIVADO del instructor/local.
+          // No viajan a GLOBAL para que otros roles solo vean aviones moviéndose.
+          delete q.routePlan;
+          delete q.routeIdx;
+          delete q.routeEnabled;
+          delete q.routeLoop;
+          delete q.routeCompleted;
+          delete q.routeLastChange;
+          delete q.routeLastReached;
+          delete q.routeFinishedAt;
+          delete q.routeManualUntil;
+          delete q.__routeFollowState;
           delete q.__syncAfter;
           return q;
         }) : snap.planes;
@@ -242,6 +307,7 @@ document.getElementById('cancelDelete').onclick = ()=>{
           planes: planesClean,
           roles: snap.roles,
           serverPause: snap.serverPause && snap.serverPause.active ? {active:true,callsign:String(snap.serverPause.callsign||'INSTRUCTOR'),startedAt:Number(snap.serverPause.startedAt||Date.now())} : null,
+          contingencies: __SETCA_cleanContingenciesForSync(snap.contingencies),
           drawings: Array.isArray(snap.drawings) ? snap.drawings.filter(d=>!(d && d.visibility === 'local')).map(d=>__normalizeDrawingScope(__clonePlain(d))) : snap.drawings,
           gtc: Array.isArray(snap.gtc) ? snap.gtc : [],
           // Emparejamientos = NETAMENTE LOCAL. No se sincronizan.
@@ -337,6 +403,17 @@ let __setcaLastAppliedRemoteTs = 0;
         delete q.tagDx;
         delete q.tagDy;
         delete q.dataBlock;
+        // No aceptar rutas V+click desde GLOBAL: son privadas/locales del instructor.
+        delete q.routePlan;
+        delete q.routeIdx;
+        delete q.routeEnabled;
+        delete q.routeLoop;
+        delete q.routeCompleted;
+        delete q.routeLastChange;
+        delete q.routeLastReached;
+        delete q.routeFinishedAt;
+        delete q.routeManualUntil;
+        delete q.__routeFollowState;
         delete q.__syncAfter;
         return q;
       };
@@ -344,6 +421,7 @@ let __setcaLastAppliedRemoteTs = 0;
       let planesChanged = false;
       let rolesChanged = false;
       let serverPauseChanged = false;
+      let contingenciesChanged = false;
       let drawingsChanged = false;
       let gtcChanged = false;
       let pairsChanged = false;
@@ -353,8 +431,50 @@ let __setcaLastAppliedRemoteTs = 0;
       let windChanged = false;
 
       if (Array.isArray(v.planes) || (v.planes && typeof v.planes === "object")) {
+        const __canKeepLocalRoutePlan = (()=>{
+          try{
+            // Las rutas V+click solo existen/son visibles en el puesto Instructor.
+            const a = window.__setcaAccess || {};
+            return String(a.role || '').toLowerCase() === 'default';
+          }catch(_){ return false; }
+        })();
+        const __localRoutePlans = new Map();
+        if(__canKeepLocalRoutePlan && Array.isArray(st.planes)){
+          st.planes.forEach(p=>{
+            if(!p || !Array.isArray(p.routePlan) || !p.routePlan.length) return;
+            __localRoutePlans.set(String(p.id || ''), {
+              routePlan: p.routePlan,
+              routeIdx: p.routeIdx,
+              routeEnabled: p.routeEnabled,
+              routeLoop: p.routeLoop,
+              routeCompleted: p.routeCompleted,
+              routeLastChange: p.routeLastChange,
+              routeLastReached: p.routeLastReached,
+              routeFinishedAt: p.routeFinishedAt,
+              routeManualUntil: p.routeManualUntil,
+              __routeFollowState: p.__routeFollowState
+            });
+          });
+        }
         const remotePlanes = Array.isArray(v.planes) ? v.planes : Object.values(v.planes);
         const nextPlanes = __setcaMergeRemoteArray(st.planes, remotePlanes, { prefix:'plane', normalize:stripRemoteLocalPlane });
+        if(__canKeepLocalRoutePlan && __localRoutePlans.size){
+          nextPlanes.forEach(p=>{
+            if(!p) return;
+            const keep = __localRoutePlans.get(String(p.id || ''));
+            if(!keep) return;
+            p.routePlan = Array.isArray(keep.routePlan) ? keep.routePlan : [];
+            p.routeIdx = keep.routeIdx;
+            p.routeEnabled = keep.routeEnabled;
+            p.routeLoop = keep.routeLoop;
+            p.routeCompleted = keep.routeCompleted;
+            p.routeLastChange = keep.routeLastChange;
+            p.routeLastReached = keep.routeLastReached;
+            p.routeFinishedAt = keep.routeFinishedAt;
+            p.routeManualUntil = keep.routeManualUntil;
+            p.__routeFollowState = keep.__routeFollowState;
+          });
+        }
         planesChanged = !__setcaSameArrayRefs(st.planes, nextPlanes);
         if(planesChanged) st.planes = nextPlanes;
       }
@@ -376,6 +496,14 @@ let __setcaLastAppliedRemoteTs = 0;
           try{ if(typeof __setLocalPauseUI === 'function') __setLocalPauseUI(); else if(typeof __setServerPauseUI === 'function') __setServerPauseUI(); }catch(_){}
           try{ if(typeof __refreshLocalDelaySnapshot === 'function') __refreshLocalDelaySnapshot(true); }catch(_){}
         }
+      }
+
+
+      {
+        const nextCont = __SETCA_cleanContingenciesForSync(v.contingencies || {});
+        const curCont = __SETCA_cleanContingenciesForSync(st.contingencies || {});
+        contingenciesChanged = (__setcaSafeJson(curCont) !== __setcaSafeJson(nextCont));
+        if(contingenciesChanged) st.contingencies = nextCont;
       }
 
       if (v.drawings) {
@@ -437,13 +565,13 @@ let __setcaLastAppliedRemoteTs = 0;
       // Reaplicar offsets locales de Data Block (no se sincronizan)
       if (window.__applyLocalTagOffsets) window.__applyLocalTagOffsets();
 
-      if(planesChanged || rolesChanged || serverPauseChanged || drawingsChanged || gtcChanged || pairsChanged || missilesChanged || impactsChanged || statsChanged || windChanged){
+      if(planesChanged || rolesChanged || serverPauseChanged || contingenciesChanged || drawingsChanged || gtcChanged || pairsChanged || missilesChanged || impactsChanged || statsChanged || windChanged){
         try{ if(typeof draw === 'function') draw(); }catch(_){ }
       }
 
       const planesStructuralChanged = (__setcaPlaneStructureSig(st.planes, st.roles) !== prevPlaneStructureSig);
 
-      if(planesStructuralChanged || rolesChanged || serverPauseChanged || drawingsChanged || windChanged){
+      if(planesStructuralChanged || rolesChanged || serverPauseChanged || contingenciesChanged || drawingsChanged || windChanged){
         repaintPlanesList && repaintPlanesList();
         repaintNav && repaintNav();
         repaintAlt && repaintAlt();
@@ -458,12 +586,12 @@ let __setcaLastAppliedRemoteTs = 0;
       if(gtcChanged){
         try{ repaintGTC && repaintGTC(); }catch(_){ }
       }
-      if(missilesChanged || impactsChanged || statsChanged || planesChanged || rolesChanged || serverPauseChanged || gtcChanged || drawingsChanged || windChanged){
+      if(missilesChanged || impactsChanged || statsChanged || planesChanged || rolesChanged || serverPauseChanged || contingenciesChanged || gtcChanged || drawingsChanged || windChanged){
         try{ paintAlerts && paintAlerts(); }catch(_){ }
         try{ renderObserverStats && renderObserverStats(); }catch(_){ }
         try{ if(typeof __navRecordAll === 'function') __navRecordAll(true); }catch(_){ }
       }
-      return (planesChanged || rolesChanged || serverPauseChanged || drawingsChanged || gtcChanged || pairsChanged || missilesChanged || impactsChanged || statsChanged || windChanged);
+      return (planesChanged || rolesChanged || serverPauseChanged || contingenciesChanged || drawingsChanged || gtcChanged || pairsChanged || missilesChanged || impactsChanged || statsChanged || windChanged);
     } catch(e){ console.warn("Apply remote state error:", e); return false; }
   }
 
@@ -2180,6 +2308,135 @@ body[data-setca-role="observer"] #pUnitMgr{
   }
 
 
+
+
+/* ===== Ground Asset List lateral ===== */
+#gtcAssetListBtn{
+  width:100%;
+  min-height:28px;
+  padding:5px 10px;
+  border-radius:10px;
+  border:1px solid rgba(148,163,184,.34);
+  background:linear-gradient(180deg, rgba(15,23,42,.92), rgba(8,13,23,.94));
+  color:#e5edf4;
+  font-size:10px;
+  font-weight:700;
+  letter-spacing:.06em;
+  text-transform:uppercase;
+  box-shadow:inset 0 1px 0 rgba(255,255,255,.06), 0 6px 16px rgba(0,0,0,.22);
+}
+#gtcAssetListBtn:hover{filter:brightness(1.10);border-color:rgba(96,165,250,.48)}
+#gtcAssetListBtn.active{background:linear-gradient(180deg, rgba(30,41,59,.96), rgba(15,23,42,.96));border-color:rgba(96,165,250,.62)}
+#pGTCBody #gtcList.gtc-list{display:none;}
+#pGTCBody #gtcList.gtc-list.gtcAssetSideOpen{
+  display:block;
+  position:fixed;
+  left:12px;
+  top:74px;
+  bottom:18px;
+  width:min(440px, 35vw);
+  max-height:none;
+  margin:0;
+  padding:48px 12px 12px;
+  overflow:auto;
+  z-index:9400;
+  background:linear-gradient(180deg, rgba(15,23,42,.94), rgba(8,13,23,.92));
+  border:1px solid rgba(148,163,184,.26);
+  border-radius:14px;
+  box-shadow:0 20px 54px rgba(0,0,0,.54);
+  backdrop-filter:blur(10px);
+  -webkit-backdrop-filter:blur(10px);
+}
+#pGTCBody #gtcList.gtcAssetSideOpen::before{
+  content:'GROUND ASSET LIST';
+  position:absolute;
+  left:14px;
+  top:12px;
+  right:50px;
+  height:24px;
+  display:flex;
+  align-items:center;
+  color:#f8fafc;
+  font:800 11px/1 system-ui,-apple-system,Segoe UI,sans-serif;
+  letter-spacing:.12em;
+}
+#pGTCBody #gtcList.gtcAssetSideOpen::after{
+  content:'×';
+  position:absolute;
+  right:12px;
+  top:10px;
+  width:26px;
+  height:26px;
+  border-radius:9px;
+  border:1px solid rgba(148,163,184,.24);
+  color:#f8fafc;
+  display:grid;
+  place-items:center;
+  font:700 16px/1 system-ui,-apple-system,Segoe UI,sans-serif;
+  pointer-events:none;
+  opacity:.74;
+}
+#pGTCBody #gtcList.gtcAssetSideOpen .gtc-empty{
+  padding:12px;
+  border:1px dashed rgba(148,163,184,.26);
+  border-radius:12px;
+  text-align:center;
+  color:#cbd5e1;
+}
+#pGTCBody #gtcList.gtcAssetSideOpen .gtc-row{
+  grid-template-columns:minmax(0,1.12fr) minmax(94px,.78fr) auto;
+  gap:8px;
+  margin:0 0 7px;
+  padding:9px 9px;
+  border:1px solid rgba(148,163,184,.14);
+  border-radius:12px;
+  background:rgba(15,23,42,.48);
+}
+#pGTCBody #gtcList.gtcAssetSideOpen .gtc-row.open{
+  border-color:rgba(96,165,250,.34);
+  background:rgba(15,23,42,.62);
+}
+#pGTCBody #gtcList.gtcAssetSideOpen .gtc-cfg-panel{
+  margin:-3px 0 9px;
+  padding:0 8px 8px;
+  border:0;
+}
+#pGTCBody #gtcList.gtcAssetSideOpen .gtc-cfg{
+  background:rgba(2,6,23,.34);
+  border:1px solid rgba(148,163,184,.16);
+  border-radius:12px;
+}
+#pGTCBody #gtcList.gtcAssetSideOpen .gtc-cfg-grid{
+  grid-template-columns:repeat(2, minmax(0,1fr));
+  gap:8px;
+}
+#pGTCBody #gtcList.gtcAssetSideOpen .gtc-cfg-block{
+  padding:7px;
+  border:1px solid rgba(148,163,184,.12);
+  border-radius:10px;
+  background:rgba(15,23,42,.34);
+}
+#pGTCBody #gtcList.gtcAssetSideOpen .gtcNameInput,
+#pGTCBody #gtcList.gtcAssetSideOpen .gtcPlaneSel,
+#pGTCBody #gtcList.gtcAssetSideOpen .gtcTargetHint{color:#f8fafc;}
+#pGTCBody #gtcList.gtcAssetSideOpen .gtcTypeBadge{border-color:rgba(56,189,248,.45);background:rgba(8,47,73,.42);color:#bae6fd;}
+#pGTCBody #gtcList.gtcAssetSideOpen .gtcTypeBadge.launcher{border-color:rgba(248,113,113,.46);background:rgba(69,10,10,.40);color:#fecaca;}
+#pGTCBody #gtcList.gtcAssetSideOpen .gtcActionBtn,
+#pGTCBody #gtcList.gtcAssetSideOpen .gtc-center-dot{
+  border-color:rgba(148,163,184,.22);
+  background:rgba(30,41,59,.80);
+  color:#f8fafc;
+}
+#pGTCBody #gtcList.gtcAssetSideOpen .gtc-green-btn{box-shadow:none;}
+#pGTCBody #gtcList.gtcAssetSideOpen::-webkit-scrollbar{width:8px;}
+#pGTCBody #gtcList.gtcAssetSideOpen::-webkit-scrollbar-thumb{background:rgba(148,163,184,.28);border-radius:999px;}
+@media (max-width: 1100px){
+  #pGTCBody #gtcList.gtc-list.gtcAssetSideOpen{width:min(405px, 46vw)}
+}
+@media (max-width: 760px){
+  #pGTCBody #gtcList.gtc-list.gtcAssetSideOpen{left:8px;right:8px;width:auto;top:64px;bottom:12px}
+}
+
   /* === GTC más compacto === */
   #pGTCBody.panel-body{
     gap:4px;
@@ -2613,6 +2870,83 @@ body[data-setca-role="observer"] #pUnitMgr{
   background:#e9eef5;
 }
 
+
+
+/* ===== Grupos: Ground Assets / Relación de gráficos ===== */
+/* ===== Grupos minimizables y paneles más compactos ===== */
+.gtcGroupHeader,.drawingScopeGroupHeader{
+  margin:8px 2px 5px;
+  padding:0;
+  border:1px solid rgba(148,163,184,.22);
+  border-radius:11px;
+  background:linear-gradient(180deg, rgba(15,23,42,.72), rgba(2,6,23,.56));
+  color:#e5e7eb;
+  font:800 10px/1.2 ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
+  letter-spacing:.055em;
+  text-transform:uppercase;
+  overflow:hidden;
+}
+.setcaGroupToggleBtn{
+  width:100%;
+  min-height:28px;
+  border:0;
+  padding:6px 8px;
+  background:transparent;
+  color:inherit;
+  display:grid;
+  grid-template-columns:16px minmax(0,1fr) auto;
+  align-items:center;
+  gap:7px;
+  text-align:left;
+  cursor:pointer;
+  font:inherit;
+  letter-spacing:inherit;
+  text-transform:inherit;
+}
+.setcaGroupToggleBtn:hover{background:rgba(255,255,255,.06)}
+.setcaGroupChevron{font-size:12px;line-height:1;opacity:.9;text-align:center;transform:translateY(-1px)}
+.setcaGroupTitle{white-space:nowrap;overflow:hidden;text-overflow:ellipsis;min-width:0;}
+.setcaGroupCount{
+  min-width:24px;
+  padding:1px 7px;
+  border-radius:999px;
+  background:rgba(148,163,184,.16);
+  border:1px solid rgba(148,163,184,.18);
+  color:#cbd5e1;
+  text-align:center;
+  font-size:9px;
+  letter-spacing:.02em;
+}
+.gtcGroupInput,.drawingScopeGroupInput{
+  width:100%;
+  margin-top:4px;
+  height:20px;
+  min-height:20px;
+  padding:1px 6px;
+  border-radius:7px;
+  border:1px solid rgba(148,163,184,.24);
+  background:rgba(2,6,23,.34);
+  color:#f8fafc;
+  font-size:9.5px;
+  outline:none;
+  box-sizing:border-box;
+}
+.gtcGroupInput:focus,.drawingScopeGroupInput:focus{border-color:rgba(250,204,21,.65);box-shadow:0 0 0 2px rgba(250,204,21,.10);}
+.drawingScopeGroupInput{max-width:170px;display:block;}
+#drawingScopeList{gap:4px !important;}
+.drawingScopeItem{padding:5px 7px !important;border-radius:9px !important;gap:5px !important;}
+.drawingScopeName{font-size:11.5px !important;}
+.drawingScopeCreator{font-size:9.5px !important;}
+#pGTCBody #gtcList.gtcAssetSideOpen{width:min(390px, 32vw) !important;padding:42px 10px 10px !important;}
+#pGTCBody #gtcList.gtcAssetSideOpen .gtc-row{padding:7px 8px !important;margin:0 0 5px !important;border-radius:10px !important;gap:6px !important;}
+#pGTCBody #gtcList.gtcAssetSideOpen .gtc-cfg-panel{margin:-2px 0 7px !important;padding:0 6px 6px !important;}
+#pGTCBody #gtcList.gtcAssetSideOpen .gtc-cfg{border-radius:10px !important;}
+#pGTCBody #gtcList.gtcAssetSideOpen .gtc-cfg-grid{gap:6px !important;}
+#pGTCBody #gtcList.gtcAssetSideOpen .gtc-cfg-block{padding:6px !important;}
+#pGTCBody .gtcActions{gap:4px !important;}
+#pGTCBody .gtcActionBtn,#pGTCBody .gtc-center-dot,#pGTCBody .gtc-green-btn{min-width:24px !important;width:24px !important;height:24px !important;}
+
+
 </style>
 
 
@@ -2933,8 +3267,212 @@ body[data-setca-role="observer"] #pUnitMgr{
 #setcaServerPauseBanner{position:fixed;left:50%;top:74px;transform:translateX(-50%);z-index:9500;display:none;pointer-events:none;padding:8px 14px;border-radius:999px;border:1px solid rgba(255,224,102,.55);background:rgba(12,16,24,.86);color:#ffe066;font:600 12px/1.2 system-ui,-apple-system,Segoe UI,sans-serif;letter-spacing:.02em;box-shadow:0 10px 30px rgba(0,0,0,.35);backdrop-filter:blur(6px);}
 #setcaServerPauseBanner strong{color:#fff;font-weight:700}
 </style>
+
+<style id="setca-contingencies-style">
+/* ===== Contingencies: panel táctico lateral compacto ===== */
+#setcaContingenciesPanel{
+  position:fixed;
+  left:12px;
+  top:74px;
+  width:min(330px, 30vw);
+  max-width:calc(100vw - 24px);
+  max-height:calc(100vh - 92px);
+  z-index:9450;
+  display:none;
+  overflow:auto;
+  padding:10px;
+  border:1px solid rgba(148,163,184,.26);
+  border-radius:14px;
+  background:linear-gradient(180deg, rgba(15,23,42,.97), rgba(7,12,22,.95));
+  box-shadow:0 18px 44px rgba(0,0,0,.46);
+  backdrop-filter:blur(10px);
+  -webkit-backdrop-filter:blur(10px);
+}
+#setcaContingenciesPanel.open{display:block;}
+#setcaContingenciesPanel .cont-head{
+  display:flex;
+  align-items:center;
+  justify-content:space-between;
+  gap:8px;
+  margin-bottom:8px;
+  padding:0 0 7px;
+  border-bottom:1px solid rgba(148,163,184,.18);
+}
+#setcaContingenciesPanel .cont-title{
+  color:#f8fafc;
+  font:800 11px/1.2 system-ui,-apple-system,Segoe UI,sans-serif;
+  letter-spacing:.10em;
+  text-transform:uppercase;
+}
+#setcaContingenciesPanel .cont-close{
+  width:26px;
+  min-width:26px;
+  height:24px;
+  padding:0;
+  border:1px solid rgba(148,163,184,.24);
+  border-radius:8px;
+  background:rgba(15,23,42,.72);
+  color:#cbd5e1;
+  cursor:pointer;
+  font:800 14px/1 system-ui,-apple-system,Segoe UI,sans-serif;
+}
+#setcaContingenciesPanel .cont-close:hover{background:rgba(30,41,59,.88);color:#fff;}
+#setcaContingenciesPanel .cont-grid{
+  display:grid;
+  grid-template-columns:repeat(2, minmax(0, 1fr));
+  gap:6px;
+  align-items:start;
+}
+#setcaContingenciesPanel .cont-btn{
+  width:100%;
+  min-width:0;
+  min-height:30px;
+  padding:6px 8px;
+  border-radius:10px;
+  border:1px solid rgba(96,165,250,.22);
+  background:linear-gradient(180deg, rgba(30,41,59,.82), rgba(15,23,42,.88));
+  color:#dbeafe;
+  font:800 10px/1.12 system-ui,-apple-system,Segoe UI,sans-serif;
+  letter-spacing:.025em;
+  text-align:center;
+  text-transform:uppercase;
+  cursor:pointer;
+  box-shadow:inset 0 1px 0 rgba(255,255,255,.05);
+  white-space:normal;
+}
+#setcaContingenciesPanel .cont-btn:hover{
+  border-color:rgba(96,165,250,.48);
+  background:linear-gradient(180deg, rgba(51,65,85,.92), rgba(15,23,42,.92));
+}
+#setcaContingenciesPanel .cont-btn.is-open{
+  color:#111827;
+  border-color:rgba(250,204,21,.62);
+  background:linear-gradient(180deg, rgba(250,204,21,.96), rgba(217,160,22,.94));
+  box-shadow:0 0 0 1px rgba(250,204,21,.16), inset 0 1px 0 rgba(255,255,255,.28);
+}
+#setcaContingenciesPanel .cont-btn[data-contingency="display_failure_blank_display"]{
+  grid-column:1 / -1;
+}
+#contingenciesBtn.active{
+  border-color:rgba(96,165,250,.62);
+  background:linear-gradient(180deg, rgba(30,41,59,.96), rgba(15,23,42,.96));
+}
+
+/* Contingencies solo visible para INSTRUCTOR de sala */
+body:not([data-setca-role="default"]) #contingenciesBtn{display:none!important;}
+body[data-setca-role="default"] #contingenciesBtn{display:inline-flex;}
+
+#setcaContingenciesPanel .cont-config{
+  grid-column:1 / -1;
+  display:grid;
+  grid-template-columns:minmax(0, 1fr) 84px;
+  gap:7px;
+  padding:8px;
+  border:1px solid rgba(148,163,184,.18);
+  border-radius:11px;
+  background:rgba(2,6,23,.42);
+  box-shadow:inset 0 1px 0 rgba(255,255,255,.035);
+}
+#setcaContingenciesPanel .cont-config[hidden]{display:none!important;}
+#setcaContingenciesPanel .cont-config label{
+  display:grid;
+  gap:3px;
+  color:#aebdd0;
+  font:800 9px/1.15 system-ui,-apple-system,Segoe UI,sans-serif;
+  text-transform:uppercase;
+  letter-spacing:.06em;
+}
+#setcaContingenciesPanel .cont-config label:first-child{grid-column:1 / 2;}
+#setcaContingenciesPanel .cont-config label:nth-child(2){grid-column:2 / 3;}
+#setcaContingenciesPanel .cont-config select,
+#setcaContingenciesPanel .cont-config input{
+  width:100%;
+  height:28px;
+  min-height:28px;
+  border-radius:8px;
+  border:1px solid rgba(148,163,184,.34);
+  background:#f8fafc;
+  color:#0f172a;
+  padding:3px 7px;
+  font:800 11px/1.1 system-ui,-apple-system,Segoe UI,sans-serif;
+  box-shadow:none;
+}
+#setcaContingenciesPanel .cont-config input{text-align:center;}
+#setcaContingenciesPanel .cont-apply{
+  grid-column:1 / -1;
+  height:29px;
+  min-height:29px;
+  padding:0 10px;
+  border-radius:9px;
+  border:1px solid rgba(250,204,21,.40);
+  background:linear-gradient(180deg, rgba(250,204,21,.94), rgba(202,138,4,.94));
+  color:#111827;
+  font:900 10px/1 system-ui,-apple-system,Segoe UI,sans-serif;
+  letter-spacing:.055em;
+  text-transform:uppercase;
+  cursor:pointer;
+}
+#setcaContingenciesPanel .cont-apply:hover{filter:brightness(1.04);}
+#setcaContingenciesPanel .cont-note{
+  grid-column:1 / -1;
+  margin-top:-2px;
+  color:#94a3b8;
+  font:600 9.5px/1.25 system-ui,-apple-system,Segoe UI,sans-serif;
+}
+@media (max-width: 760px){
+  #setcaContingenciesPanel{left:8px;right:8px;width:auto;top:64px;}
+  #setcaContingenciesPanel .cont-grid{grid-template-columns:1fr;}
+  #setcaContingenciesPanel .cont-btn[data-contingency="display_failure_blank_display"]{grid-column:auto;}
+}
+</style>
+
+
 </head>
 <body class="setca-access-locked">
+
+<div id="setcaContingenciesPanel" aria-hidden="true">
+  <div class="cont-head">
+    <div class="cont-title">Contingencies</div>
+    <button id="closeContingenciesPanel" class="cont-close focusable" type="button" aria-label="Cerrar contingencias">×</button>
+  </div>
+  <div class="cont-grid" role="group" aria-label="Contingencies">
+    <button class="cont-btn focusable" type="button" data-contingency="delay_lag">Delay / Lag</button>
+    <div id="delayLagConfig" class="cont-config" hidden>
+      <label>Avión
+        <select id="delayLagPlane" class="focusable"></select>
+      </label>
+      <label>Segundos
+        <input id="delayLagSeconds" class="focusable" type="number" min="1" max="120" step="1" value="5">
+      </label>
+      <button id="applyDelayLag" class="cont-apply focusable" type="button">Aplicar Delay</button>
+      <div class="cont-note">Congela solo la representación visual; el avión sigue moviéndose internamente.</div>
+    </div>
+    <button class="cont-btn focusable" type="button" data-contingency="fade_lost_contact">Fade / Lost Contact</button>
+    <div id="fadeLostConfig" class="cont-config" hidden>
+      <label>Avión
+        <select id="fadeLostPlane" class="focusable"></select>
+      </label>
+      <label>Segundos
+        <input id="fadeLostSeconds" class="focusable" type="number" min="1" max="120" step="1" value="5">
+      </label>
+      <button id="applyFadeLost" class="cont-apply focusable" type="button">Aplicar Fade</button>
+      <div class="cont-note">Oculta temporalmente el avión en pantalla; el movimiento real continúa y reaparece donde corresponde.</div>
+    </div>
+    <button class="cont-btn focusable" type="button" data-contingency="descent">Descent</button>
+    <button class="cont-btn focusable" type="button" data-contingency="display_failure_blank_display">Display Failure / Blank Display</button>
+    <div id="displayFailureConfig" class="cont-config" hidden>
+      <label>Callsign en sala
+        <select id="displayFailureCallsign" class="focusable"></select>
+      </label>
+      <label>Segundos
+        <input id="displayFailureSeconds" class="focusable" type="number" min="1" max="120" step="1" value="5">
+      </label>
+      <button id="applyDisplayFailure" class="cont-apply focusable" type="button">Aplicar Radar Failure</button>
+      <div class="cont-note">Apaga temporalmente la pantalla radar del callsign seleccionado. Solo el alumno objetivo ve RADAR FAILURE.</div>
+    </div>
+  </div>
+</div>
+
 <div id="setcaServerPauseBanner">El instructor <strong>INSTRUCTOR</strong> ha pausado el servidor</div>
 
 <div class="app">
@@ -3149,6 +3687,7 @@ body[data-setca-role="observer"] #pUnitMgr{
           </div>
           <div class="gtc-toolbar-side">
             <span id="gtcCount" class="pill">0</span>
+            <button id="gtcAssetListBtn" class="btn mini focusable" type="button" title="Abrir lista de radares y misiles">Ground Asset List</button>
             <span id="gtcModeChip" class="mini"></span>
           </div>
         </div>
@@ -3167,7 +3706,7 @@ body[data-setca-role="observer"] #pUnitMgr{
 <!-- Reporte -->
 <div id="report" class="modal"><span id="closeReport" class="close">&times;</span><div id="reportContent"></div></div>
 <div id="navReport" class="modal"><span id="closeNavReport" class="close">&times;</span><div id="navReportContent"><h2>ANALISIS DE NAVEGACIONES</h2><div class="navReportToolbar"><div class="navZoomGroup"><button id="navZoomOut" class="navZoomBtn" type="button" title="Alejar">−</button><div id="navZoomReadout" class="navZoomReadout">100%</div><button id="navZoomIn" class="navZoomBtn" type="button" title="Acercar">+</button><button id="navZoomReset" class="navZoomBtn" type="button" title="Restablecer vista">Reset</button></div><div class="navReplayGroup"><button id="navMeasureToggle" class="navModeBtn" type="button" title="Usar regla local en NAV">📏 Regla</button><button id="nav3DToggle" class="navModeBtn" type="button" title="Ver perfil de vuelo 3D local">🧱 3D</button><div class="nav3DViewGroup"><button id="nav3DPitchDown" class="navMiniBtn" type="button" title="Menos ángulo">−</button><input id="nav3DPitch" class="nav3DPitchRange" type="range" min="0" max="89" step="1" value="58" aria-label="Ángulo de vista 3D"><button id="nav3DPitchUp" class="navMiniBtn" type="button" title="Más ángulo">+</button><div id="nav3DReadout" class="nav3DReadout">3D 58°</div></div><button id="navReplayToggle" class="navModeBtn" type="button" title="Activar replay local">⏯ Replay</button><button id="navReplayBack" class="navMiniBtn" type="button" title="Retroceder 5 segundos">⏪</button><button id="navReplayPlay" class="navMiniBtn" type="button" title="Reproducir / pausar replay">▶</button><button id="navReplayFwd" class="navMiniBtn" type="button" title="Avanzar 5 segundos">⏩</button><input id="navReplayRange" class="navReplayRange" type="range" min="0" max="1000" step="1" value="1000" aria-label="Replay local NAV"><div id="navReplayTime" class="navReplayTime">LIVE</div></div></div><div class="navPairLocalWrap"><div class="navPairLocalGroup"><span class="navPairLocalLabel">Pareo local NAV</span><select id="navPairLocalA" aria-label="Aeronave A para pareo local"></select><select id="navPairLocalB" aria-label="Aeronave B para pareo local"></select><button id="navPairLocalAdd" class="navModeBtn" type="button" title="Agregar pareo local para análisis">PAREAR</button><button id="navPairLocalClear" class="navMiniBtn" type="button" title="Limpiar todos los pareos locales">✕</button><span class="navPairLocalHint">Solo local · arrastra con el mouse en 2D o 3D · no sincroniza</span></div><div id="navPairLocalList" class="navPairLocalList"></div></div><div id="navReportMeta" class="navReportMeta"></div><canvas id="navReportCanvas"></canvas><div id="navLegend" class="navLegend"></div></div></div>
-<div id="drawingScopeModal" class="modal drawingScopeModal" aria-hidden="true"><span id="closeDrawingScopeModal" class="close">&times;</span><div id="drawingScopeModalContent"><h2>RELACIÓN DE GRÁFICOS</h2><div class="drawingScopeModalToolbar"><span class="drawingScopeModalHint">Costado izquierdo · mapa visible</span><span id="drawingScopeCount" class="drawingScopeCount">0</span></div><div id="drawingScopeList" class="drawingScopeModalList" aria-label="Listado de gráficos"></div></div></div>
+<div id="drawingScopeModal" class="modal drawingScopeModal" aria-hidden="true"><span id="closeDrawingScopeModal" class="close">&times;</span><div id="drawingScopeModalContent"><h2>RELACIÓN DE GRÁFICOS</h2><div class="drawingScopeModalToolbar"><span class="drawingScopeModalHint">Grupos minimizables · mapa visible</span><span id="drawingScopeCount" class="drawingScopeCount">0</span></div><div id="drawingScopeList" class="drawingScopeModalList" aria-label="Listado de gráficos"></div></div></div>
 
 <script>
 /* ===== Utils ===== */
@@ -3457,6 +3996,7 @@ let st={
   showHalos:false,
   predMin:0,
   localPlaneFocusHalo:null,
+  contingencies:{delayLag:{},fadeLost:{},displayFailure:{}},
   mode:'digital',
   missiles:[],
   splashes:[],
@@ -3494,6 +4034,217 @@ function __lsSave(key, obj){
 function __clonePlain(obj){
   try{ return JSON.parse(JSON.stringify(obj)); }catch(_){ return obj; }
 }
+
+
+/* ===== CONTINGENCIES: Delay / Lag visual (no altera movimiento real) ===== */
+function __SETCA_cleanContingenciesForSync(src){
+  const now = Date.now();
+  const out = { delayLag:{}, fadeLost:{}, displayFailure:{} };
+  try{
+    const map = src && src.delayLag && typeof src.delayLag === 'object' ? src.delayLag : {};
+    Object.keys(map).forEach(id=>{
+      const e = map[id];
+      if(!e || typeof e !== 'object') return;
+      const until = Number(e.until || 0);
+      if(until <= now) return;
+      out.delayLag[String(id)] = {
+        planeId:String(id),
+        until,
+        startedAt:Number(e.startedAt || now),
+        seconds:Number(e.seconds || Math.max(1, Math.ceil((until-now)/1000))),
+        x:Number(e.x), y:Number(e.y), hdg:Number(e.hdg), alt:Number(e.alt), spd:Number(e.spd),
+        by:String(e.by || '')
+      };
+    });
+    const fadeMap = src && src.fadeLost && typeof src.fadeLost === 'object' ? src.fadeLost : {};
+    Object.keys(fadeMap).forEach(id=>{
+      const e = fadeMap[id];
+      if(!e || typeof e !== 'object') return;
+      const until = Number(e.until || 0);
+      if(until <= now) return;
+      out.fadeLost[String(id)] = {
+        planeId:String(id),
+        until,
+        startedAt:Number(e.startedAt || now),
+        seconds:Number(e.seconds || Math.max(1, Math.ceil((until-now)/1000))),
+        by:String(e.by || '')
+      };
+    });
+    const displayMap = src && src.displayFailure && typeof src.displayFailure === 'object' ? src.displayFailure : {};
+    Object.keys(displayMap).forEach(key=>{
+      const e = displayMap[key];
+      if(!e || typeof e !== 'object') return;
+      const until = Number(e.until || 0);
+      if(until <= now) return;
+      const callsign = String(e.callsign || key || '').trim();
+      if(!callsign) return;
+      out.displayFailure[callsign.toUpperCase()] = {
+        callsign,
+        until,
+        startedAt:Number(e.startedAt || now),
+        seconds:Number(e.seconds || Math.max(1, Math.ceil((until-now)/1000))),
+        by:String(e.by || '')
+      };
+    });
+  }catch(_){ }
+  return out;
+}
+function __SETCA_ensureContingencies(){
+  if(!st.contingencies || typeof st.contingencies !== 'object') st.contingencies = {delayLag:{}, fadeLost:{}, displayFailure:{}};
+  if(!st.contingencies.delayLag || typeof st.contingencies.delayLag !== 'object') st.contingencies.delayLag = {};
+  if(!st.contingencies.fadeLost || typeof st.contingencies.fadeLost !== 'object') st.contingencies.fadeLost = {};
+  if(!st.contingencies.displayFailure || typeof st.contingencies.displayFailure !== 'object') st.contingencies.displayFailure = {};
+  return st.contingencies;
+}
+function __SETCA_pruneDelayLag(){
+  try{
+    const c = __SETCA_ensureContingencies();
+    const now = Date.now();
+    Object.keys(c.delayLag).forEach(id=>{ if(!c.delayLag[id] || Number(c.delayLag[id].until||0) <= now) delete c.delayLag[id]; });
+    Object.keys(c.fadeLost||{}).forEach(id=>{ if(!c.fadeLost[id] || Number(c.fadeLost[id].until||0) <= now) delete c.fadeLost[id]; });
+    Object.keys(c.displayFailure||{}).forEach(id=>{ if(!c.displayFailure[id] || Number(c.displayFailure[id].until||0) <= now) delete c.displayFailure[id]; });
+  }catch(_){ }
+}
+window.__SETCA_getActiveDelayLag = function(plane){
+  try{
+    if(!plane) return null;
+    const c = __SETCA_ensureContingencies();
+    const id = String(plane.id || '');
+    const e = c.delayLag && c.delayLag[id];
+    if(!e) return null;
+    if(Number(e.until||0) <= Date.now()) { delete c.delayLag[id]; return null; }
+    return e;
+  }catch(_){ return null; }
+};
+window.__SETCA_getActiveFadeLost = function(plane){
+  try{
+    if(!plane) return null;
+    const c = __SETCA_ensureContingencies();
+    const id = String(plane.id || '');
+    const e = c.fadeLost && c.fadeLost[id];
+    if(!e) return null;
+    if(Number(e.until||0) <= Date.now()) { delete c.fadeLost[id]; return null; }
+    return e;
+  }catch(_){ return null; }
+};
+function __SETCA_canUseContingencies(){
+  try{
+    const a = window.__setcaAccess || {};
+    return String(a.role || 'default').toLowerCase() === 'default' && !a.planning && !a.freeplay;
+  }catch(_){ return false; }
+}
+function __SETCA_applyDelayLag(planeId, seconds){
+  if(!__SETCA_canUseContingencies()){ alert('Solo el Instructor puede aplicar contingencias.'); return false; }
+  const id = String(planeId || '');
+  const sec = Math.max(1, Math.min(120, Math.round(Number(seconds) || 5)));
+  const plane = (Array.isArray(st.planes) ? st.planes : []).find(p=>String(p.id||'') === id);
+  if(!plane){ alert('Seleccione un avión válido.'); return false; }
+  const now = Date.now();
+  const c = __SETCA_ensureContingencies();
+  c.delayLag[id] = {
+    planeId:id,
+    startedAt:now,
+    until:now + sec*1000,
+    seconds:sec,
+    x:Number(plane.x), y:Number(plane.y), hdg:Number(plane.hdg), alt:Number(plane.alt), spd:Number(plane.spd),
+    by:String((window.__setcaAccess && window.__setcaAccess.callsign) || window.__setcaUsername || 'SETCA')
+  };
+  try{ draw && draw(); }catch(_){ }
+  // SETCA_FIX_DELAYLAG_SYNC: el canal real de nube es _SETCA_SYNC.
+  // Antes se intentaba usar window.SETCA_SYNC, por eso la contingencia podía no propagarse.
+  try{
+    const sync = window._SETCA_SYNC || window.SETCA_SYNC;
+    if(sync && typeof sync.pushNow === 'function') sync.pushNow();
+    else if(sync && typeof sync.push === 'function') sync.push();
+  }catch(_){ }
+  return true;
+}
+function __SETCA_applyFadeLost(planeId, seconds){
+  if(!__SETCA_canUseContingencies()){ alert('Solo el Instructor puede aplicar contingencias.'); return false; }
+  const id = String(planeId || '');
+  const sec = Math.max(1, Math.min(120, Math.round(Number(seconds) || 5)));
+  const plane = (Array.isArray(st.planes) ? st.planes : []).find(p=>String(p.id||'') === id);
+  if(!plane){ alert('Seleccione un avión válido.'); return false; }
+  const now = Date.now();
+  const c = __SETCA_ensureContingencies();
+  c.fadeLost[id] = {
+    planeId:id,
+    startedAt:now,
+    until:now + sec*1000,
+    seconds:sec,
+    by:String((window.__setcaAccess && window.__setcaAccess.callsign) || window.__setcaUsername || 'SETCA')
+  };
+  try{ draw && draw(); }catch(_){ }
+  try{
+    const sync = window._SETCA_SYNC || window.SETCA_SYNC;
+    if(sync && typeof sync.pushNow === 'function') sync.pushNow();
+    else if(sync && typeof sync.push === 'function') sync.push();
+  }catch(_){ }
+  return true;
+}
+
+function __SETCA_normCallsignKey(v){
+  return String(v == null ? '' : v).trim().toUpperCase();
+}
+window.__SETCA_getActiveDisplayFailureForCallsign = function(callsign){
+  try{
+    const key = __SETCA_normCallsignKey(callsign);
+    if(!key) return null;
+    const c = __SETCA_ensureContingencies();
+    const e = c.displayFailure && c.displayFailure[key];
+    if(!e) return null;
+    if(Number(e.until||0) <= Date.now()) { delete c.displayFailure[key]; return null; }
+    return e;
+  }catch(_){ return null; }
+};
+window.__SETCA_getActiveDisplayFailureForMe = function(){
+  const cs = __SETCA_normCallsignKey((window.__setcaAccess && window.__setcaAccess.callsign) || window.__setcaUsername || localStorage.getItem('setca_username') || '');
+  return cs ? window.__SETCA_getActiveDisplayFailureForCallsign(cs) : null;
+};
+function __SETCA_applyDisplayFailure(callsign, seconds){
+  if(!__SETCA_canUseContingencies()){ alert('Solo el Instructor puede aplicar contingencias.'); return false; }
+  const raw = String(callsign || '').trim();
+  const key = __SETCA_normCallsignKey(raw);
+  if(!key){ alert('Seleccione un callsign válido.'); return false; }
+  const sec = Math.max(1, Math.min(120, Math.round(Number(seconds) || 5)));
+  const now = Date.now();
+  const c = __SETCA_ensureContingencies();
+  c.displayFailure[key] = {
+    callsign:raw,
+    startedAt:now,
+    until:now + sec*1000,
+    seconds:sec,
+    by:String((window.__setcaAccess && window.__setcaAccess.callsign) || window.__setcaUsername || 'SETCA')
+  };
+  try{ draw && draw(); }catch(_){ }
+  try{
+    const sync = window._SETCA_SYNC || window.SETCA_SYNC;
+    if(sync && typeof sync.pushNow === 'function') sync.pushNow();
+    else if(sync && typeof sync.push === 'function') sync.push();
+  }catch(_){ }
+  return true;
+}
+function __SETCA_drawRadarFailureOverlay(){
+  try{
+    const e = window.__SETCA_getActiveDisplayFailureForMe && window.__SETCA_getActiveDisplayFailureForMe();
+    if(!e) return false;
+    ctx.save();
+    ctx.setTransform(1,0,0,1,0,0);
+    ctx.fillStyle = '#000';
+    ctx.fillRect(0,0,W,H);
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.font = '700 28px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace';
+    ctx.fillStyle = '#ff4d4d';
+    ctx.fillText('RADAR FAILURE', W/2, H/2);
+    ctx.font = '12px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace';
+    ctx.fillStyle = 'rgba(255,255,255,.72)';
+    ctx.fillText('BLANK DISPLAY', W/2, H/2 + 34);
+    ctx.restore();
+    return true;
+  }catch(_){ return false; }
+}
+
 function __normalizeDrawingScope(d){
   if(!d || typeof d !== 'object') return d;
   if(d.visibility !== 'local' && d.visibility !== 'global') d.visibility = 'global';
@@ -5935,6 +6686,13 @@ if (Math.min(diffCW, diffCCW) > 0.1) {
   p._gt=(p._gt||0)+dt*1000;if(p._gt>1800){p.ghosts.push({x:p.x,y:p.y});if(p.ghosts.length>40)p.ghosts.shift();p._gt=0;}
 }
 function drawPlane(p){
+  const __livePlaneRef = p;
+  const __fadeLost = (typeof window.__SETCA_getActiveFadeLost === 'function') ? window.__SETCA_getActiveFadeLost(p) : null;
+  if(__fadeLost) return;
+  const __delayLag = (typeof window.__SETCA_getActiveDelayLag === 'function') ? window.__SETCA_getActiveDelayLag(p) : null;
+  if(__delayLag){
+    p = {...p, x:Number(__delayLag.x), y:Number(__delayLag.y), hdg:Number.isFinite(+__delayLag.hdg)?+__delayLag.hdg:p.hdg, alt:Number.isFinite(+__delayLag.alt)?+__delayLag.alt:p.alt, spd:Number.isFinite(+__delayLag.spd)?+__delayLag.spd:p.spd, __delayLagInfo:__delayLag, __livePlaneRef};
+  }
   syncPlaneRoleState(p);
   const s=toScreen(p.x,p.y);
 
@@ -5991,20 +6749,25 @@ function drawPlane(p){
   const visualScale = getTacticalVisualScale(zoom);
   const planeVisualScale = ((typeof window.__SETCA_getPlaneVisualUserScale === 'function') ? window.__SETCA_getPlaneVisualUserScale() : 1) * visualScale;
   const ghostSize = 2 * planeVisualScale;
-  const unknownHalf = 3.4 * planeVisualScale;
-  const symbolRadius = 2.6 * planeVisualScale;
-  const symbolStroke = Math.max(0.8, 1 * planeVisualScale);
+  const unknownHalf = 3.8 * planeVisualScale;
+  // Símbolos tácticos por rol: marcos sin relleno.
+  // Friend y demás: cuadrado | Hostile: triángulo con punta al rumbo | Boogey: rombo | Unknown/Kill-confirm: X.
+  const symbolHalf = 4.0 * planeVisualScale;
+  const symbolTriR = 4.1 * planeVisualScale;
+  const symbolDiamondHalf = 3.9 * planeVisualScale;
+  const symbolStroke = Math.max(0.85, 1.05 * planeVisualScale);
   const speedForLead = Math.max(0, Number.isFinite(+p.spd) ? +p.spd : 0);
-  // Proyección frontal más compacta: aprox. la mitad del largo anterior,
-  // pero con una diferencia más clara entre velocidades lentas y rápidas.
+  // Proyección frontal proporcional a velocidad: duplicada respecto a la versión anterior
+  // para diferenciar mejor aeronaves lentas y rápidas.
   const headingLen = (()=>{
-    const minLen = 4 * planeVisualScale;
-    const maxLen = 12 * planeVisualScale;
+    const minLen = 8 * planeVisualScale;
+    const maxLen = 24 * planeVisualScale;
     const len = minLen + Math.min(maxLen - minLen, (speedForLead / 125) * planeVisualScale);
     return Math.max(minLen, Math.min(maxLen, len));
   })();
   const headingStroke = Math.max(0.8, 1 * planeVisualScale);
   p.ghosts.forEach((g,i)=>{const sg=toScreen(g.x,g.y);const op=(i+1)/p.ghosts.length*.35;ctx.fillStyle=`rgba(179,0,255,${op})`;ctx.fillRect(sg.x-ghostSize/2,sg.y-ghostSize/2,ghostSize,ghostSize);});
+  const lr=(p.hdg-90)*Math.PI/180;
   const isKillConfirm = (role === 'Kill-confirm');
   if(role === 'Unknown' || isKillConfirm){
     const half = isKillConfirm ? Math.max(4.8 * planeVisualScale, unknownHalf + 1.2*planeVisualScale) : unknownHalf;
@@ -6019,9 +6782,42 @@ function drawPlane(p){
     ctx.stroke();
     ctx.restore();
   }else{
-    ctx.save();ctx.beginPath();ctx.arc(s.x,s.y,symbolRadius,0,2*Math.PI);ctx.fillStyle=color;ctx.fill();ctx.lineWidth=symbolStroke;ctx.strokeStyle='rgba(0,0,0,0.55)';ctx.stroke();ctx.restore();
+    ctx.save();
+    // Símbolos sin relleno: solo marco con el color táctico del rol.
+    ctx.fillStyle = 'transparent';
+    ctx.strokeStyle = color;
+    ctx.lineWidth = symbolStroke;
+    ctx.lineJoin = 'round';
+
+    if(role === 'Hostile'){
+      // Hostile: triángulo táctico con la punta hacia adelante, según el rumbo del avión.
+      ctx.save();
+      ctx.translate(s.x, s.y);
+      ctx.rotate(lr);
+      ctx.beginPath();
+      ctx.moveTo(symbolTriR, 0);
+      ctx.lineTo(-symbolTriR * 0.70, symbolTriR * 0.82);
+      ctx.lineTo(-symbolTriR * 0.70, -symbolTriR * 0.82);
+      ctx.closePath();
+      ctx.stroke();
+      ctx.restore();
+    }else if(role === 'Boogey'){
+      // Boogey: rombo táctico sin relleno.
+      ctx.beginPath();
+      ctx.moveTo(s.x, s.y - symbolDiamondHalf);
+      ctx.lineTo(s.x + symbolDiamondHalf, s.y);
+      ctx.lineTo(s.x, s.y + symbolDiamondHalf);
+      ctx.lineTo(s.x - symbolDiamondHalf, s.y);
+      ctx.closePath();
+      ctx.stroke();
+    }else{
+      // Friend, Commercial, Neutral, Bandit, etc.: cuadrado táctico sin relleno.
+      ctx.beginPath();
+      ctx.rect(s.x - symbolHalf, s.y - symbolHalf, symbolHalf * 2, symbolHalf * 2);
+      ctx.stroke();
+    }
+    ctx.restore();
   }
-  const lr=(p.hdg-90)*Math.PI/180;
   if(!isKillConfirm){
     ctx.beginPath();ctx.moveTo(s.x,s.y);ctx.lineTo(s.x+Math.cos(lr)*headingLen,s.y+Math.sin(lr)*headingLen);ctx.strokeStyle=color;ctx.lineWidth=headingStroke;ctx.stroke();
   }
@@ -6070,7 +6866,7 @@ function drawPlane(p){
     if(typeof window.__SETCA_pushDbOverlayItem === 'function'){
       window.__SETCA_pushDbOverlayItem({
         id: p.id,
-        planeRef: p,
+        planeRef: (__livePlaneRef || p),
         mode: st.labelMode,
         name: p.name,
         callsignText: callsignDb,
@@ -6117,6 +6913,27 @@ function drawPlane(p){
     }else{
       st.localPlaneFocusHalo = null;
     }
+  }
+
+  if(__delayLag){
+    ctx.save();
+    // Indicador Delay/Lag: muestra cuánto retraso visual acumula el contacto (+1, +2, ...).
+    // No usa cuenta regresiva ni aro de alerta para evitar confusión táctica.
+    const startedAt = Number(__delayLag.startedAt || Date.now());
+    const maxSec = Math.max(1, Math.round(Number(__delayLag.seconds || 1) || 1));
+    const elapsedSec = Math.max(1, Math.min(maxSec, Math.floor((Date.now() - startedAt) / 1000) + 1));
+    const t = `+${elapsedSec}`;
+    const fontPx = Math.max(8, 9 * planeVisualScale);
+    const yOff = Math.max(11, 12 * planeVisualScale);
+    ctx.font = `${fontPx}px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace`;
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'bottom';
+    ctx.lineWidth = Math.max(2, 2.4 * planeVisualScale);
+    ctx.strokeStyle = 'rgba(0,0,0,.78)';
+    ctx.fillStyle = '#facc15';
+    ctx.strokeText(t, s.x, s.y - yOff);
+    ctx.fillText(t, s.x, s.y - yOff);
+    ctx.restore();
   }
   if(planeHasEmergencyXpdr(p)){
     const phase = (performance.now()%1200)/1200;
@@ -6252,6 +7069,7 @@ cvs.addEventListener('mousedown',e=>{ if(e.button!==0) return; // block measure 
       y:w.y,
       covR:+preset.covR || 0,
       covH:+preset.covH || 0,
+      covOpacity:0.18,
       misR:+preset.misR || 0,
       misH:+preset.misH || 0,
       trackPlaneId:''
@@ -6708,9 +7526,9 @@ function drawGTC(){
       const rPx = rNm * zoom * PX_PER_NM;
       const hFt = (u && typeof u.covH === 'number') ? u.covH : 0;
       const hNorm = Math.max(0, Math.min(1, (isFinite(hFt)?hFt:0) / 120000));
-      const fillA = 0.05 + 0.08*hNorm;
-      const edgeA = 0.28 + 0.32*hNorm;
-      ctx.fillStyle = canLaunch ? `rgba(255,0,0,${fillA.toFixed(3)})` : `rgba(80,190,255,${(fillA*0.95).toFixed(3)})`;
+      const fillA = Math.max(0, Math.min(0.85, Number.isFinite(+u.covOpacity) ? +u.covOpacity : (0.05 + 0.08*hNorm)));
+      const edgeA = 0.34 + 0.34*hNorm;
+      ctx.fillStyle = canLaunch ? `rgba(255,0,0,${fillA.toFixed(3)})` : `rgba(80,190,255,${fillA.toFixed(3)})`;
       ctx.beginPath(); ctx.arc(s.x, s.y, rPx, 0, 2*Math.PI); ctx.fill();
       ctx.strokeStyle = canLaunch ? `rgba(255,0,0,${edgeA.toFixed(3)})` : `rgba(80,190,255,${edgeA.toFixed(3)})`;
       ctx.lineWidth = 1;
@@ -9198,6 +10016,11 @@ function repaintPairs(){
   const sA=$('#pairA'),sB=$('#pairB'); sA.innerHTML=''; sB.innerHTML='';
   st.planes.forEach(p=>{const a=document.createElement('option');a.value=p.id;a.textContent=p.name;sA.appendChild(a);sB.appendChild(a.cloneNode(true));});
   repaintPairList();
+  // SETCA_FIX_DELAYLAG_SELECTOR: el selector de Delay/Lag se sincroniza con las mismas
+  // opciones activas que usan las casillas de Emparejamientos.
+  try{ if(window.__SETCA_refreshDelayLagPlaneOptions) window.__SETCA_refreshDelayLagPlaneOptions(); }catch(_){ }
+  try{ if(window.__SETCA_refreshFadeLostPlaneOptions) window.__SETCA_refreshFadeLostPlaneOptions(); }catch(_){ }
+  try{ if(window.__SETCA_refreshDisplayFailureCallsignOptions) window.__SETCA_refreshDisplayFailureCallsignOptions(); }catch(_){ }
 }
 function repaintAlt(){
   const list=$('#altList'); 
@@ -9239,6 +10062,7 @@ setInterval(()=>{ try{ repaintAlt(); }catch(e){} }, 900);
 let lastTS=0,accFPS=0,frames=0;
 function loop(ts){
   const dt=Math.max(0,(ts-lastTS)/1000); lastTS=ts;
+  try{ __SETCA_pruneDelayLag && __SETCA_pruneDelayLag(); }catch(_){ }
   const planningMode = !!(window.__SETCA_isPlanningMode && window.__SETCA_isPlanningMode());
   const serverPaused = __SETCA_isServerPaused();
   if(!planningMode && !serverPaused){ st.elapsed = performance.now() - st.t0; telTick += dt; if(telTick>5){logTel(); telTick=0;} }
@@ -9306,11 +10130,13 @@ try{
       const midX=(rA.x+rB.x)/2,midY=(rA.y+rB.y)/2;ctx.fillStyle='#2ee74f';ctx.font='14px monospace';ctx.textAlign='center';ctx.fillText(lbl,midX,midY-10);
     }
     paintAlerts();
+    try{ __SETCA_drawRadarFailureOverlay && __SETCA_drawRadarFailureOverlay(); }catch(_){ }
   } finally {
     if(st !== __liveState) st = __liveState;
   }
   if(st.localPause) __drawLocalPauseOverlay();
   if(__SETCA_isServerPaused()) __drawServerPauseOverlay();
+  try{ __SETCA_drawRadarFailureOverlay && __SETCA_drawRadarFailureOverlay(); }catch(_){ }
   accFPS+=dt;frames++;if(accFPS>=0.5){fpsEl.textContent=String(Math.round(frames/accFPS));accFPS=0;frames=0;}
   requestAnimationFrame(loop);
 }
@@ -10433,9 +11259,184 @@ requestAnimationFrame(()=>{ repaintPlanesList(); repaintNav(); repaintStudent();
     const contingenciesBtn = document.getElementById('contingenciesBtn');
     if (contingenciesBtn && !contingenciesBtn.dataset.bound) {
       contingenciesBtn.dataset.bound = '1';
-      contingenciesBtn.addEventListener('click', ()=>{
-        try { toast('Contingencies listo para futuras funciones'); } catch(_) {}
+      const panel = document.getElementById('setcaContingenciesPanel');
+      const closeBtn = document.getElementById('closeContingenciesPanel');
+      const setOpen = (open)=>{
+        if(!panel) return;
+        if(open && !(typeof __SETCA_canUseContingencies === 'function' && __SETCA_canUseContingencies())){
+          panel.classList.remove('open');
+          panel.setAttribute('aria-hidden', 'true');
+          contingenciesBtn.classList.remove('active');
+          return;
+        }
+        panel.classList.toggle('open', !!open);
+        panel.setAttribute('aria-hidden', open ? 'false' : 'true');
+        contingenciesBtn.classList.toggle('active', !!open);
+        if(open){ try{ (window.__SETCA_refreshDelayLagPlaneOptions||function(){})(); (window.__SETCA_refreshFadeLostPlaneOptions||function(){})(); }catch(_){ } }
+      };
+      contingenciesBtn.addEventListener('click', (ev)=>{
+        ev.preventDefault();
+        if(!(typeof __SETCA_canUseContingencies === 'function' && __SETCA_canUseContingencies())) return;
+        setOpen(!(panel && panel.classList.contains('open')));
       });
+      const __escOpt = (v)=>String(v == null ? '' : v).replace(/&/g,'&amp;').replace(/"/g,'&quot;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+      const refreshContingencyPlaneOptions = (selectId)=>{
+        const sel = document.getElementById(selectId);
+        if(!sel) return;
+        const old = sel.value;
+
+        // SETCA_FIX_CONTINGENCY_SELECTOR:
+        // Delay/Lag y Fade/Lost Contact toman la misma lista viva que Emparejamientos.
+        const pairA = document.getElementById('pairA');
+        const pairOpts = pairA ? Array.from(pairA.options || []).filter(o=>String(o.value || '').trim()) : [];
+        if(pairOpts.length){
+          sel.disabled = false;
+          sel.innerHTML = pairOpts.map(o=>`<option value="${__escOpt(o.value)}">${__escOpt(o.textContent || o.value)}</option>`).join('');
+          if(old && Array.from(sel.options).some(o=>o.value===old)) sel.value = old;
+          return;
+        }
+
+        const planes = (Array.isArray(st.planes) ? st.planes : [])
+          .filter(p=>p && p.id)
+          .slice()
+          .sort((a,b)=>String(a.name||a.id||'').localeCompare(String(b.name||b.id||''), undefined, {numeric:true, sensitivity:'base'}));
+        if(!planes.length){
+          sel.innerHTML = '<option value="">Sin aviones en vuelo</option>';
+          sel.disabled = true;
+          return;
+        }
+        sel.disabled = false;
+        sel.innerHTML = planes.map(p=>{
+          const id = String(p.id || '');
+          const cs = String(p.name || id || 'SIN-CALLSIGN').trim();
+          return `<option value="${__escOpt(id)}">${__escOpt(cs)}</option>`;
+        }).join('');
+        if(old && Array.from(sel.options).some(o=>o.value===old)) sel.value = old;
+      };
+      const refreshDelayPlaneOptions = ()=>refreshContingencyPlaneOptions('delayLagPlane');
+      const refreshFadeLostPlaneOptions = ()=>refreshContingencyPlaneOptions('fadeLostPlane');
+      const refreshDisplayFailureCallsignOptions = ()=>{
+        const sel = document.getElementById('displayFailureCallsign');
+        if(!sel) return;
+        const old = sel.value;
+        const room = String(window.__setcaCurrentRoom || (window.__setcaAccess && window.__setcaAccess.room) || (location.hash||'').replace(/^#/,'').trim() || 'sala-default');
+        const seen = new Set();
+        const items = [];
+        const add = (v)=>{
+          const cs = String(v && (v.callsign || v.name) || v || '').trim();
+          if(!cs) return;
+          const key = cs.toUpperCase();
+          if(seen.has(key)) return;
+          seen.add(key);
+          items.push(cs);
+        };
+        try{
+          const raw = window.__setcaPresence && window.__setcaPresence[room];
+          if(Array.isArray(raw)) raw.forEach(add);
+        }catch(_){ }
+        add((window.__setcaAccess && window.__setcaAccess.callsign) || window.__setcaUsername || localStorage.getItem('setca_username'));
+        items.sort((a,b)=>a.localeCompare(b, undefined, {numeric:true, sensitivity:'base'}));
+        if(!items.length){
+          sel.innerHTML = '<option value="">Sin callsigns conectados</option>';
+          sel.disabled = true;
+          return;
+        }
+        sel.disabled = false;
+        sel.innerHTML = items.map(cs=>'<option value="'+__escOpt(cs)+'">'+__escOpt(cs)+'</option>').join('');
+        if(old && Array.from(sel.options).some(o=>o.value===old)) sel.value = old;
+      };
+      window.__SETCA_refreshDelayLagPlaneOptions = refreshDelayPlaneOptions;
+      window.__SETCA_refreshFadeLostPlaneOptions = refreshFadeLostPlaneOptions;
+      window.__SETCA_refreshDisplayFailureCallsignOptions = refreshDisplayFailureCallsignOptions;
+      panel && panel.addEventListener('click', (ev)=>{
+        const btn = ev.target && ev.target.closest ? ev.target.closest('[data-contingency]') : null;
+        if(!btn) return;
+        const key = btn.getAttribute('data-contingency');
+        const map = {
+          delay_lag: { id:'delayLagConfig', refresh:refreshDelayPlaneOptions },
+          fade_lost_contact: { id:'fadeLostConfig', refresh:refreshFadeLostPlaneOptions },
+          display_failure_blank_display: { id:'displayFailureConfig', refresh:refreshDisplayFailureCallsignOptions }
+        };
+        const item = map[key];
+        if(!item) return;
+        const cfg = document.getElementById(item.id);
+        if(!cfg) return;
+        const willOpen = cfg.hidden;
+        ['delayLagConfig','fadeLostConfig','displayFailureConfig'].forEach(id=>{
+          const el = document.getElementById(id);
+          if(el) el.hidden = true;
+        });
+        panel.querySelectorAll('[data-contingency].is-open').forEach(b=>b.classList.remove('is-open'));
+        cfg.hidden = !willOpen;
+        btn.classList.toggle('is-open', willOpen);
+        if(willOpen && typeof item.refresh === 'function') item.refresh();
+      });
+      const delayLagSel = document.getElementById('delayLagPlane');
+      if(delayLagSel && !delayLagSel.dataset.dynamicBound){
+        delayLagSel.dataset.dynamicBound = '1';
+        ['focus','pointerdown','mousedown','click'].forEach(evt=>delayLagSel.addEventListener(evt, refreshDelayPlaneOptions, {passive:true}));
+      }
+      const fadeLostSel = document.getElementById('fadeLostPlane');
+      if(fadeLostSel && !fadeLostSel.dataset.dynamicBound){
+        fadeLostSel.dataset.dynamicBound = '1';
+        ['focus','pointerdown','mousedown','click'].forEach(evt=>fadeLostSel.addEventListener(evt, refreshFadeLostPlaneOptions, {passive:true}));
+      }
+      const displayFailureSel = document.getElementById('displayFailureCallsign');
+      if(displayFailureSel && !displayFailureSel.dataset.dynamicBound){
+        displayFailureSel.dataset.dynamicBound = '1';
+        ['focus','pointerdown','mousedown','click'].forEach(evt=>displayFailureSel.addEventListener(evt, refreshDisplayFailureCallsignOptions, {passive:true}));
+      }
+      if(!window.__SETCA_delayLagPlaneRefreshTimer){
+        window.__SETCA_delayLagPlaneRefreshTimer = setInterval(()=>{
+          try{
+            const p = document.getElementById('setcaContingenciesPanel');
+            const cfg = document.getElementById('delayLagConfig');
+            const fadeCfg = document.getElementById('fadeLostConfig');
+            const displayCfg = document.getElementById('displayFailureConfig');
+            if(p && p.classList.contains('open') && cfg && !cfg.hidden) refreshDelayPlaneOptions();
+            if(p && p.classList.contains('open') && fadeCfg && !fadeCfg.hidden) refreshFadeLostPlaneOptions();
+            if(p && p.classList.contains('open') && displayCfg && !displayCfg.hidden) refreshDisplayFailureCallsignOptions();
+          }catch(_){ }
+        }, 900);
+      }
+      const applyDelayLagBtn = document.getElementById('applyDelayLag');
+      if(applyDelayLagBtn && !applyDelayLagBtn.dataset.bound){
+        applyDelayLagBtn.dataset.bound = '1';
+        applyDelayLagBtn.addEventListener('click', ()=>{
+          try{ (window.__SETCA_refreshDelayLagPlaneOptions||function(){})(); }catch(_){ }
+          const sel = document.getElementById('delayLagPlane');
+          const sec = document.getElementById('delayLagSeconds');
+          if(!sel || !sel.value){ alert('No hay avión seleccionado para aplicar Delay / Lag.'); return; }
+          __SETCA_applyDelayLag(sel && sel.value, sec && sec.value);
+        });
+      }
+      const applyFadeLostBtn = document.getElementById('applyFadeLost');
+      if(applyFadeLostBtn && !applyFadeLostBtn.dataset.bound){
+        applyFadeLostBtn.dataset.bound = '1';
+        applyFadeLostBtn.addEventListener('click', ()=>{
+          try{ (window.__SETCA_refreshFadeLostPlaneOptions||function(){})(); }catch(_){ }
+          const sel = document.getElementById('fadeLostPlane');
+          const sec = document.getElementById('fadeLostSeconds');
+          if(!sel || !sel.value){ alert('No hay avión seleccionado para aplicar Fade / Lost Contact.'); return; }
+          __SETCA_applyFadeLost(sel && sel.value, sec && sec.value);
+        });
+      }
+      const applyDisplayFailureBtn = document.getElementById('applyDisplayFailure');
+      if(applyDisplayFailureBtn && !applyDisplayFailureBtn.dataset.bound){
+        applyDisplayFailureBtn.dataset.bound = '1';
+        applyDisplayFailureBtn.addEventListener('click', ()=>{
+          try{ (window.__SETCA_refreshDisplayFailureCallsignOptions||function(){})(); }catch(_){ }
+          const sel = document.getElementById('displayFailureCallsign');
+          const sec = document.getElementById('displayFailureSeconds');
+          if(!sel || !sel.value){ alert('No hay callsign seleccionado para aplicar Radar Failure.'); return; }
+          __SETCA_applyDisplayFailure(sel && sel.value, sec && sec.value);
+        });
+      }
+      if(closeBtn && !closeBtn.dataset.bound){
+        closeBtn.dataset.bound = '1';
+        closeBtn.addEventListener('click', (ev)=>{ ev.preventDefault(); setOpen(false); });
+      }
+      document.addEventListener('keydown', (ev)=>{ if(ev.key === 'Escape') setOpen(false); });
     }
 
     ensureConfigPanel();
@@ -11480,6 +12481,19 @@ function getDrawingDisplayName(d){
   const typeLabel = {circle:'Círculo', line:'Línea', route:'Ruta', arwy:'ARWY', point:'Punto', square:'Cuadrado', bullseye:'Bullseye', cap:'CAP Hipódromo', cap_l:'CAP L', cap_s:'CAP S', label:'Etiqueta', polygon:'Polígono'}[d.type] || 'Gráfico';
   return `${typeLabel} ${d.id || ''}`.trim();
 }
+function getDrawingGroupName(d){
+  const raw = (d && typeof d.groupName === 'string') ? d.groupName.trim() : '';
+  return raw || 'SIN GRUPO';
+}
+function setDrawingGroupName(id, name, skipPersist){
+  if(!window.st || !Array.isArray(st.drawings) || !id) return;
+  const d = st.drawings.find(x=>x && x.id===id);
+  if(!d) return;
+  const clean = String(name || '').trim();
+  d.groupName = clean || '';
+  if(!skipPersist) persistDrawingMetaChanges();
+}
+
 function persistDrawingMetaChanges(){
   if(typeof repaintNav === 'function') repaintNav();
   if(typeof repaintAlt === 'function') repaintAlt();
@@ -11534,6 +12548,60 @@ Creador: ${creator}`)) return false;
   renderDrawingScopePanel();
   return true;
 }
+
+/* ===== SETCA: grupos minimizables locales ===== */
+function setcaGroupStorageKey(kind){ return 'SETCA_COLLAPSED_GROUPS_' + String(kind || 'default'); }
+function setcaReadCollapsedGroups(kind){
+  try{ return JSON.parse(localStorage.getItem(setcaGroupStorageKey(kind)) || '{}') || {}; }catch(_){ return {}; }
+}
+function setcaWriteCollapsedGroups(kind, map){
+  try{ localStorage.setItem(setcaGroupStorageKey(kind), JSON.stringify(map || {})); }catch(_){ }
+}
+function setcaIsGroupCollapsed(kind, name){
+  const map = setcaReadCollapsedGroups(kind);
+  return !!map[String(name || 'Sin grupo')];
+}
+function setcaToggleGroupCollapsed(kind, name){
+  const key = String(name || 'Sin grupo');
+  const map = setcaReadCollapsedGroups(kind);
+  map[key] = !map[key];
+  setcaWriteCollapsedGroups(kind, map);
+  if(kind === 'gtc'){
+    try{ repaintGTC(); }catch(_){ }
+  }else{
+    try{ renderDrawingScopePanel(); }catch(_){ }
+  }
+}
+function setcaMakeGroupHeader(kind, groupName, count){
+  const gh = document.createElement('div');
+  gh.className = (kind === 'gtc') ? 'gtcGroupHeader' : 'drawingScopeGroupHeader';
+  const collapsed = setcaIsGroupCollapsed(kind, groupName);
+  const btn = document.createElement('button');
+  btn.type = 'button';
+  btn.className = 'setcaGroupToggleBtn focusable';
+  btn.title = collapsed ? 'Expandir grupo' : 'Minimizar grupo';
+  btn.setAttribute('aria-expanded', collapsed ? 'false' : 'true');
+  btn.addEventListener('click', (ev)=>{
+    ev.preventDefault();
+    ev.stopPropagation();
+    setcaToggleGroupCollapsed(kind, groupName);
+  });
+  const chev = document.createElement('span');
+  chev.className = 'setcaGroupChevron';
+  chev.textContent = collapsed ? '▸' : '▾';
+  const title = document.createElement('span');
+  title.className = 'setcaGroupTitle';
+  title.textContent = String(groupName || 'Sin grupo');
+  title.title = title.textContent;
+  const cnt = document.createElement('span');
+  cnt.className = 'setcaGroupCount';
+  cnt.textContent = String(count || 0);
+  btn.appendChild(chev);
+  btn.appendChild(title);
+  btn.appendChild(cnt);
+  gh.appendChild(btn);
+  return gh;
+}
 function refreshDrawingScopeSelection(){
   const list = document.getElementById('drawingScopeList');
   if(!list) return;
@@ -11553,13 +12621,36 @@ function renderDrawingScopePanel(){
     return;
   }
   arr.sort((a,b)=>{
+    const ga = getDrawingGroupName(a);
+    const gb = getDrawingGroupName(b);
+    const cg = ga.localeCompare(gb, 'es', {numeric:true, sensitivity:'base'});
+    if(cg) return cg;
     const aa = ((a && typeof a.name === 'string') ? a.name.trim() : '') || ((a && a.id) ? a.id : '');
     const bb = ((b && typeof b.name === 'string') ? b.name.trim() : '') || ((b && b.id) ? b.id : '');
     return aa.localeCompare(bb, 'es', {numeric:true, sensitivity:'base'});
   });
   list.innerHTML = '';
+  const drawingGroups = [];
+  let lastDrawingGroup = null;
   arr.forEach(d=>{
     if(!d) return;
+    const drawingGroupName = getDrawingGroupName(d);
+    if(drawingGroupName !== lastDrawingGroup){
+      lastDrawingGroup = drawingGroupName;
+      drawingGroups.push({ name:drawingGroupName, count:0 });
+    }
+    drawingGroups[drawingGroups.length-1].count += 1;
+  });
+  const drawingGroupCounts = new Map(drawingGroups.map(g=>[g.name, g.count]));
+  lastDrawingGroup = null;
+  arr.forEach(d=>{
+    if(!d) return;
+    const drawingGroupName = getDrawingGroupName(d);
+    if(drawingGroupName !== lastDrawingGroup){
+      lastDrawingGroup = drawingGroupName;
+      list.appendChild(setcaMakeGroupHeader('drawing', drawingGroupName, drawingGroupCounts.get(drawingGroupName) || 0));
+    }
+    if(setcaIsGroupCollapsed('drawing', drawingGroupName)) return;
     const hidden = isDrawingHiddenLocal(d.id);
     const canDelete = canCurrentUserDeleteDrawing(d);
     const creator = getDrawingCreatorName(d);
@@ -11591,8 +12682,19 @@ function renderDrawingScopePanel(){
     creatorEl.textContent = `Creador: ${creator}`;
     creatorEl.title = creatorEl.textContent;
 
+    const groupInp = document.createElement('input');
+    groupInp.className = 'ghost focusable drawingScopeGroupInput';
+    groupInp.type = 'text';
+    groupInp.placeholder = 'Grupo';
+    groupInp.value = (typeof d.groupName === 'string') ? d.groupName : '';
+    groupInp.title = 'Nombre del grupo';
+    groupInp.addEventListener('click', ev=>ev.stopPropagation());
+    groupInp.addEventListener('input', ev=>{ ev.stopPropagation(); setDrawingGroupName(d.id, groupInp.value, true); });
+    groupInp.addEventListener('change', ev=>{ ev.stopPropagation(); setDrawingGroupName(d.id, groupInp.value, false); renderDrawingScopePanel(); });
+
     meta.appendChild(name);
     meta.appendChild(creatorEl);
+    meta.appendChild(groupInp);
 
     const centerBtn = document.createElement('button');
     centerBtn.type = 'button';
@@ -11676,6 +12778,7 @@ function renderDrawingScopePanel(){
 window.renderDrawingScopePanel = renderDrawingScopePanel;
 window.setDrawingVisibility = setDrawingVisibility;
 window.setDrawingName = setDrawingName;
+window.setDrawingGroupName = setDrawingGroupName;
 window.centerDrawingById = centerDrawingById;
 window.deleteDrawingById = deleteDrawingById;
 window.isDrawingHiddenLocal = isDrawingHiddenLocal;
@@ -12867,20 +13970,48 @@ body.setca-access-locked .app{
   border-radius:10px;
   padding:8px 10px;
   cursor:pointer;
-  display:flex;
+  display:grid;
+  grid-template-columns:minmax(86px, 1fr) minmax(130px, 1.35fr) auto;
   align-items:center;
-  justify-content:space-between;
   gap:8px;
   font-size:12px;
+  width:100%;
+  text-align:initial;
 }
 .setca-room-item.active{ box-shadow: inset 0 0 0 1px rgba(110,255,145,0.36); background:#112918; }
 .setca-room-item small{ display:block; color:#a8d8b0; margin-top:3px; }
+.setca-room-main{min-width:0;text-align:left;display:flex;flex-direction:column;gap:2px;}
+.setca-room-main strong{white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+.setca-room-instructor{
+  flex:1 1 auto;
+  min-width:120px;
+  text-align:center;
+  font:800 10px/1.2 ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
+  letter-spacing:.055em;
+  text-transform:uppercase;
+  color:#9fb0a4;
+  white-space:nowrap;
+  overflow:hidden;
+  text-overflow:ellipsis;
+  padding:2px 6px;
+}
+.setca-room-instructor.online{
+  color:#bbf7d0;
+  border:1px solid rgba(74,222,128,.28);
+  background:rgba(22,101,52,.16);
+  border-radius:999px;
+}
+.setca-room-instructor.empty{visibility:hidden;}
 .setca-room-flag{
   border:1px solid #3a7a46;
   border-radius:999px;
   padding:4px 7px;
   font-size:10px;
   white-space:nowrap;
+}
+@media (max-width: 640px){
+  .setca-room-item{grid-template-columns:1fr auto;}
+  .setca-room-instructor{grid-column:1 / -1; text-align:left; min-width:0;}
 }
 .setca-gate-error{
   min-height: 16px;
@@ -13167,14 +14298,18 @@ onAuthStateChanged(auth, u=>{
 
 function startPresence(){
   // Escuchar lista de usuarios por sala
-  salas.forEach(sala=>{
+  Array.from(new Set([...(Array.isArray(salas)?salas:[]), currentRoom || 'sala-default', 'sala-default'])).forEach(sala=>{
     const uRef = ref(db, `rooms/${sala}/users`);
     onValue(uRef, snap=>{
       const val = snap.val() || {};
       const entries = Object.values(val);
       const names = entries.map(v => (v && v.name) ? v.name : "sinNombre");
       // Guardar cache de presencia
-      try{ window.__setcaPresence[sala] = names.slice(); }catch(_){ }
+      try{ window.__setcaPresence[sala] = entries.map(v=>({
+        name: String((v && v.name) || (v && v.callsign) || 'sinNombre'),
+        callsign: String((v && v.callsign) || (v && v.name) || 'sinNombre'),
+        role: String((v && v.role) || 'default')
+      })); }catch(_){ }
       const count = names.length;
       const rowId = "room-row-" + sala;
       let row = document.getElementById(rowId);
@@ -14282,6 +15417,15 @@ document.querySelectorAll('#pCmdBody .btn').forEach(btn=>{
 
   function nowMs(){ return Date.now(); }
   function isObserver(){ return !!(window.st && st.modoObservador); }
+  function isInstructorRouteOwner(){
+    try{
+      // V+click / puntos de control de navegación: SOLO INSTRUCTOR real.
+      // No Planning Tool, no Free Play, no Pseudo Piloto, no ODT/ODI-CO/Observador.
+      const a = window.__setcaAccess || {};
+      return String(a.role || '').toLowerCase() === 'default';
+    }catch(_){ return false; }
+  }
+  function canUseFlightPlanner(){ return isInstructorRouteOwner() && !isObserver(); }
   function getPlaneById(id){ return (window.st && Array.isArray(st.planes)) ? st.planes.find(p=>p && p.id===id) : null; }
   function getCtx(){ try{return cvs.getContext('2d');}catch(_){return null;} }
   function consume(e){
@@ -15040,8 +16184,18 @@ document.querySelectorAll('#pCmdBody .btn').forEach(btn=>{
   if(typeof window.updatePlane === 'function' && !window.__SETCA_ROUTE_UPDATE_WRAPPED__){
     const _origUpdatePlane = window.updatePlane;
     window.updatePlane = function(p, dt){
-      try{ applyRouteGuidance(p, dt); }catch(err){ }
-      return _origUpdatePlane.apply(this, arguments);
+      try{
+        // Guardamos posición previa para confirmar consumo real después del movimiento.
+        if(p && Array.isArray(p.routePlan) && p.routePlan.length && p.routeEnabled){
+          const rs0 = (p.__routeFollowState && typeof p.__routeFollowState === 'object') ? p.__routeFollowState : (p.__routeFollowState = {});
+          rs0.preMoveX = Number(p.x||0);
+          rs0.preMoveY = Number(p.y||0);
+        }
+        applyRouteGuidance(p, dt);
+      }catch(err){ }
+      const out = _origUpdatePlane.apply(this, arguments);
+      try{ consumeRouteAfterMove(p, dt); }catch(err){ }
+      return out;
     };
     window.__SETCA_ROUTE_UPDATE_WRAPPED__ = true;
   }
@@ -15062,6 +16216,113 @@ document.querySelectorAll('#pCmdBody .btn').forEach(btn=>{
   }
   document.addEventListener('input', tryMarkManualRouteOverrideFromTarget, true);
   document.addEventListener('change', tryMarkManualRouteOverrideFromTarget, true);
+
+
+  function consumeReachedWaypoint(p, reason){
+    if(!p || typeof p !== 'object') return false;
+    const arr = Array.isArray(p.routePlan) ? p.routePlan : null;
+    if(!arr || !arr.length || !p.routeEnabled) return false;
+
+    let idx = Number.isFinite(p.routeIdx) ? Math.floor(p.routeIdx) : 0;
+    idx = clamp(idx, 0, Math.max(0, arr.length - 1));
+    const wp = arr[idx];
+    if(!wp) return false;
+
+    const reachedWp = cloneWp(wp);
+    arr.splice(idx, 1); // CONSUMO REAL: desaparece el punto alcanzado, incluyendo el último.
+    p.routePlan = arr.filter(Boolean).map(cloneWp);
+    p.routeCompleted = false;
+    p.routeLastReached = reachedWp && reachedWp.id ? reachedWp.id : idx;
+    p.routeLastChange = nowMs();
+
+    if(p.__routeFollowState){
+      p.__routeFollowState.idx = -1;
+      p.__routeFollowState.prevDist = NaN;
+      p.__routeFollowState.near = false;
+      p.__routeFollowState.preMoveX = Number(p.x||0);
+      p.__routeFollowState.preMoveY = Number(p.y||0);
+      p.__routeFollowState.consumeReason = reason || 'reached';
+    }
+
+    if(Number.isFinite(p.routeManualUntil) && p.routeManualUntil < nowMs() + 500){
+      p.routeManualUntil = 0;
+    }
+
+    if(p.routePlan.length){
+      const nextIdx = Math.min(idx, p.routePlan.length - 1);
+      p.routeIdx = Math.max(0, nextIdx);
+      const nextWp = p.routePlan[p.routeIdx];
+      if(nextWp){
+        if(Number.isFinite(nextWp.alt)) p.tgtAlt = nextWp.alt;
+        if(Number.isFinite(nextWp.spd)) p.tgtSpd = nextWp.spd;
+        p.tgtHdg = bearingDeg(p, nextWp);
+      }
+    }else{
+      // También se consume el último punto. No queda punto fantasma ni línea residual.
+      p.routeIdx = 0;
+      p.routeEnabled = false;
+      p.routeCompleted = true;
+      p.routeFinishedAt = nowMs();
+      p.__routeFollowState = p.__routeFollowState || {};
+      p.__routeFollowState.idx = -1;
+      p.__routeFollowState.prevDist = NaN;
+      p.__routeFollowState.near = false;
+    }
+
+    try{ syncSharedState(); }catch(_){ }
+    try{ repaintLocalPanels(); }catch(_){ }
+    try{ if(typeof drawShapes === 'function') drawShapes(); }catch(_){ }
+    return true;
+  }
+
+  function consumeRouteAfterMove(p, dt){
+    if(!p || typeof p !== 'object') return false;
+    const arr = Array.isArray(p.routePlan) ? p.routePlan : null;
+    if(!arr || !arr.length || !p.routeEnabled) return false;
+
+    let idx = Number.isFinite(p.routeIdx) ? Math.floor(p.routeIdx) : 0;
+    idx = clamp(idx, 0, Math.max(0, arr.length - 1));
+    const wp = arr[idx];
+    if(!wp) return false;
+
+    const rs = (p.__routeFollowState && typeof p.__routeFollowState === 'object') ? p.__routeFollowState : (p.__routeFollowState = {});
+    const x0 = Number.isFinite(rs.preMoveX) ? Number(rs.preMoveX) : Number(p.x||0);
+    const y0 = Number.isFinite(rs.preMoveY) ? Number(rs.preMoveY) : Number(p.y||0);
+    const x1 = Number(p.x||0);
+    const y1 = Number(p.y||0);
+    const wx = Number(wp.x||0);
+    const wy = Number(wp.y||0);
+
+    const distNow = Math.hypot(wx - x1, wy - y1);
+    const spdKmh = Number.isFinite(p.spd) ? p.spd : (Number.isFinite(p.tgtSpd) ? p.tgtSpd : 500);
+    const nmps = Math.max(0, (spdKmh / NM2KM_VAL) / 3600);
+    const dtSec = Math.max(0, Number(dt)||0);
+    const toleranceNM = clamp(Math.max(0.03, nmps * Math.max(1.2, dtSec * 1.5)), 0.03, 0.18);
+
+    // 1) alcanzó la zona de captura después de moverse.
+    if(distNow <= toleranceNM){
+      return consumeReachedWaypoint(p, 'post-hit');
+    }
+
+    // 2) pasó el punto entre la posición previa y la nueva, aunque no haya caído exactamente encima.
+    const vx = x1 - x0;
+    const vy = y1 - y0;
+    const seg2 = vx*vx + vy*vy;
+    if(seg2 > 1e-9){
+      const t = ((wx - x0) * vx + (wy - y0) * vy) / seg2;
+      const tc = Math.max(0, Math.min(1, t));
+      const cx = x0 + vx * tc;
+      const cy = y0 + vy * tc;
+      const dSeg = Math.hypot(wx - cx, wy - cy);
+      const crossed = (t >= 0 && t <= 1 && dSeg <= toleranceNM);
+      const overShot = (((wx - x0) * (wx - x1) + (wy - y0) * (wy - y1)) <= 0) && dSeg <= Math.max(toleranceNM, 0.08);
+      if(crossed || overShot){
+        return consumeReachedWaypoint(p, crossed ? 'post-cross' : 'post-overshoot');
+      }
+    }
+
+    return false;
+  }
 
   function applyRouteGuidance(p, dt){
     if(!p || typeof p !== 'object') return;
@@ -15115,39 +16376,7 @@ document.querySelectorAll('#pCmdBody .btn').forEach(btn=>{
     rs.prevDist = distNM;
 
     if(reachedNow){
-      const reachedWp = cloneWp(wp);
-      arr.splice(idx, 1); // consume el waypoint alcanzado para que desaparezca de la ruta
-      p.routePlan = arr;
-      p.routeCompleted = false;
-      p.routeLastReached = reachedWp && reachedWp.id ? reachedWp.id : idx;
-      p.routeLastChange = nowMs();
-
-      if(p.__routeFollowState){
-        p.__routeFollowState.idx = -1;
-        p.__routeFollowState.prevDist = NaN;
-        p.__routeFollowState.near = false;
-      }
-
-      // al pasar un punto, retomamos guiado normal salvo que el usuario siga tocando controles
-      if(Number.isFinite(p.routeManualUntil) && p.routeManualUntil < nowMs() + 500){
-        p.routeManualUntil = 0;
-      }
-
-      if(arr.length){
-        const nextIdx = Math.min(idx, arr.length - 1);
-        p.routeIdx = nextIdx;
-        const nextWp = arr[nextIdx];
-        if(nextWp){
-          if(Number.isFinite(nextWp.alt)) p.tgtAlt = nextWp.alt;
-          if(Number.isFinite(nextWp.spd)) p.tgtSpd = nextWp.spd;
-          p.tgtHdg = bearingDeg(p, nextWp);
-        }
-      }else{
-        p.routeIdx = 0;
-        p.routeEnabled = false;
-        p.routeCompleted = true;
-        p.routeFinishedAt = nowMs();
-      }
+      consumeReachedWaypoint(p, 'pre-near');
     }
   }
 
@@ -15215,6 +16444,7 @@ document.querySelectorAll('#pCmdBody .btn').forEach(btn=>{
   }
 
   function drawRoutesOverlay(){
+    if(!isInstructorRouteOwner()) return;
     const ctx = getCtx();
     if(!ctx || !window.st || !Array.isArray(st.planes)) return;
 
@@ -15245,6 +16475,7 @@ document.querySelectorAll('#pCmdBody .btn').forEach(btn=>{
 
   // --- Eventos teclado ---
   addEventListener('keydown', (e)=>{
+    if(!canUseFlightPlanner()) return;
     if(e.key==='v' || e.key==='V'){
       planner.vDown = true;
       if(planner.editing) planner.awaitFinalizeClick = false;
@@ -15272,6 +16503,7 @@ document.querySelectorAll('#pCmdBody .btn').forEach(btn=>{
   }, true);
 
   addEventListener('keyup', (e)=>{
+    if(!canUseFlightPlanner()) return;
     if(e.key==='v' || e.key==='V'){
       planner.vDown = false;
       if(planner.editing){
@@ -15294,7 +16526,7 @@ document.querySelectorAll('#pCmdBody .btn').forEach(btn=>{
 
   // --- Mouse: iniciar/agregar/finalizar ---
   cvs.addEventListener('mousedown', (e)=>{
-    if(isObserver()) return;
+    if(!canUseFlightPlanner()) return;
 
     if(e.button===2){
       const hitWp = findWaypointHit(e.clientX, e.clientY);
@@ -15361,7 +16593,7 @@ document.querySelectorAll('#pCmdBody .btn').forEach(btn=>{
   // Clicks fuera del canvas (pero cerca del radar): permite colocar navegación fuera del mapa visible
   // sin perder el flujo V-hold. No interfiere con paneles laterales ni con el editor.
   addEventListener('mousedown', (e)=>{
-    if(isObserver()) return;
+    if(!canUseFlightPlanner()) return;
     if(!planner.editing) return;
     if(e.target === cvs) return;
     if(planner.pop && planner.pop.contains && planner.pop.contains(e.target)) return;
@@ -15397,7 +16629,7 @@ document.querySelectorAll('#pCmdBody .btn').forEach(btn=>{
 
   // Contextmenu captura: editar waypoint aunque exista menú de dibujos
   cvs.addEventListener('contextmenu', (e)=>{
-    if(isObserver()) return;
+    if(!canUseFlightPlanner()) return;
     if(nowMs() < (planner.suppressCtxMenuUntil||0)){ consume(e); return; }
     const hitWp = findWaypointHit(e.clientX, e.clientY);
     if(!hitWp) return;
@@ -15441,7 +16673,7 @@ document.querySelectorAll('#pCmdBody .btn').forEach(btn=>{
     try{ e.preventDefault && e.preventDefault(); }catch(_){ }
     try{ e.stopImmediatePropagation ? e.stopImmediatePropagation() : e.stopPropagation && e.stopPropagation(); }catch(_){ }
   }
-  function planePickThresholdPx(){ return 8; }
+  function planePickThresholdPx(){ return 10; }
   function findPlaneAtClient(clientX, clientY){
     if(!window.st || !Array.isArray(st.planes) || typeof toScreen !== 'function') return null;
     const r = cvs.getBoundingClientRect();
@@ -16180,6 +17412,16 @@ function gtcPersist(kind='soft'){
 }
 window.gtcPersist = gtcPersist;
 
+function gtcGetGroupName(u){
+  const raw = (u && typeof u.groupName === 'string') ? u.groupName.trim() : '';
+  return raw || 'SIN GRUPO';
+}
+function gtcSetGroupName(u, name){
+  if(!u) return;
+  const clean = String(name || '').trim();
+  u.groupName = clean || '';
+}
+
 function gtcNormalizeUnit(u, idx){
   const item = (u && typeof u === 'object') ? u : {};
   if(!item.id) item.id = 'GTC-' + Math.random().toString(36).slice(2,8).toUpperCase();
@@ -16188,10 +17430,13 @@ function gtcNormalizeUnit(u, idx){
   if(!String(item.label || '').trim()) item.label = item.canLaunch ? 'LANZA' : 'RADAR';
   if(!String(item.shortLabel || '').trim()) item.shortLabel = item.canLaunch ? 'LANZA' : 'RADAR';
   if(!String(item.name || '').trim()) item.name = item.presetKey ? gtcNextNameForPreset(item) : (item.canLaunch ? `LANZA${idx+1}` : `RADAR${idx+1}`);
+  if(typeof item.groupName !== 'string') item.groupName = '';
   if(!Number.isFinite(+item.x)) item.x = 0;
   if(!Number.isFinite(+item.y)) item.y = 0;
   if(!Number.isFinite(+item.covR)) item.covR = item.canLaunch ? 30 : 50/NM2KM;
   if(!Number.isFinite(+item.covH)) item.covH = item.canLaunch ? 30000 : 120000;
+  if(!Number.isFinite(+item.covOpacity)) item.covOpacity = 0.18;
+  item.covOpacity = Math.max(0, Math.min(1, +item.covOpacity));
   if(!Number.isFinite(+item.misR)) item.misR = item.canLaunch ? 20 : 0;
   if(!Number.isFinite(+item.misH)) item.misH = item.canLaunch ? 30000 : 0;
   if(item.trackPlaneId === undefined || item.trackPlaneId === null) item.trackPlaneId = '';
@@ -16220,7 +17465,26 @@ function repaintGTC(){
   const hUnit = (window.st && st.altUnit === 'm') ? 'm' : 'ft';
   const fmtCoord = (v)=> Number.isFinite(+v) ? (+v).toFixed(1) : '0.0';
   const frag = document.createDocumentFragment();
-  arr.forEach((u, idx)=>{
+  const displayArr = arr.slice().sort((a,b)=>{
+    const ga = gtcGetGroupName(a);
+    const gb = gtcGetGroupName(b);
+    const cg = ga.localeCompare(gb, 'es', {numeric:true, sensitivity:'base'});
+    if(cg) return cg;
+    return String(a.name||'').localeCompare(String(b.name||''), 'es', {numeric:true, sensitivity:'base'});
+  });
+  const gtcGroupCounts = new Map();
+  displayArr.forEach(u=>{
+    const gn = gtcGetGroupName(u);
+    gtcGroupCounts.set(gn, (gtcGroupCounts.get(gn) || 0) + 1);
+  });
+  let lastGtcGroup = null;
+  displayArr.forEach((u, idx)=>{
+    const groupName = gtcGetGroupName(u);
+    if(groupName !== lastGtcGroup){
+      lastGtcGroup = groupName;
+      frag.appendChild(setcaMakeGroupHeader('gtc', groupName, gtcGroupCounts.get(groupName) || 0));
+    }
+    if(setcaIsGroupCollapsed('gtc', groupName)) return;
     const canLaunch = __gtcCanLaunch(u);
     const row = document.createElement('div');
     row.className = 'gtc-row';
@@ -16244,8 +17508,17 @@ function repaintGTC(){
       u.name = inp.value;
       gtcPersist('flush');
     });
+    const grpInp = document.createElement('input');
+    grpInp.className = 'ghost focusable gtcGroupInput';
+    grpInp.type = 'text';
+    grpInp.placeholder = 'Grupo';
+    grpInp.value = (typeof u.groupName === 'string') ? u.groupName : '';
+    grpInp.title = 'Nombre del grupo';
+    grpInp.addEventListener('input', ()=>{ gtcSetGroupName(u, grpInp.value); gtcPersist('soft'); });
+    grpInp.addEventListener('change', ()=>{ gtcSetGroupName(u, grpInp.value); repaintGTC(); gtcPersist('flush'); });
     nameWrap.appendChild(badge);
     nameWrap.appendChild(inp);
+    nameWrap.appendChild(grpInp);
     const planeWrap = document.createElement('div');
     planeWrap.className = 'gtc-planeWrap';
     if(canLaunch){
@@ -16348,6 +17621,7 @@ function repaintGTC(){
     };
     const cR = mkCtrl('Cob. Radio', rUnit);
     const cH = mkCtrl('Cob. Altura', hUnit);
+    const cO = mkCtrl('Opacidad', '%');
     const mR = mkCtrl('Misil Radio', rUnit);
     const mH = mkCtrl('Misil Altura', hUnit);
     [[cR, rRange, getCovRDisp()], [mR, rRange, getMisRDisp()]].forEach(([ctrl, range, value])=>{
@@ -16362,12 +17636,17 @@ function repaintGTC(){
       ctrl.num.value = String(Math.max(0, Math.round(value || 0)));
       ctrl.rng.value = ctrl.num.value;
     });
+    cO.num.min = 0; cO.num.max = 80; cO.num.step = 1;
+    cO.rng.min = 0; cO.rng.max = 80; cO.rng.step = 1;
+    cO.num.value = String(Math.round(Math.max(0, Math.min(0.8, Number.isFinite(+u.covOpacity) ? +u.covOpacity : 0.18)) * 100));
+    cO.rng.value = cO.num.value;
     const setCovRFromDisp = (v)=>{ const n = parseFloat(v); if(!(n > 0)){ u.covR = 0; return; } const cl = Math.max(1, Math.min(rRange.max, n)); u.covR = (typeof gtcRadFromDisp === 'function') ? gtcRadFromDisp(cl) : cl; };
     const setCovHFromDisp = (v)=>{ const n = parseFloat(v); if(!(n > 0)){ u.covH = 0; return; } const cl = Math.max(0, Math.min(hRange.max, n)); u.covH = (typeof gtcAltFromDisp === 'function') ? gtcAltFromDisp(cl) : cl; };
     const setMisRFromDisp = (v)=>{ const n = parseFloat(v); if(!(n > 0)){ u.misR = 0; return; } const cl = Math.max(1, Math.min(rRange.max, n)); u.misR = (typeof gtcRadFromDisp === 'function') ? gtcRadFromDisp(cl) : cl; };
     const setMisHFromDisp = (v)=>{ const n = parseFloat(v); if(!(n > 0)){ u.misH = 0; return; } const cl = Math.max(0, Math.min(hRange.max, n)); u.misH = (typeof gtcAltFromDisp === 'function') ? gtcAltFromDisp(cl) : cl; };
     const syncCovR = (v)=>{ const raw = Math.max(0, parseFloat(v) || 0); cR.num.value = String(raw); cR.rng.value = String(raw); setCovRFromDisp(raw); try{ if(typeof gtcRefreshIndicators === 'function') gtcRefreshIndicators(); }catch(_){ } gtcPersist('soft'); };
     const syncCovH = (v)=>{ const raw = Math.max(0, parseFloat(v) || 0); cH.num.value = String(raw); cH.rng.value = String(raw); setCovHFromDisp(raw); try{ if(typeof gtcRefreshIndicators === 'function') gtcRefreshIndicators(); }catch(_){ } gtcPersist('soft'); };
+    const syncCovO = (v)=>{ const raw = Math.max(0, Math.min(80, parseFloat(v) || 0)); cO.num.value = String(raw); cO.rng.value = String(raw); u.covOpacity = raw/100; try{ if(typeof repaintAll === 'function') repaintAll(); }catch(_){ } gtcPersist('soft'); };
     const syncMisR = (v)=>{ const raw = Math.max(0, parseFloat(v) || 0); mR.num.value = String(raw); mR.rng.value = String(raw); setMisRFromDisp(raw); gtcPersist('soft'); };
     const syncMisH = (v)=>{ const raw = Math.max(0, parseFloat(v) || 0); mH.num.value = String(raw); mH.rng.value = String(raw); setMisHFromDisp(raw); gtcPersist('soft'); };
     cR.num.addEventListener('input', ()=>syncCovR(cR.num.value));
@@ -16378,6 +17657,10 @@ function repaintGTC(){
     cH.rng.addEventListener('input', ()=>syncCovH(cH.rng.value));
     cH.num.addEventListener('change', ()=>gtcPersist('flush'));
     cH.rng.addEventListener('change', ()=>gtcPersist('flush'));
+    cO.num.addEventListener('input', ()=>syncCovO(cO.num.value));
+    cO.rng.addEventListener('input', ()=>syncCovO(cO.rng.value));
+    cO.num.addEventListener('change', ()=>gtcPersist('flush'));
+    cO.rng.addEventListener('change', ()=>gtcPersist('flush'));
     mR.num.addEventListener('input', ()=>syncMisR(mR.num.value));
     mR.rng.addEventListener('input', ()=>syncMisR(mR.rng.value));
     mR.num.addEventListener('change', ()=>gtcPersist('flush'));
@@ -16388,6 +17671,7 @@ function repaintGTC(){
     mH.rng.addEventListener('change', ()=>gtcPersist('flush'));
     cfgGrid.appendChild(cR.box);
     cfgGrid.appendChild(cH.box);
+    cfgGrid.appendChild(cO.box);
     if(canLaunch){ cfgGrid.appendChild(mR.box); cfgGrid.appendChild(mH.box); }
     const foot = document.createElement('div');
     foot.className = 'gtc-cfg-foot';
@@ -16396,7 +17680,7 @@ function repaintGTC(){
     posTxt.textContent = `Posición radar: X ${fmtCoord(u.x)} · Y ${fmtCoord(u.y)}`;
     const profileTxt = document.createElement('span');
     profileTxt.className = 'mini';
-    profileTxt.textContent = canLaunch ? `Perfil: ${u.label || 'MISIL'} · ${Math.round(getMisHDisp())}${hUnit} · ${Math.round(getMisRDisp())}${rUnit}` : `Perfil: ${u.label || 'RADAR'} · ${Math.round(getCovRDisp())}${rUnit}`;
+    profileTxt.textContent = canLaunch ? `Perfil: ${u.label || 'MISIL'} · ${Math.round(getMisHDisp())}${hUnit} · ${Math.round(getMisRDisp())}${rUnit} · Op ${Math.round((+u.covOpacity||0)*100)}%` : `Perfil: ${u.label || 'RADAR'} · ${Math.round(getCovRDisp())}${rUnit} · Op ${Math.round((+u.covOpacity||0)*100)}%`;
     foot.appendChild(posTxt);
     foot.appendChild(profileTxt);
     cov.appendChild(cfgGrid);
@@ -17060,6 +18344,43 @@ addEventListener('blur', hideGtcMenu, true);
 addEventListener('scroll', ()=>{ try{ hideGtcMenu(); }catch(_){} }, true);
 
 
+
+
+/* ===== Ground Asset List: panel lateral ===== */
+(function initGroundAssetListPanel(){
+  function closeGtcAssetList(){
+    const list = document.getElementById('gtcList');
+    const btn = document.getElementById('gtcAssetListBtn');
+    if(list) list.classList.remove('gtcAssetSideOpen');
+    if(btn){ btn.classList.remove('active'); btn.textContent = 'Ground Asset List'; }
+  }
+  function toggleGtcAssetList(){
+    const list = document.getElementById('gtcList');
+    const btn = document.getElementById('gtcAssetListBtn');
+    if(!list) return;
+    const open = !list.classList.contains('gtcAssetSideOpen');
+    list.classList.toggle('gtcAssetSideOpen', open);
+    if(btn){ btn.classList.toggle('active', open); btn.textContent = open ? 'Cerrar Asset List' : 'Ground Asset List'; }
+    if(open){ try{ if(typeof repaintGTC === 'function') repaintGTC(); }catch(_){ } }
+  }
+  window.closeGtcAssetList = closeGtcAssetList;
+  window.toggleGtcAssetList = toggleGtcAssetList;
+  document.addEventListener('click', function(e){
+    const btn = e.target && e.target.closest ? e.target.closest('#gtcAssetListBtn') : null;
+    if(btn){ e.preventDefault(); e.stopPropagation(); toggleGtcAssetList(); return; }
+    const list = document.getElementById('gtcList');
+    if(list && list.classList.contains('gtcAssetSideOpen')){
+      const r = list.getBoundingClientRect();
+      if(e.clientX >= r.right - 38 && e.clientX <= r.right - 6 && e.clientY >= r.top + 4 && e.clientY <= r.top + 38){
+        e.preventDefault(); e.stopPropagation(); closeGtcAssetList();
+      }
+    }
+  }, true);
+  document.addEventListener('keydown', function(e){
+    if(e.key === 'Escape') closeGtcAssetList();
+  });
+})();
+
 (function initGTC(){
   document.querySelectorAll('.gtcPresetBtn[data-gtc-preset]').forEach(btn=>{
     btn.addEventListener('click', ()=>{
@@ -17079,10 +18400,12 @@ addEventListener('scroll', ()=>{ try{ hideGtcMenu(); }catch(_){} }, true);
 
 
 <script type="module">
-import { getDatabase, ref, get, set } from "https://www.gstatic.com/firebasejs/10.12.3/firebase-database.js";
+import { getDatabase, ref, get, set, runTransaction, onValue } from "https://www.gstatic.com/firebasejs/10.12.3/firebase-database.js";
+import { getAuth } from "https://www.gstatic.com/firebasejs/10.12.3/firebase-auth.js";
 
 (function(){
   const db = getDatabase();
+  const auth = getAuth();
   const PRESET_ROOMS = ['sala-default','alfa','bravo','charlie','delta','eco','foxtrot','golf','hotel','india','juliet'];
   const GATE_KEY = 'setca_access_gate_v3';
   const MASTER_ACCESS_KEY = 'SETCA-2026';
@@ -17120,6 +18443,9 @@ import { getDatabase, ref, get, set } from "https://www.gstatic.com/firebasejs/1
   };
 
   let roomsCache = [];
+  const __roomInstructorLocks = Object.create(null);
+  const __roomInstructorUnsubs = Object.create(null);
+  let __roomInstructorRenderTick = null;
   let gateMode = 'join';
   let editMode = false;
   let gateState = {
@@ -17259,6 +18585,35 @@ import { getDatabase, ref, get, set } from "https://www.gstatic.com/firebasejs/1
   function setRoomBadge(room){
     if(roomBadge) roomBadge.textContent = room ? ('SALA ' + roomLabel(room)) : 'SIN SALA';
   }
+  function __escapeGateHtml(v){
+    return String(v == null ? '' : v).replace(/[&<>"']/g, ch => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[ch]));
+  }
+  function __activeInstructorForRoom(roomId){
+    try{
+      const lock = __roomInstructorLocks[String(roomId || 'sala-default')];
+      if(!lock || typeof lock !== 'object') return null;
+      const cs = String(lock.callsign || '').trim();
+      const active = !!(cs && Number(lock.expiresAt || 0) > Date.now());
+      return active ? cs : null;
+    }catch(_){ return null; }
+  }
+  function __observeInstructorLocksForRooms(){
+    try{
+      roomsCache.forEach(room=>{
+        const id = String(room && room.id || 'sala-default');
+        if(!id || __roomInstructorUnsubs[id]) return;
+        __roomInstructorUnsubs[id] = onValue(ref(db, __roomInstructorLockPath(id)), snap=>{
+          __roomInstructorLocks[id] = snap.exists() ? (snap.val() || null) : null;
+          renderRooms();
+        });
+      });
+      if(!__roomInstructorRenderTick){
+        __roomInstructorRenderTick = setInterval(()=>{
+          try{ renderRooms(); }catch(_){ }
+        }, 1000);
+      }
+    }catch(err){ console.warn('SETCA instructor room list observe error', err); }
+  }
   function setStepState(el, status){
     if(!el) return;
     el.classList.remove('active','done');
@@ -17336,6 +18691,7 @@ import { getDatabase, ref, get, set } from "https://www.gstatic.com/firebasejs/1
       if(ap !== bp) return ap - bp;
       return String(a.id).localeCompare(String(b.id));
     });
+    __observeInstructorLocksForRooms();
     renderRooms();
   }
   window.fetchRooms = fetchRooms;
@@ -17352,11 +18708,13 @@ import { getDatabase, ref, get, set } from "https://www.gstatic.com/firebasejs/1
       row.type = 'button';
       row.className = 'setca-room-item';
       if(room.id === gateState.room) row.classList.add('active');
+      const instructorCallsign = __activeInstructorForRoom(room.id);
       row.innerHTML = `
-        <div style="text-align:left; min-width:0;">
-          <strong>${String(room.label || roomLabel(room.id)).toUpperCase()}</strong>
+        <div class="setca-room-main">
+          <strong>${__escapeGateHtml(String(room.label || roomLabel(room.id)).toUpperCase())}</strong>
           <small>${room.private ? 'Sala privada · requiere clave' : 'Sala abierta'}</small>
         </div>
+        <div class="setca-room-instructor ${instructorCallsign ? 'online' : 'empty'}">${instructorCallsign ? ('INSTRUCTOR EN LÍNEA - ' + __escapeGateHtml(instructorCallsign)) : ''}</div>
         <span class="setca-room-flag">${room.private ? '🔐 PRIVADA' : 'ABIERTA'}</span>
       `;
       row.addEventListener('click', ()=>{
@@ -17454,6 +18812,13 @@ import { getDatabase, ref, get, set } from "https://www.gstatic.com/firebasejs/1
     try{ if(window.st) st.canInstructorPlaneMove = !!window.__SETCA_instructorPlaneMove; }catch(_){ }
     body.classList.add('setca-role-locked');
     body.setAttribute('data-setca-role', freeplay ? 'freeplay' : (planning ? 'planning' : String(access.role || 'default')));
+    try{
+      const contBtn = document.getElementById('contingenciesBtn');
+      const contPanel = document.getElementById('setcaContingenciesPanel');
+      const allowCont = String(access.role || 'default').toLowerCase() === 'default' && !planning && !freeplay;
+      if(contBtn){ contBtn.style.display = allowCont ? '' : 'none'; contBtn.disabled = !allowCont; }
+      if(!allowCont && contPanel){ contPanel.classList.remove('open'); contPanel.setAttribute('aria-hidden','true'); }
+    }catch(_){ }
     const ids = ['alumnoBtn','odtBtn','observerBtn'];
     ids.forEach(id=>{
       const btn = document.getElementById(id);
@@ -17685,6 +19050,8 @@ import { getDatabase, ref, get, set } from "https://www.gstatic.com/firebasejs/1
     gate.setAttribute('aria-hidden', 'true');
     setError('');
     refreshAfterAccess();
+    try{ __observeInstructorOnline(window.__setcaAccess.room); }catch(_){ }
+    try{ __startInstructorLockHeartbeat(window.__setcaAccess); }catch(_){ }
 
     const salasBtn = document.getElementById('salasBtn');
     if(salasBtn){
@@ -17712,6 +19079,178 @@ import { getDatabase, ref, get, set } from "https://www.gstatic.com/firebasejs/1
     }catch(err){
       console.warn('SETCA room capacity check failed', err);
       return { ok:true, maxUsers:0, count:0 };
+    }
+  }
+
+
+  const __INSTRUCTOR_LOCK_TTL_MS = 16000;
+  const __INSTRUCTOR_LOCK_HEARTBEAT_MS = 5000;
+  let __instructorLockTimer = null;
+  let __instructorLockRoom = '';
+  let __instructorLockUid = '';
+  let __instructorBannerUnsub = null;
+  let __instructorBannerRoom = '';
+  let __instructorBannerLast = null;
+  let __instructorBannerTick = null;
+
+  function __isInstructorAccess(access){
+    return !!(access && !access.planning && !access.freeplay && String(access.role || '').toLowerCase() === 'default');
+  }
+  function __getClientUid(){
+    try{
+      const locked = sessionStorage.getItem('setca_instructor_lock_uid_v1');
+      if(locked) return String(locked);
+    }catch(_){ }
+    try{
+      if(auth && auth.currentUser && auth.currentUser.uid){
+        const v = String(auth.currentUser.uid);
+        try{ sessionStorage.setItem('setca_instructor_lock_uid_v1', v); }catch(_){ }
+        return v;
+      }
+    }catch(_){ }
+    try{
+      if(window.currentUID){
+        const v = String(window.currentUID);
+        try{ sessionStorage.setItem('setca_instructor_lock_uid_v1', v); }catch(_){ }
+        return v;
+      }
+    }catch(_){ }
+    try{
+      let sid = sessionStorage.getItem('setca_gate_client_uid_v1');
+      if(!sid){ sid = 'tab-' + Math.random().toString(36).slice(2) + '-' + Date.now().toString(36); sessionStorage.setItem('setca_gate_client_uid_v1', sid); }
+      try{ sessionStorage.setItem('setca_instructor_lock_uid_v1', sid); }catch(_){ }
+      return sid;
+    }catch(_){ return 'tab-' + Date.now().toString(36) + Math.random().toString(36).slice(2); }
+  }
+  function __roomInstructorLockPath(roomId){
+    return `rooms/${String(roomId || 'sala-default')}/instructorLock`;
+  }
+  async function __reserveInstructorLock(roomId, callsign){
+    const room = String(roomId || currentHashRoom() || 'sala-default');
+    const uid = __getClientUid();
+    const cs = String(callsign || 'INSTRUCTOR').trim() || 'INSTRUCTOR';
+    const now = Date.now();
+    const lockRef = ref(db, __roomInstructorLockPath(room));
+    const result = await runTransaction(lockRef, (current)=>{
+      const cur = (current && typeof current === 'object') ? current : null;
+      const owner = cur ? String(cur.uid || '') : '';
+      const expiresAt = cur ? Number(cur.expiresAt || 0) : 0;
+      if(!owner || owner === uid || expiresAt <= now){
+        return {
+          uid,
+          callsign: cs,
+          role: 'default',
+          room,
+          since: (owner === uid && cur && Number(cur.since || 0)) ? Number(cur.since || 0) : now,
+          updatedAt: now,
+          expiresAt: now + __INSTRUCTOR_LOCK_TTL_MS
+        };
+      }
+      return;
+    });
+    const val = result && result.snapshot && result.snapshot.val ? (result.snapshot.val() || null) : null;
+    if(result && result.committed){
+      __instructorLockRoom = room;
+      __instructorLockUid = uid;
+      try{ sessionStorage.setItem('setca_instructor_lock_uid_v1', uid); }catch(_){ }
+      return { ok:true, lock: val };
+    }
+    return { ok:false, lock: val };
+  }
+  function __formatInstructorLockError(lock){
+    const cs = String(lock && lock.callsign || 'otro instructor').trim() || 'otro instructor';
+    return `Ya hay un INSTRUCTOR en línea en esta sala: ${cs}. Solo puede ingresar un instructor por sala.`;
+  }
+  async function __releaseInstructorLock(){
+    try{
+      const access = window.__setcaAccess || {};
+      const room = String(__instructorLockRoom || access.room || currentHashRoom() || 'sala-default');
+      const uid = String(__instructorLockUid || __getClientUid());
+      if(!room || !uid) return;
+      const lockRef = ref(db, __roomInstructorLockPath(room));
+      await runTransaction(lockRef, (current)=>{
+        const cur = (current && typeof current === 'object') ? current : null;
+        if(cur && String(cur.uid || '') === uid) return null;
+        return current;
+      });
+      try{ sessionStorage.removeItem('setca_instructor_lock_uid_v1'); }catch(_){ }
+    }catch(err){ console.warn('No se pudo liberar instructorLock', err); }
+  }
+  window.__SETCA_releaseInstructorLock = __releaseInstructorLock;
+
+  function __stopInstructorLockHeartbeat(){
+    if(__instructorLockTimer){ clearInterval(__instructorLockTimer); __instructorLockTimer = null; }
+  }
+  function __handleInstructorLockLost(lock){
+    __stopInstructorLockHeartbeat();
+    clearSession();
+    try{ sessionStorage.removeItem('setca_access_gate_v3'); }catch(_){ }
+    alert(__formatInstructorLockError(lock));
+    const cleanUrl = String(location.pathname || '') + String(location.search || '') + '#' + String((window.__setcaAccess && window.__setcaAccess.room) || currentHashRoom() || 'sala-default');
+    location.href = cleanUrl;
+  }
+  function __startInstructorLockHeartbeat(access){
+    __stopInstructorLockHeartbeat();
+    if(!__isInstructorAccess(access)) return;
+    const room = String(access.room || currentHashRoom() || 'sala-default');
+    const callsign = String(access.callsign || 'INSTRUCTOR').trim() || 'INSTRUCTOR';
+    const beat = async ()=>{
+      try{
+        const res = await __reserveInstructorLock(room, callsign);
+        if(!res.ok) __handleInstructorLockLost(res.lock);
+      }catch(err){ console.warn('Instructor lock heartbeat error', err); }
+    };
+    beat();
+    __instructorLockTimer = setInterval(beat, __INSTRUCTOR_LOCK_HEARTBEAT_MS);
+  }
+
+  function __ensureInstructorOnlineBanner(){
+    let banner = document.getElementById('setcaInstructorOnlineBanner');
+    if(!banner){
+      banner = document.createElement('div');
+      banner.id = 'setcaInstructorOnlineBanner';
+      banner.setAttribute('aria-live','polite');
+      banner.style.display = 'none';
+      document.body.appendChild(banner);
+    }
+    if(!document.getElementById('setcaInstructorOnlineBannerStyle')){
+      const style = document.createElement('style');
+      style.id = 'setcaInstructorOnlineBannerStyle';
+      style.textContent = `
+        #setcaInstructorOnlineBanner{
+          position:fixed; left:50%; top:48px; transform:translateX(-50%);
+          z-index:9490; display:none; align-items:center; justify-content:center;
+          min-width:260px; max-width:calc(100vw - 32px); padding:6px 12px;
+          border:1px solid rgba(74,222,128,.48); border-radius:999px;
+          background:rgba(3,20,10,.88); color:#bbf7d0;
+          font:800 11px/1.2 ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
+          letter-spacing:.08em; text-transform:uppercase;
+          box-shadow:0 10px 28px rgba(0,0,0,.34); backdrop-filter:blur(6px);
+          pointer-events:none;
+        }
+        #setcaInstructorOnlineBanner strong{color:#ffffff; margin-left:5px;}
+        body.setca-access-locked #setcaInstructorOnlineBanner{display:none!important;}
+      `;
+      document.head.appendChild(style);
+    }
+    return banner;
+  }
+  function __paintInstructorOnlineBanner(lock){
+    // El estado del instructor se muestra en el listado de salas, no como aviso dentro del radar.
+    const banner = document.getElementById('setcaInstructorOnlineBanner');
+    if(banner){ banner.style.display = 'none'; banner.textContent = ''; }
+  }
+  function __observeInstructorOnline(roomId){
+    const room = String(roomId || currentHashRoom() || 'sala-default');
+    if(__instructorBannerRoom === room && __instructorBannerUnsub) return;
+    try{ if(__instructorBannerUnsub) __instructorBannerUnsub(); }catch(_){ }
+    __instructorBannerRoom = room;
+    __instructorBannerUnsub = onValue(ref(db, __roomInstructorLockPath(room)), snap=>{
+      __instructorBannerLast = snap.exists() ? (snap.val() || null) : null;
+      __paintInstructorOnlineBanner(__instructorBannerLast);
+    });
+    if(!__instructorBannerTick){
+      __instructorBannerTick = setInterval(()=>__paintInstructorOnlineBanner(__instructorBannerLast), 1000);
     }
   }
 
@@ -17825,10 +19364,17 @@ import { getDatabase, ref, get, set } from "https://www.gstatic.com/firebasejs/1
       chosenRoom = created.room;
     }
 
+    const accessRole = String(gateState.role || 'default');
+    const accessCallsign = gateState.callsign.trim();
+    if(accessRole.toLowerCase() === 'default'){
+      const reserved = await __reserveInstructorLock(chosenRoom, accessCallsign);
+      if(!reserved.ok){ setError(__formatInstructorLockError(reserved.lock)); return; }
+    }
+
     const access = {
       side: 'neutral',
-      role: String(gateState.role || 'default'),
-      callsign: gateState.callsign.trim(),
+      role: accessRole,
+      callsign: accessCallsign,
       room: chosenRoom,
       planning: false,
       freeplay: false,
@@ -17896,30 +19442,59 @@ import { getDatabase, ref, get, set } from "https://www.gstatic.com/firebasejs/1
     }
   }, true);
 
-  const saved = loadSession();
-  if(saved && (saved.planning || saved.freeplay || String(saved.room || '') === currentHashRoom())){
-    unlockWithAccess(saved);
-  }else{
+  function __openAccessGateFresh(msg){
     clearSession();
     safeSetGateState({ side:'neutral', room: '' });
     gate.classList.add('open');
     gate.setAttribute('aria-hidden', 'false');
     body.classList.add('setca-access-locked');
+    if(msg) setError(msg);
   }
 
+  async function __bootstrapSavedAccess(){
+    const saved = loadSession();
+    if(saved && (saved.planning || saved.freeplay || String(saved.room || '') === currentHashRoom())){
+      if(__isInstructorAccess(saved)){
+        try{
+          const reserved = await __reserveInstructorLock(saved.room || currentHashRoom(), saved.callsign || 'INSTRUCTOR');
+          if(!reserved.ok){ __openAccessGateFresh(__formatInstructorLockError(reserved.lock)); return; }
+        }catch(err){ console.warn('Instructor lock restore error', err); __openAccessGateFresh('No se pudo validar el instructor de la sala.'); return; }
+      }
+      unlockWithAccess(saved);
+    }else{
+      __openAccessGateFresh('');
+    }
+  }
+
+  __bootstrapSavedAccess();
   fetchRooms();
   updateGateUI();
 
   if(typeof window.setcaOff === 'function' && !window.setcaOff.__setcaWrapped){
     const origOff = window.setcaOff;
     window.setcaOff = async function(){
+      try{ await __releaseInstructorLock(); }catch(_){ }
       clearSession();
       return origOff.apply(this, arguments);
     };
     window.setcaOff.__setcaWrapped = true;
   }
 
-  window.__SETCA_leaveToMain = function(){
+  addEventListener('beforeunload', ()=>{
+    try{
+      if(__isInstructorAccess(window.__setcaAccess || {})){
+        const room = String(__instructorLockRoom || (window.__setcaAccess && window.__setcaAccess.room) || currentHashRoom() || 'sala-default');
+        const uid = String(__instructorLockUid || __getClientUid());
+        const payload = JSON.stringify({ uid, room, ts: Date.now() });
+        if(navigator.sendBeacon){
+          // Firebase REST no se usa aquí; el bloqueo expira solo en pocos segundos si el navegador cierra abruptamente.
+        }
+      }
+    }catch(_){ }
+  });
+
+  window.__SETCA_leaveToMain = async function(){
+    try{ await __releaseInstructorLock(); }catch(_){ }
     try{ clearSession(); }catch(_){ }
     try{ sessionStorage.removeItem('setca_access_gate_v2'); }catch(_){ }
     try{ sessionStorage.removeItem('setca_access_gate_v3'); }catch(_){ }
@@ -18931,6 +20506,95 @@ body.setca-observer-readonly-strict #unPair{
   addEventListener('resize', syncObserverReadOnlyUi, {passive:true});
   setTimeout(syncObserverReadOnlyUi, 0);
   setTimeout(syncObserverReadOnlyUi, 400);
+})();
+</script>
+
+
+
+
+
+
+
+<script id="setca-vclick-private-instructor-safety">
+(function(){
+  if(window.__SETCA_VCLICK_PRIVATE_INSTRUCTOR_SAFETY__) return;
+  window.__SETCA_VCLICK_PRIVATE_INSTRUCTOR_SAFETY__ = true;
+  function isInstructor(){
+    try{
+      const a = window.__setcaAccess || {};
+      return String(a.role || '').toLowerCase() === 'default';
+    }catch(_){ return false; }
+  }
+  function restoreNavUi(){
+    try{ document.body.classList.remove('setca-nav-locked'); }catch(_){ }
+    try{
+      const nb = document.getElementById('navBtn');
+      if(nb){ nb.disabled = false; nb.style.display = ''; nb.title = 'Análisis de navegaciones'; }
+      const pnav = document.getElementById('pNav');
+      if(pnav) pnav.style.display = '';
+    }catch(_){ }
+  }
+  function lockWaypointEditorForNonInstructor(){
+    if(isInstructor()) return;
+    try{
+      const ed = document.getElementById('setcaWaypointEditor');
+      if(ed) ed.style.display = 'none';
+      if(window.__SETCA_ROUTEPLANNER && typeof window.__SETCA_ROUTEPLANNER.cancel === 'function') window.__SETCA_ROUTEPLANNER.cancel();
+    }catch(_){ }
+  }
+  document.addEventListener('keydown', function(ev){
+    if(isInstructor()) return;
+    if(ev.key === 'v' || ev.key === 'V'){
+      try{ ev.preventDefault(); ev.stopImmediatePropagation ? ev.stopImmediatePropagation() : ev.stopPropagation(); }catch(_){ }
+      lockWaypointEditorForNonInstructor();
+    }
+  }, true);
+  setInterval(function(){ restoreNavUi(); lockWaypointEditorForNonInstructor(); }, 1200);
+  setTimeout(restoreNavUi, 0);
+  setTimeout(restoreNavUi, 500);
+})();
+</script>
+
+
+<script id="setca-vclick-instructor-private-final-guard">
+(function(){
+  if(window.__SETCA_VCLICK_INSTRUCTOR_PRIVATE_FINAL_GUARD__) return;
+  window.__SETCA_VCLICK_INSTRUCTOR_PRIVATE_FINAL_GUARD__ = true;
+  function isInstructor(){
+    try{ return String(((window.__setcaAccess||{}).role)||'').toLowerCase() === 'default'; }catch(_){ return false; }
+  }
+  function stripLocalRoutesForNonInstructor(){
+    if(isInstructor()) return;
+    try{
+      const planes = (window.st && Array.isArray(st.planes)) ? st.planes : [];
+      let changed = false;
+      planes.forEach(p=>{
+        if(!p || typeof p !== 'object') return;
+        if(Array.isArray(p.routePlan) && p.routePlan.length) changed = true;
+        delete p.routePlan;
+        delete p.routeIdx;
+        delete p.routeEnabled;
+        delete p.routeLoop;
+        delete p.routeCompleted;
+        delete p.routeLastChange;
+        delete p.routeLastReached;
+        delete p.routeFinishedAt;
+        delete p.routeManualUntil;
+        delete p.__routeFollowState;
+      });
+      if(changed){ try{ if(typeof repaintAll === 'function') repaintAll(); }catch(_){ } }
+    }catch(_){ }
+  }
+  document.addEventListener('keydown', function(ev){
+    if(isInstructor()) return;
+    if(ev.key === 'v' || ev.key === 'V'){
+      try{ ev.preventDefault(); ev.stopImmediatePropagation ? ev.stopImmediatePropagation() : ev.stopPropagation(); }catch(_){ }
+      try{ if(window.__SETCA_ROUTEPLANNER && typeof window.__SETCA_ROUTEPLANNER.cancel === 'function') window.__SETCA_ROUTEPLANNER.cancel(); }catch(_){ }
+      stripLocalRoutesForNonInstructor();
+    }
+  }, true);
+  setInterval(stripLocalRoutesForNonInstructor, 1500);
+  setTimeout(stripLocalRoutesForNonInstructor, 300);
 })();
 </script>
 
