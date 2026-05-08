@@ -1,4 +1,4 @@
-ESTE SIMULADOR SE ENCUENTRA EN FASE DE PRUEBA - PUEDEN OCURRIR ERRORES DURANTE EL FUNCIONAMIENTO 2.6
+ESTE SIMULADOR SE ENCUENTRA EN FASE DE PRUEBA - PUEDEN OCURRIR ERRORES DURANTE EL FUNCIONAMIENTO 2.5.2 040326
 <!DOCTYPE html>
 <html lang="es">
 <head>
@@ -20253,14 +20253,16 @@ import { getDatabase, ref, get, set } from "https://www.gstatic.com/firebasejs/1
       ctx2.lineTo(endX, endY);
       ctx2.stroke();
 
-      // Rumbo solo en la punta, formato 000°.
+      // Rumbo en la mitad de la proyección para que sea visible incluso con cursos largos.
       ctx2.setLineDash([]);
       ctx2.shadowBlur = 0;
       ctx2.font = '12px monospace';
       ctx2.textAlign = 'center';
       ctx2.textBaseline = 'middle';
-      const tx = endX + ux * 14;
-      const ty = endY + uy * 14;
+      const midRatio = 0.50;
+      const labelGap = 12;
+      const tx = s.x + dx * midRatio + px * labelGap;
+      const ty = s.y + dy * midRatio + py * labelGap;
       const tw = ctx2.measureText(label).width;
       ctx2.fillStyle = 'rgba(0,0,0,0.55)';
       ctx2.fillRect(tx - tw/2 - 4, ty - 8, tw + 8, 16);
