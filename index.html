@@ -1,4 +1,4 @@
-ESTE SIMULADOR SE ENCUENTRA EN FASE DE PRUEBA - PUEDEN OCURRIR ERRORES DURANTE EL FUNCIONAMIENTO 2.5.2 040326
+ESTE SIMULADOR SE ENCUENTRA EN FASE DE PRUEBA - PUEDEN OCURRIR ERRORES DURANTE EL FUNCIONAMIENTO 2.6
 <!DOCTYPE html>
 <html lang="es">
 <head>
@@ -3427,6 +3427,25 @@ body[data-setca-role="default"] #contingenciesBtn{display:inline-flex;}
 </style>
 
 
+
+
+<style id="setca-plane-context-target-contrast-fix">
+/* Corrección visual puntual: selector Objetivo del menú de click derecho sobre avión */
+#setcaPlaneBeCtx #setcaPlaneCtxTarget,
+#setcaPlaneBeCtx #setcaPlaneCtxTarget:hover,
+#setcaPlaneBeCtx #setcaPlaneCtxTarget:focus{
+  background:#ffffff !important;
+  color:#000000 !important;
+  border-color:rgba(0,0,0,.28) !important;
+  box-shadow:none !important;
+}
+#setcaPlaneBeCtx #setcaPlaneCtxTarget option,
+#setcaPlaneBeCtx #setcaPlaneCtxTarget optgroup{
+  background:#ffffff !important;
+  color:#000000 !important;
+}
+</style>
+
 </head>
 <body class="setca-access-locked">
 
@@ -4554,6 +4573,7 @@ const __NAV_STORE = {
     lastFrameAt:0
   },
   localPairs: [],
+  missileTracks: Object.create(null),
   profile3d: {
     enabled:false,
     altFtPerNm:6000,
@@ -4849,9 +4869,67 @@ function __navRecordPlane(p, force=false, nowTs=null){
     }
   }
 }
+function __navMissileColor(m){
+  const lt = String(m && m.launcherType || '').toLowerCase();
+  if(lt === 'gtc' || lt === 'ground') return '#EF4444';
+  return '#F97316';
+}
+function __navEnsureMissileTrack(m){
+  if(!m || !m.id) return null;
+  if(!__NAV_STORE.missileTracks || typeof __NAV_STORE.missileTracks !== 'object') __NAV_STORE.missileTracks = Object.create(null);
+  const id = String(m.id);
+  let track = __NAV_STORE.missileTracks[id];
+  if(!track){
+    track = __NAV_STORE.missileTracks[id] = {
+      id,
+      name:String(m.name || id),
+      launcher:String(m.launcher || ''),
+      launcherName:String(m.launcherName || m.launcher || ''),
+      launcherType:String(m.launcherType || ''),
+      targetName:String(m.targetName || m.tgt || ''),
+      color:__navMissileColor(m),
+      pts:[]
+    };
+  }
+  track.name = String(m.name || track.name || id);
+  track.launcher = String(m.launcher || track.launcher || '');
+  track.launcherName = String(m.launcherName || track.launcherName || track.launcher || '');
+  track.launcherType = String(m.launcherType || track.launcherType || '');
+  track.targetName = String(m.targetName || track.targetName || m.tgt || '');
+  track.color = __navMissileColor(m);
+  return track;
+}
+function __navRecordMissile(m, force=false, nowTs=null){
+  if(!m || !m.id) return;
+  const track = __navEnsureMissileTrack(m);
+  if(!track) return;
+  const now = Number.isFinite(nowTs) ? nowTs : performance.now();
+  const x = Number.isFinite(+m.x) ? +m.x : 0;
+  const y = Number.isFinite(+m.y) ? +m.y : 0;
+  const pts = track.pts;
+  const last = pts.length ? pts[pts.length-1] : null;
+  const moved = last ? Math.hypot(x-last.x, y-last.y) : Infinity;
+  const dtMs = last ? (now - last.t) : Infinity;
+  if(force || !last || moved >= 0.03 || dtMs >= Math.max(160, __NAV_STORE.sampleEveryMs / 2)){
+    pts.push({
+      x,
+      y,
+      t:now,
+      alt:Number.isFinite(+m.alt) ? +m.alt : 0,
+      hdg:Number.isFinite(+m.courseDeg) ? __navNormalizeDeg((+m.courseDeg) + 90) : 0,
+      tx:Number.isFinite(+m.tx) ? +m.tx : null,
+      ty:Number.isFinite(+m.ty) ? +m.ty : null,
+      status:String(m.status || 'fly')
+    });
+    if(pts.length > __NAV_STORE.maxPointsPerTrack){
+      pts.splice(0, pts.length - __NAV_STORE.maxPointsPerTrack);
+    }
+  }
+}
 function __navRecordAll(force=false){
   const now = performance.now();
   (Array.isArray(st.planes) ? st.planes : []).forEach(p=>__navRecordPlane(p, force, now));
+  (Array.isArray(st.missiles) ? st.missiles : []).forEach(m=>__navRecordMissile(m, force, now));
 }
 window.__navRecordAll = __navRecordAll;
 
@@ -5019,6 +5097,14 @@ function __drawServerPauseOverlay(){
 function __navGetTimeBounds(){
   let min = Infinity, max = -Infinity;
   Object.values(__NAV_STORE.tracks || {}).forEach(track=>{
+    (Array.isArray(track && track.pts) ? track.pts : []).forEach(pt=>{
+      const t = +pt.t;
+      if(!Number.isFinite(t)) return;
+      if(t < min) min = t;
+      if(t > max) max = t;
+    });
+  });
+  Object.values(__NAV_STORE.missileTracks || {}).forEach(track=>{
     (Array.isArray(track && track.pts) ? track.pts : []).forEach(pt=>{
       const t = +pt.t;
       if(!Number.isFinite(t)) return;
@@ -5314,6 +5400,7 @@ function __navCollectRenderData(){
   const cutoff = __navGetEffectiveCutoff();
   const currentState = replayActive ? null : ((st && st.localPause && st.pauseSnapshot) ? st.pauseSnapshot : st);
   const planeMap = new Map((Array.isArray(currentState && currentState.planes) ? currentState.planes : []).map(p=>[String(p && p.id || ''), p]));
+  const missileMap = new Map((Array.isArray(currentState && currentState.missiles) ? currentState.missiles : []).map(m=>[String(m && m.id || ''), m]));
   const tracks = Object.values(__NAV_STORE.tracks || {}).map(track=>{
     const pts = (Array.isArray(track.pts) ? track.pts : []).filter(pt=>!Number.isFinite(cutoff) || pt.t <= cutoff);
     const plane = replayActive ? null : planeMap.get(String(track.id || ''));
@@ -5334,7 +5421,84 @@ function __navCollectRenderData(){
           } : (pts.length ? pts[pts.length-1] : null))
     };
   }).filter(track=>track.pts.length || track.current);
-  return { cutoff, tracks, replayActive, mode3d:__navIs3DEnabled() };
+  const missiles = Object.values(__NAV_STORE.missileTracks || {}).map(track=>{
+    const pts = (Array.isArray(track.pts) ? track.pts : []).filter(pt=>!Number.isFinite(cutoff) || pt.t <= cutoff);
+    const live = replayActive ? null : missileMap.get(String(track.id || ''));
+    const replayPoint = replayActive ? __navPointAtCutoff(track.pts, cutoff) : null;
+    const current = replayActive
+      ? replayPoint
+      : (live ? {
+          x:+live.x||0,
+          y:+live.y||0,
+          alt:Number.isFinite(+live.alt) ? +live.alt : 0,
+          hdg:Number.isFinite(+live.courseDeg) ? __navNormalizeDeg((+live.courseDeg) + 90) : 0,
+          tx:Number.isFinite(+live.tx) ? +live.tx : null,
+          ty:Number.isFinite(+live.ty) ? +live.ty : null,
+          status:String(live.status || 'fly')
+        } : (pts.length ? pts[pts.length-1] : null));
+    return {
+      id:String(track.id || ''),
+      name:String(track.name || track.id || 'MISIL'),
+      launcherName:String(track.launcherName || track.launcher || ''),
+      launcherType:String(track.launcherType || ''),
+      targetName:String(track.targetName || ''),
+      color:String(track.color || '#F97316'),
+      pts,
+      current
+    };
+  }).filter(track=>track.pts.length || track.current);
+  return { cutoff, tracks, missiles, replayActive, mode3d:__navIs3DEnabled() };
+}
+function __navDrawMissileMarker(c, x, y, color, hdgDeg, mode3d=false){
+  const ang = ((__navNormalizeDeg(hdgDeg) - 90) * Math.PI / 180);
+  const r = mode3d ? 6.6 : 5.4;
+  c.save();
+  c.translate(x, y);
+  c.rotate(ang);
+  c.beginPath();
+  c.moveTo(r + 2, 0);
+  c.lineTo(-r, r * 0.46);
+  c.lineTo(-r * 0.55, 0);
+  c.lineTo(-r, -r * 0.46);
+  c.closePath();
+  c.fillStyle = String(color || '#F97316');
+  c.fill();
+  c.strokeStyle = '#111827';
+  c.lineWidth = 1;
+  c.stroke();
+  c.restore();
+}
+function __navDrawMissileLabel(c, x, y, missile, mode3d=false){
+  const name = String(missile && missile.name || 'MISIL').trim() || 'MISIL';
+  const from = String(missile && missile.launcherName || '').trim();
+  const to = String(missile && missile.targetName || '').trim();
+  const sub = from || to ? `${from ? from : 'ORIGEN'} → ${to ? to : 'OBJ'}` : '';
+  c.save();
+  c.textAlign = 'center';
+  c.textBaseline = 'middle';
+  c.font = mode3d ? '800 9px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace' : '800 10px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace';
+  const w1 = c.measureText(name).width;
+  c.font = '700 8px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace';
+  const w2 = sub ? c.measureText(sub).width : 0;
+  const w = Math.min(180, Math.max(w1, w2) + 14);
+  const h = sub ? 28 : 18;
+  const bx = x - w / 2;
+  const by = y + (mode3d ? 14 : 12);
+  __navRoundRectPath(c, bx, by, w, h, 8);
+  c.fillStyle = 'rgba(255,255,255,.92)';
+  c.fill();
+  c.strokeStyle = 'rgba(249,115,22,.48)';
+  c.lineWidth = 1;
+  c.stroke();
+  c.fillStyle = '#111827';
+  c.font = mode3d ? '800 9px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace' : '800 10px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace';
+  c.fillText(name, x, by + 9);
+  if(sub){
+    c.fillStyle = '#7c2d12';
+    c.font = '700 8px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace';
+    c.fillText(sub.length > 28 ? sub.slice(0,27) + '…' : sub, x, by + 21);
+  }
+  c.restore();
 }
 function __navDrawCurrentMarker(c, x, y, color, hdgDeg, mode3d=false){
   const ang = ((__navNormalizeDeg(hdgDeg) - 90) * Math.PI / 180);
@@ -5559,6 +5723,7 @@ function renderNavReport(forceLegend=false){
   if(!modal || !canvas || !meta || !legend) return;
   const info = __navCollectRenderData();
   const tracks = info.tracks;
+  const missiles = Array.isArray(info.missiles) ? info.missiles : [];
   const replayActive = !!info.replayActive;
   const mode3d = !!info.mode3d;
   __navRefreshLocalPairUI(tracks);
@@ -5591,6 +5756,20 @@ function renderNavReport(forceLegend=false){
       maxAltFt = Math.max(maxAltFt, proj.altFt || 0);
     }
   });
+  missiles.forEach(missile=>{
+    missile.pts.forEach(pt=>{
+      const proj = __navProjectPoint(pt, mode3d);
+      projectedCloud.push(proj);
+      projectedGroundCloud.push(mode3d ? { vx:proj.gx, vy:proj.gy } : { vx:proj.vx, vy:proj.vy });
+      maxAltFt = Math.max(maxAltFt, proj.altFt || 0);
+    });
+    if(missile.current){
+      const proj = __navProjectPoint(missile.current, mode3d);
+      projectedCloud.push(proj);
+      projectedGroundCloud.push(mode3d ? { vx:proj.gx, vy:proj.gy } : { vx:proj.vx, vy:proj.vy });
+      maxAltFt = Math.max(maxAltFt, proj.altFt || 0);
+    }
+  });
 
   c.fillStyle = '#ffffff';
   c.fillRect(0,0,cssW,cssH);
@@ -5602,7 +5781,7 @@ function renderNavReport(forceLegend=false){
     zoomReadout.textContent = `${Math.round(__navClampZoom(__NAV_STORE.view.zoom) * 100)}%`;
   }
 
-  const legendSig = tracks.map(track=>String(track.id || '')).sort().join('|');
+  const legendSig = tracks.map(track=>String(track.id || '')).sort().join('|') + '::MS:' + missiles.map(m=>String(m.id || '')).sort().join('|');
   const shouldRebuildLegend = !!forceLegend || legend.dataset.sig !== legendSig;
 
   if(!projectedCloud.length){
@@ -5710,6 +5889,67 @@ function renderNavReport(forceLegend=false){
   c.rect(0, 0, cssW, cssH);
   c.clip();
 
+  missiles.forEach(missile=>{
+    if(mode3d && missile.pts.length){
+      c.save();
+      c.setLineDash([4,5]);
+      c.beginPath();
+      missile.pts.forEach((pt, idx)=>{
+        const proj = __navProjectPoint({ x:pt.x, y:pt.y, alt:0, hdg:pt.hdg }, true);
+        const x = sx(proj.vx), y = sy(proj.vy);
+        if(idx===0) c.moveTo(x, y); else c.lineTo(x, y);
+      });
+      c.strokeStyle = __navColorWithAlpha(missile.color, .24);
+      c.lineWidth = 1;
+      c.stroke();
+      c.restore();
+    }
+    if(missile.pts.length){
+      c.save();
+      c.setLineDash([7,4]);
+      c.beginPath();
+      missile.pts.forEach((pt, idx)=>{
+        const sp = ptScreen(pt);
+        if(idx===0) c.moveTo(sp.x, sp.y); else c.lineTo(sp.x, sp.y);
+      });
+      c.strokeStyle = __navColorWithAlpha(missile.color, mode3d ? .88 : .94);
+      c.lineWidth = mode3d ? 1.8 : 1.6;
+      c.stroke();
+      c.setLineDash([]);
+      const first = ptScreen(missile.pts[0]);
+      c.fillStyle = __navColorWithAlpha(missile.color, .88);
+      c.beginPath(); c.arc(first.x, first.y, 2.6, 0, Math.PI*2); c.fill();
+      c.restore();
+    }
+    if(missile.current){
+      const cur = ptScreen(missile.current);
+      if(mode3d){
+        const shadowProj = __navProjectPoint({ x:missile.current.x, y:missile.current.y, alt:0, hdg:missile.current.hdg }, true);
+        const shx = sx(shadowProj.vx), shy = sy(shadowProj.vy);
+        c.strokeStyle = 'rgba(249,115,22,.38)';
+        c.lineWidth = 1;
+        c.beginPath();
+        c.moveTo(shx, shy);
+        c.lineTo(cur.x, cur.y);
+        c.stroke();
+      }
+      __navDrawMissileMarker(c, cur.x, cur.y, missile.color, missile.current.hdg, mode3d);
+      __navDrawMissileLabel(c, cur.x, cur.y, missile, mode3d);
+      if(Number.isFinite(+missile.current.tx) && Number.isFinite(+missile.current.ty)){
+        const tgt = ptScreen({x:+missile.current.tx, y:+missile.current.ty, alt:0, hdg:0});
+        c.save();
+        c.setLineDash([2,5]);
+        c.strokeStyle = __navColorWithAlpha(missile.color, .38);
+        c.lineWidth = 1;
+        c.beginPath();
+        c.moveTo(cur.x, cur.y);
+        c.lineTo(tgt.x, tgt.y);
+        c.stroke();
+        c.restore();
+      }
+    }
+  });
+
   tracks.forEach(track=>{
     if(mode3d && track.pts.length){
       c.save();
@@ -5791,6 +6031,14 @@ function renderNavReport(forceLegend=false){
     meta.style.display = 'block';
   }
 
+  const __navMissileCount = missiles.length;
+  if(__navMissileCount && meta.textContent){
+    meta.textContent += ` · ${__navMissileCount} misil${__navMissileCount===1?'':'es'} NAV`;
+  } else if(__navMissileCount && !meta.textContent){
+    meta.textContent = `${__navMissileCount} misil${__navMissileCount===1?'':'es'} visible${__navMissileCount===1?'':'s'} en NAV`;
+    meta.style.display = 'block';
+  }
+
   const __navLocalPairCount = Array.isArray(__NAV_STORE.localPairs) ? __NAV_STORE.localPairs.length : 0;
   if(__navLocalPairCount && meta.textContent){
     meta.textContent += ` · ${__navLocalPairCount} pareo${__navLocalPairCount===1?'':'s'} local${__navLocalPairCount===1?'':'es'}`;
@@ -5801,7 +6049,7 @@ function renderNavReport(forceLegend=false){
 
   if(shouldRebuildLegend){
     legend.dataset.sig = legendSig;
-    legend.innerHTML = tracks
+    const aircraftLegendHtml = tracks
       .slice()
       .sort((a,b)=>a.name.localeCompare(b.name))
       .map(track=>{
@@ -5810,6 +6058,10 @@ function renderNavReport(forceLegend=false){
         const altLabel = track.current ? `<span class="navLegendSub">${__navFormatAltLabel(track.current.alt || 0)}</span>` : '';
         return `<div class="navLegendItem" data-nav-legend-item="${track.id}"><span class="navLegendSwatch" style="background:${track.color}" data-nav-center-track="${track.id}" title="Ir al avión ${track.name}"></span><div class="navLegendText"><span class="navLegendName">${track.name}</span>${altLabel}</div><div class="navColorControl"><select class="navColorSelect" data-nav-pending-color="${track.id}" aria-label="Color local para ${track.name}">${options}</select><button class="navColorApplyBtn" type="button" data-nav-apply-color="${track.id}">ACEPTAR</button></div></div>`;
       }).join('');
+    const missileLegendHtml = missiles.length
+      ? `<div class="navLegendItem"><span class="navLegendSwatch" style="background:#F97316" title="Misiles de avión y tierra"></span><div class="navLegendText"><span class="navLegendName">MISILES EN NAV (${missiles.length})</span><span class="navLegendSub">Avión y tierra · traza punteada</span></div></div>`
+      : '';
+    legend.innerHTML = aircraftLegendHtml + missileLegendHtml;
   }
 }
 
