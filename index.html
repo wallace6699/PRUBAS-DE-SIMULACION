@@ -1,4 +1,4 @@
-ESTE SIMULADOR SE ENCUENTRA EN FASE DE PRUEBA - PUEDEN OCURRIR ERRORES DURANTE EL FUNCIONAMIENTO 2.7
+ESTE SIMULADOR SE ENCUENTRA EN FASE DE PRUEBA - PUEDEN OCURRIR ERRORES DURANTE EL FUNCIONAMIENTO 2.6
 <!DOCTYPE html>
 <html lang="es">
 <head>
@@ -6970,6 +6970,52 @@ function getPlaneVerticalProfile(p){
   if(tipo.includes('comercial') || tipo.includes('airliner') || tipo.includes('civil')) return { climb:COMMERCIAL_VERTICAL_FPM, descend:COMMERCIAL_VERTICAL_FPM, tau:2.2, settle:220 };
   return { climb:2000, descend:1600, tau:2.6, settle:170 };
 }
+function getPlaneSpeedProfile(p){
+  const tipo = normalizePlaneTipoKey(getPlaneTipoDisplay(p) || (p && p.tipo) || '');
+  if(tipo.includes('caza') || tipo.includes('fighter')) return { accel:120, decel:150, tau:0.55, settle:18 };
+  if(tipo.includes('awacs')) return { accel:10, decel:13, tau:1.9, settle:7 };
+  if(tipo.includes('tanker')) return { accel:10, decel:13, tau:1.9, settle:7 };
+  if(tipo.includes('transporte')) return { accel:8, decel:11, tau:2.1, settle:6 };
+  if(tipo.includes('helicoptero') || tipo.includes('helicopter')) return { accel:4, decel:6, tau:1.6, settle:4 };
+  if(tipo.includes('comercial') || tipo.includes('airliner') || tipo.includes('civil')) return { accel:12, decel:16, tau:1.8, settle:8 };
+  return { accel:28, decel:36, tau:1.2, settle:10 };
+}
+function updatePlaneSpeed(p,dt){
+  if(!p) return;
+  if(!Number.isFinite(+p.spd)) p.spd = Number.isFinite(+p.tgtSpd) ? +p.tgtSpd : 0;
+  if(!Number.isFinite(+p.tgtSpd)) p.tgtSpd = Number.isFinite(+p.spd) ? +p.spd : 0;
+  if(!Number.isFinite(+p.speedRateKmhps)) p.speedRateKmhps = 0;
+
+  const target = Math.max(0, +p.tgtSpd || 0);
+  const current = Math.max(0, +p.spd || 0);
+  const delta = target - current;
+  if(Math.abs(delta) <= 0.5){
+    p.spd = target;
+    p.speedRateKmhps = 0;
+    return;
+  }
+
+  const prof = getPlaneSpeedProfile(p);
+  const desiredRaw = delta * 0.9;
+  const desiredRate = delta > 0
+    ? Math.min(prof.accel, Math.max(0, desiredRaw))
+    : Math.max(-prof.decel, Math.min(0, desiredRaw));
+  const alpha = 1 - Math.exp(-Math.max(0, dt) / Math.max(0.15, prof.tau));
+  p.speedRateKmhps += (desiredRate - p.speedRateKmhps) * alpha;
+
+  if(Math.abs(delta) <= prof.settle){
+    const brakeAlpha = 1 - Math.exp(-Math.max(0, dt) / Math.max(0.12, prof.tau * 0.5));
+    p.speedRateKmhps += (0 - p.speedRateKmhps) * brakeAlpha;
+  }
+
+  const stepKmh = p.speedRateKmhps * dt;
+  if(Math.abs(stepKmh) >= Math.abs(delta)){
+    p.spd = target;
+    p.speedRateKmhps = 0;
+    return;
+  }
+  p.spd = Math.max(0, current + stepKmh);
+}
 function updatePlaneAltitude(p,dt){
   if(!p) return;
   if(!Number.isFinite(+p.alt)) p.alt = Number.isFinite(+p.tgtAlt) ? +p.tgtAlt : 0;
@@ -7019,9 +7065,7 @@ function updatePlane(p,dt){
     if(!Number.isFinite(+p.spd)) p.spd = 0;
     return;
   }
-  const acc=40;
-  if(p.spd<p.tgtSpd) p.spd=Math.min(p.spd+acc*dt,p.tgtSpd);
-  else if(p.spd>p.tgtSpd) p.spd=Math.max(p.spd-acc*dt,p.tgtSpd);
+  updatePlaneSpeed(p,dt);
 // Giro hacia rumbo objetivo (con sesgo opcional I/D)
 const diffCW  = (p.tgtHdg - p.hdg + 360) % 360;   // giro a la derecha (clockwise)
 const diffCCW = (p.hdg - p.tgtHdg + 360) % 360;   // giro a la izquierda (counterclockwise)
@@ -7116,17 +7160,17 @@ function drawPlane(p){
   const symbolHalf = 4.0 * planeVisualScale;
   const symbolTriR = 4.1 * planeVisualScale;
   const symbolDiamondHalf = 3.9 * planeVisualScale;
-  const symbolStroke = Math.max(0.85, 1.05 * planeVisualScale);
+  const symbolStroke = Math.max(1.15, 1.35 * planeVisualScale);
   const speedForLead = Math.max(0, Number.isFinite(+p.spd) ? +p.spd : 0);
-  // Proyección frontal proporcional a velocidad: duplicada respecto a la versión anterior
-  // para diferenciar mejor aeronaves lentas y rápidas.
+  // Proyeccion frontal proporcional a velocidad: mas rapida = linea mas larga.
   const headingLen = (()=>{
-    const minLen = 8 * planeVisualScale;
-    const maxLen = 24 * planeVisualScale;
-    const len = minLen + Math.min(maxLen - minLen, (speedForLead / 125) * planeVisualScale);
+    const minLen = 12 * planeVisualScale;
+    const maxLen = 64 * planeVisualScale;
+    const speedRatio = Math.max(0, Math.min(1, speedForLead / 1100));
+    const len = minLen + (maxLen - minLen) * speedRatio;
     return Math.max(minLen, Math.min(maxLen, len));
   })();
-  const headingStroke = Math.max(0.8, 1 * planeVisualScale);
+  const headingStroke = Math.max(1.15, 1.35 * planeVisualScale);
   p.ghosts.forEach((g,i)=>{const sg=toScreen(g.x,g.y);const op=(i+1)/p.ghosts.length*.35;ctx.fillStyle=`rgba(179,0,255,${op})`;ctx.fillRect(sg.x-ghostSize/2,sg.y-ghostSize/2,ghostSize,ghostSize);});
   const lr=(p.hdg-90)*Math.PI/180;
   const isKillConfirm = (role === 'Kill-confirm');
@@ -10371,8 +10415,8 @@ function repaintNav(){
         const cambio = st.metric ? delta : delta * KTS2KMH;
         const base = Number.isFinite(+p.tgtSpd) ? +p.tgtSpd : (+p.spd || 0);
         const next = Math.max(0, base + cambio);
-        p.spd = next;
         p.tgtSpd = next;
+        if(!Number.isFinite(+p.spd)) p.spd = next;
         try{ if(typeof repaintVuelos==='function') repaintVuelos(); }catch(_){ }
         try{ if(typeof repaintPlanesList==='function') repaintPlanesList(); }catch(_){ }
         try{ if(typeof repaintNav==='function') repaintNav(); }catch(_){ }
@@ -10389,8 +10433,8 @@ function repaintNav(){
         const cambio = st.metric ? (delta / FT2M) : delta;
         const base = Number.isFinite(+p.tgtAlt) ? +p.tgtAlt : (+p.alt || 0);
         const next = Math.max(0, base + cambio);
-        p.alt = next;
         p.tgtAlt = next;
+        if(!Number.isFinite(+p.alt)) p.alt = next;
         try{ if(typeof repaintVuelos==='function') repaintVuelos(); }catch(_){ }
         try{ if(typeof repaintPlanesList==='function') repaintPlanesList(); }catch(_){ }
         try{ if(typeof repaintNav==='function') repaintNav(); }catch(_){ }
@@ -10414,8 +10458,8 @@ function repaintNav(){
     c.querySelector('#spd-'+id).onchange = e => {
       const val = +e.target.value || 0;
       const next = st.metric ? val : val * KTS2KMH;
-      p.spd = Math.max(0, next);
       p.tgtSpd = Math.max(0, next);
+      if(!Number.isFinite(+p.spd)) p.spd = Math.max(0, next);
       try{ if(typeof repaintVuelos==='function') repaintVuelos(); }catch(_){ }
       try{ if(typeof repaintPlanesList==='function') repaintPlanesList(); }catch(_){ }
       try{ if(typeof repaintNav==='function') repaintNav(); }catch(_){ }
@@ -10426,8 +10470,8 @@ function repaintNav(){
     c.querySelector('#alt-'+id).onchange = e => {
       const val = +e.target.value || 0;
       const next = st.metric ? (val / FT2M) : val;
-      p.alt = Math.max(0, next);
       p.tgtAlt = Math.max(0, next);
+      if(!Number.isFinite(+p.alt)) p.alt = Math.max(0, next);
       try{ if(typeof repaintVuelos==='function') repaintVuelos(); }catch(_){ }
       try{ if(typeof repaintPlanesList==='function') repaintPlanesList(); }catch(_){ }
       try{ if(typeof repaintNav==='function') repaintNav(); }catch(_){ }
