@@ -81,6 +81,7 @@ document.getElementById('cancelDelete').onclick = ()=>{
   }
   const ROOM_ID = getRoomId();
   const stateRef = ref(db, `rooms/${ROOM_ID}/state`);
+  const ordersRef = ref(db, `rooms/${ROOM_ID}/orders`);
   const __planningMode = !!(window.__SETCA_PLANNING_BOOT || (window.__SETCA_isPlanningMode && window.__SETCA_isPlanningMode()));
   const __freePlayMode = !!(window.__SETCA_FREEPLAY_BOOT || (window.__SETCA_isFreePlayMode && window.__SETCA_isFreePlayMode()));
   const __localOnlyMode = !!(window.__SETCA_LOCALONLY_BOOT || (window.__SETCA_isLocalOnlyMode && window.__SETCA_isLocalOnlyMode()));
@@ -100,7 +101,23 @@ document.getElementById('cancelDelete').onclick = ()=>{
   }
   function __SETCA_isAuthoritativeWriterRole(role){
     const rv = String(role || '').toLowerCase();
-    return rv === 'default' || rv === 'pseudopilot';
+    return rv === 'default';
+  }
+  function __SETCA_canSendAircraftOrder(){
+    if(__localOnlyMode) return false;
+    const access = __SETCA_getAccessForSync();
+    if(access && (access.planning || access.freeplay)) return false;
+    const role = String((access && access.role) || '').toLowerCase();
+    return role === 'pseudopilot';
+  }
+  function __SETCA_isInstructorAuthority(){
+    if(__localOnlyMode) return false;
+    const access = __SETCA_getAccessForSync();
+    if(access && (access.planning || access.freeplay)) return false;
+    return String((access && access.role) || '').toLowerCase() === 'default';
+  }
+  function __SETCA_shouldRouteAircraftCommand(){
+    return __SETCA_canSendAircraftOrder() && !__SETCA_isInstructorAuthority();
   }
   function __SETCA_canWriteSharedState(){
     if(__localOnlyMode) return false;
@@ -109,6 +126,9 @@ document.getElementById('cancelDelete').onclick = ()=>{
     return __SETCA_isAuthoritativeWriterRole((access && access.role) || '');
   }
   try{ window.__SETCA_isAuthoritativeWriterRole = __SETCA_isAuthoritativeWriterRole; }catch(_){ }
+  try{ window.__SETCA_canSendAircraftOrder = __SETCA_canSendAircraftOrder; }catch(_){ }
+  try{ window.__SETCA_isInstructorAuthority = __SETCA_isInstructorAuthority; }catch(_){ }
+  try{ window.__SETCA_shouldRouteAircraftCommand = __SETCA_shouldRouteAircraftCommand; }catch(_){ }
   try{ window.__SETCA_canWriteSharedState = __SETCA_canWriteSharedState; }catch(_){ }
   let currentUID = null;
 
@@ -191,7 +211,7 @@ document.getElementById('cancelDelete').onclick = ()=>{
 
   const __SETCA_SYNC_STAGING = Object.freeze({
     // SETCA_SYNC_1S: refresco coordinado cada 1 s para sala online.
-    // Instructor y Pseudopiloto son fuentes mandatorias del estado compartido.
+    // El Instructor es la fuente mandatoria del estado compartido.
     planeAddMs: 1000,
     missileAddMs: 1000,
     remoteApplyMs: 50,
@@ -320,8 +340,18 @@ document.getElementById('cancelDelete').onclick = ()=>{
   const __SETCA_DYNAMIC_PLANE_FIELDS = Object.freeze([
     'x','y','hdg','tgtHdg','spd','tgtSpd','alt','tgtAlt','turn','turnBias',
     'routeManualUntil','targetId','beAssignedId','ctxMissileType','vsFpm',
-    'speedRateKmhps','awacsSweepAng','__cmdAt'
+    'speedRateKmhps','awacsSweepAng','xpdr','name','tipo','fail','fuel',
+    'jamming','awacsCoverage','__cmdAt'
   ]);
+
+  const __SETCA_AIRCRAFT_ORDER_NUMBER_FIELDS = new Set([
+    'x','y','hdg','tgtHdg','spd','tgtSpd','alt','tgtAlt','turn',
+    'routeManualUntil','vsFpm','speedRateKmhps','awacsSweepAng','fuel','__cmdAt'
+  ]);
+  const __SETCA_AIRCRAFT_ORDER_STRING_FIELDS = new Set([
+    'turnBias','targetId','beAssignedId','ctxMissileType','xpdr','name','tipo'
+  ]);
+  const __SETCA_AIRCRAFT_ORDER_BOOL_FIELDS = new Set(['jamming','awacsCoverage']);
 
   function __setcaPlaneWithDynamicFields(base, dynamicSrc){
     const out = {...(base || {})};
@@ -333,6 +363,94 @@ document.getElementById('cancelDelete').onclick = ()=>{
     if(cmdAt) out.__cmdAt = cmdAt;
     return out;
   }
+
+  function __SETCA_sanitizeAircraftPatch(patch){
+    const src = (patch && typeof patch === 'object') ? patch : {};
+    const out = {};
+    Object.keys(src).forEach(key=>{
+      const val = src[key];
+      if(__SETCA_AIRCRAFT_ORDER_NUMBER_FIELDS.has(key)){
+        const n = Number(val);
+        if(Number.isFinite(n)) out[key] = n;
+        return;
+      }
+      if(__SETCA_AIRCRAFT_ORDER_STRING_FIELDS.has(key)){
+        out[key] = String(val == null ? '' : val).slice(0, 80);
+        return;
+      }
+      if(__SETCA_AIRCRAFT_ORDER_BOOL_FIELDS.has(key)){
+        out[key] = !!val;
+        return;
+      }
+      if(key === 'fail' && val && typeof val === 'object'){
+        out.fail = {
+          comms: !!val.comms,
+          eng: String(val.eng || 'none').slice(0, 20),
+          cab: String(val.cab || 'none').slice(0, 20),
+          gear: !!val.gear,
+          bird: !!val.bird
+        };
+      }
+    });
+    out.__cmdAt = Math.max(Number(out.__cmdAt || 0) || 0, Date.now());
+    return out;
+  }
+
+  function __SETCA_applyAircraftOrder(order){
+    try{
+      if(!__SETCA_isInstructorAuthority()) return false;
+      if(!order || typeof order !== 'object') return false;
+      const planeId = String(order.planeId || '').trim();
+      if(!planeId || !window.st || !Array.isArray(window.st.planes)) return false;
+      const p = window.st.planes.find(x=>x && String(x.id || '') === planeId);
+      if(!p) return false;
+      const patch = __SETCA_sanitizeAircraftPatch(order.patch || {});
+      Object.keys(patch).forEach(key=>{
+        const val = patch[key];
+        if((key === 'targetId' || key === 'beAssignedId') && !String(val || '').trim()){
+          delete p[key];
+          return;
+        }
+        p[key] = val;
+      });
+      if(order.role && window.st.roles && typeof window.st.roles === 'object'){
+        window.st.roles[planeId] = String(order.role || 'Neutral').slice(0, 40);
+      }
+      __SETCA_markAircraftDirty(p);
+      return true;
+    }catch(e){
+      console.warn('SETCA aircraft order apply error:', e);
+      return false;
+    }
+  }
+
+  async function __SETCA_submitAircraftCommand(cmd){
+    try{
+      if(!__SETCA_shouldRouteAircraftCommand()) return false;
+      const planeId = String(cmd && cmd.planeId || '').trim();
+      if(!planeId) return false;
+      const patch = __SETCA_sanitizeAircraftPatch(cmd && cmd.patch || {});
+      const role = String(cmd && cmd.role || '').slice(0, 40);
+      const id = `${Date.now()}_${Math.random().toString(36).slice(2, 9)}`;
+      await set(ref(db, `rooms/${ROOM_ID}/orders/${id}`), {
+        id,
+        planeId,
+        kind:String(cmd && cmd.kind || 'aircraft-command').slice(0, 40),
+        patch,
+        role,
+        by:currentUID || 'pending',
+        byRole:__SETCA_getSharedWriteRole() || 'pseudopilot',
+        tsClient:Date.now(),
+        serverAt:serverTimestamp()
+      });
+      return true;
+    }catch(e){
+      console.warn('SETCA aircraft order submit error:', e);
+      return false;
+    }
+  }
+  try{ window.__SETCA_submitAircraftCommand = __SETCA_submitAircraftCommand; }catch(_){ }
+  try{ window.__SETCA_sanitizeAircraftPatch = __SETCA_sanitizeAircraftPatch; }catch(_){ }
 
   function __setcaMergePlanesByAuthority(currentPlanes, nextPlanes, writerRole){
     const role = String(writerRole || '').toLowerCase();
@@ -750,6 +868,51 @@ let __setcaLastAppliedRemoteTs = 0;
       __scheduleRemoteStateApply(v);
     });
   }
+
+  const __setcaProcessedOrderIds = new Set();
+  function __SETCA_processAircraftOrders(raw){
+    if(__localOnlyMode || !__SETCA_isInstructorAuthority()) return false;
+    if(!window.st || !Array.isArray(window.st.planes)){
+      setTimeout(()=>__SETCA_processAircraftOrders(raw), 250);
+      return false;
+    }
+    const map = (raw && typeof raw === 'object') ? raw : {};
+    const rows = Object.keys(map).map(key=>({ key, value:map[key] }))
+      .filter(row=>row.value && typeof row.value === 'object')
+      .sort((a,b)=>(Number(a.value.tsClient || 0) - Number(b.value.tsClient || 0)));
+    let changed = false;
+    rows.forEach(row=>{
+      const orderId = String(row.value.id || row.key);
+      if(__setcaProcessedOrderIds.has(orderId)) return;
+      __setcaProcessedOrderIds.add(orderId);
+      if(__SETCA_applyAircraftOrder(row.value)) changed = true;
+      try{ set(ref(db, `rooms/${ROOM_ID}/orders/${row.key}`), null); }catch(_){ }
+    });
+    if(changed){
+      try{ repaintPlanesList && repaintPlanesList(); }catch(_){ }
+      try{ repaintNav && repaintNav(); }catch(_){ }
+      try{ repaintAlt && repaintAlt(); }catch(_){ }
+      try{ repaintVuelos && repaintVuelos(); }catch(_){ }
+      try{ if(window._SETCA_SYNC && typeof window._SETCA_SYNC.push === 'function') window._SETCA_SYNC.push(); }catch(_){ }
+    }
+    return changed;
+  }
+
+  let __setcaOrdersUnsub = null;
+  function __SETCA_startAircraftOrderListener(){
+    if(__localOnlyMode || !__SETCA_isInstructorAuthority()) return false;
+    if(__setcaOrdersUnsub) return true;
+    __setcaOrdersUnsub = onValue(ordersRef, (snap) => {
+      const v = snap.val();
+      if(!v) return;
+      __SETCA_processAircraftOrders(v);
+    }, (err)=>{
+      console.warn('SETCA aircraft orders listener error:', err);
+      __setcaOrdersUnsub = null;
+    });
+    return true;
+  }
+  try{ window.__SETCA_startAircraftOrderListener = __SETCA_startAircraftOrderListener; }catch(_){ }
 
   window._SETCA_SYNC = {
     pushNow: () => __localOnlyMode ? false : pushStateToCloud(st),
@@ -9569,7 +9732,7 @@ cvs.addEventListener('mousedown',e=>{
     const d=Math.hypot(wx-p.x,wy-p.y);
     if(d<15/zoom && d<bd){bd=d;best=p;}
   });
-  if(best){draggingPlane=best;dragStart={x:e.clientX,y:e.clientY};}
+  if(best){draggingPlane=best;dragStart={x:e.clientX,y:e.clientY,planeX:Number(best.x||0),planeY:Number(best.y||0)};}
 });
 addEventListener('mousemove',e=>{
   if(window.st && window.st.modoObservador){ draggingPlane=null; draggingDrawing=null; dragStart=null; return; }
@@ -9584,14 +9747,25 @@ addEventListener('mousemove',e=>{
 }
   if(draggingPlane){
   if(typeof __SETCA_canInstructorMovePlanes === 'function' && !__SETCA_canInstructorMovePlanes()){ draggingPlane=null; dragStart=null; return; }
+  if(window.__SETCA_shouldRouteAircraftCommand && window.__SETCA_shouldRouteAircraftCommand()) return;
   const r=cvs.getBoundingClientRect();const w=toWorld(e.clientX-r.left,e.clientY-r.top);const sw=toWorld(dragStart.x-r.left,dragStart.y-r.top);draggingPlane.x+=w.x-sw.x;draggingPlane.y+=w.y-sw.y;try{ if(window.__SETCA_markAircraftDirty) window.__SETCA_markAircraftDirty(draggingPlane); }catch(_){ }dragStart={x:e.clientX,y:e.clientY};}
 });
-addEventListener('mouseup',()=>{
+addEventListener('mouseup',(e)=>{
   const movedPlane = draggingPlane;
   const movedDrawing = draggingDrawing;
+  const movedPlaneStart = dragStart;
   draggingPlane=null; draggingDrawing=null; dragStart=null;
   if((movedPlane||movedDrawing)){
     if(typeof repaintNav==='function') repaintNav();
+    if(movedPlane && movedPlaneStart && window.__SETCA_shouldRouteAircraftCommand && window.__SETCA_shouldRouteAircraftCommand()){
+      try{
+        const r=cvs.getBoundingClientRect();
+        const w=toWorld(e.clientX-r.left,e.clientY-r.top);
+        const sw=toWorld(movedPlaneStart.x-r.left,movedPlaneStart.y-r.top);
+        __SETCA_routeAircraftPatchToInstructor(movedPlane, {x:(Number(movedPlaneStart.planeX)||0)+(w.x-sw.x), y:(Number(movedPlaneStart.planeY)||0)+(w.y-sw.y)}, 'position');
+      }catch(_){ }
+      return;
+    }
     if(movedPlane) try{ if(window.__SETCA_markAircraftDirty) window.__SETCA_markAircraftDirty(movedPlane); }catch(_){ }
     if(movedPlane && typeof window.__SETCA_scheduleAircraftSync1s === 'function') window.__SETCA_scheduleAircraftSync1s();
     else if(window._SETCA_SYNC && typeof window._SETCA_SYNC.push==='function') window._SETCA_SYNC.push();
@@ -10559,6 +10733,10 @@ function repaintNav(){
         e.target.value = String(p.name || '');
         return;
       }
+      if(__SETCA_routeAircraftPatchToInstructor(p, {name:String(e.target.value || '').trim()}, 'callsign')){
+        e.target.value = String(p.name || '');
+        return;
+      }
       __setcaCommitPlaneNameChange(p, e.target.value, { skipNav:false });
       try{ if(typeof repaintVuelos==='function') repaintVuelos(); }catch(_){}
     };
@@ -10568,12 +10746,14 @@ function repaintNav(){
     xpdrInput.addEventListener('input', e=>{
       const v = sanitizeXpdr(e.target.value);
       if(e.target.value !== v) e.target.value = v;
+      if(window.__SETCA_shouldRouteAircraftCommand && window.__SETCA_shouldRouteAircraftCommand()) return;
       setPlaneXpdr(p, v);
       repaintVuelos();
     });
     xpdrInput.addEventListener('change', e=>{
       const v = sanitizeXpdr(e.target.value);
       e.target.value = v;
+      if(__SETCA_routeAircraftPatchToInstructor(p, {xpdr:v}, 'xpdr')) return;
       setPlaneXpdr(p, e.target.value);
       repaintVuelos();
     });
@@ -10593,6 +10773,8 @@ function repaintNav(){
       const b = btn.getAttribute('data-bias');
       if((p.turnBias||'')===b) btn.classList.add('biasOn');
       btn.onclick = ()=>{
+        const nextBias = (p.turnBias===b) ? null : b;
+        if(__SETCA_routeAircraftPatchToInstructor(p, {turnBias:nextBias || ''}, 'turn-bias')){ repaintNav(); return; }
         p.turnBias = (p.turnBias===b) ? null : b;
         try{ if(window.__SETCA_markAircraftDirty) window.__SETCA_markAircraftDirty(p); }catch(_){ }
         repaintNav();
@@ -10607,6 +10789,7 @@ function repaintNav(){
         const cambio = st.metric ? delta : delta * KTS2KMH;
         const base = Number.isFinite(+p.tgtSpd) ? +p.tgtSpd : (+p.spd || 0);
         const next = Math.max(0, base + cambio);
+        if(__SETCA_routeAircraftPatchToInstructor(p, {tgtSpd:next}, 'speed')){ repaintNav(); return; }
         p.tgtSpd = next;
         if(!Number.isFinite(+p.spd)) p.spd = next;
         try{ if(window.__SETCA_markAircraftDirty) window.__SETCA_markAircraftDirty(p); }catch(_){ }
@@ -10640,7 +10823,9 @@ function repaintNav(){
     c.querySelectorAll('button[data-turn]').forEach(btn=>{
       btn.onclick = ()=>{
         const delta = parseFloat(btn.getAttribute('data-turn')) || 0;
-        p.turn = Math.max(0, (p.turn || 0) + delta);
+        const nextTurn = Math.max(0, (p.turn || 0) + delta);
+        if(__SETCA_routeAircraftPatchToInstructor(p, {turn:nextTurn}, 'turn-rate')){ repaintNav(); return; }
+        p.turn = nextTurn;
         try{ if(window.__SETCA_markAircraftDirty) window.__SETCA_markAircraftDirty(p); }catch(_){ }
         repaintNav();
         __SETCA_pushInstructorCommandNow();
@@ -10652,6 +10837,7 @@ function repaintNav(){
     c.querySelector('#spd-'+id).onchange = e => {
       const val = +e.target.value || 0;
       const next = st.metric ? val : val * KTS2KMH;
+      if(__SETCA_routeAircraftPatchToInstructor(p, {tgtSpd:Math.max(0, next)}, 'speed')){ repaintNav(); return; }
       p.tgtSpd = Math.max(0, next);
       if(!Number.isFinite(+p.spd)) p.spd = Math.max(0, next);
       try{ if(window.__SETCA_markAircraftDirty) window.__SETCA_markAircraftDirty(p); }catch(_){ }
@@ -10673,7 +10859,7 @@ function repaintNav(){
       try{ if(typeof repaintPairs==='function') repaintPairs(); }catch(_){ }
       try{ __SETCA_pushInstructorCommandNow(); }catch(_){ }
     };
-    c.querySelector('#tr-'+id).onchange = e => { p.turn = +e.target.value || 2; try{ if(window.__SETCA_markAircraftDirty) window.__SETCA_markAircraftDirty(p); }catch(_){ } __SETCA_pushInstructorCommandNow(); };
+    c.querySelector('#tr-'+id).onchange = e => { const nextTurn = +e.target.value || 2; if(__SETCA_routeAircraftPatchToInstructor(p, {turn:nextTurn}, 'turn-rate')){ repaintNav(); return; } p.turn = nextTurn; try{ if(window.__SETCA_markAircraftDirty) window.__SETCA_markAircraftDirty(p); }catch(_){ } __SETCA_pushInstructorCommandNow(); };
 
     // Rol (estado global)
     const role=c.querySelector('#role-'+id); 
@@ -10683,6 +10869,11 @@ function repaintNav(){
     role.onchange=e=>{
       const prevRole = normalizePlaneRole(st.roles[id] || 'Neutral');
       const requestedRole = normalizePlaneRole(e.target.value);
+      if(__SETCA_routeAircraftPatchToInstructor(p, {}, 'role', requestedRole)){
+        e.target.value = prevRole;
+        repaintNav();
+        return;
+      }
       const rv = applyPlaneRoleChange(p, requestedRole);
       e.target.value = rv;
       e.target.style.color = '#000';
@@ -10707,6 +10898,7 @@ function repaintNav(){
     tgt.value = __navTargets.some(x=>x.id===String(p.targetId || '')) ? String(p.targetId) : '';
     tgt.onchange = e => {
       const v = String(e.target.value || '');
+      if(__SETCA_routeAircraftPatchToInstructor(p, {targetId:v}, 'target')){ repaintNav(); return; }
       if(v) p.targetId = v; else delete p.targetId;
       try{
         if(typeof flushSync === 'function') flushSync();
@@ -10750,9 +10942,21 @@ function __SETCA_pushInstructorCommandNow(){
   }catch(_){ }
   return false;
 }
+function __SETCA_routeAircraftPatchToInstructor(p, patch, kind, role){
+  try{
+    if(!p || !p.id) return false;
+    if(!(window.__SETCA_shouldRouteAircraftCommand && window.__SETCA_shouldRouteAircraftCommand())) return false;
+    if(window.__SETCA_submitAircraftCommand){
+      window.__SETCA_submitAircraftCommand({ planeId:p.id, patch:patch || {}, kind:kind || 'aircraft-command', role:role || '' });
+      return true;
+    }
+  }catch(_){ }
+  return false;
+}
 function __SETCA_setCommandHdg(p, value){
   if(!p) return 0;
   const hdg = ((Number(value) || 0) % 360 + 360) % 360;
+  if(__SETCA_routeAircraftPatchToInstructor(p, {tgtHdg:hdg}, 'heading')) return hdg;
   p.tgtHdg = hdg;
   try{ if(window.__SETCA_markAircraftDirty) window.__SETCA_markAircraftDirty(p); }catch(_){ }
   if(__SETCA_isLocalPlanningLike()){
@@ -10764,6 +10968,7 @@ function __SETCA_setCommandHdg(p, value){
 function __SETCA_setCommandAlt(p, value){
   if(!p) return 0;
   const alt = Math.max(0, Number(value) || 0);
+  if(__SETCA_routeAircraftPatchToInstructor(p, {tgtAlt:alt, ...(alt <= 0 ? {alt:0, vsFpm:0} : {})}, 'altitude')) return alt;
   p.tgtAlt = alt;
   try{ if(window.__SETCA_markAircraftDirty) window.__SETCA_markAircraftDirty(p); }catch(_){ }
   if(__SETCA_isLocalPlanningLike() || alt <= 0){
@@ -10821,14 +11026,57 @@ function repaintAlt(){
 setInterval(()=>{ try{ repaintAlt(); }catch(e){} }, 900);
 
 /* ===== Loop ===== */
-let lastTS=0,accFPS=0,frames=0;
+let lastTS=0,accFPS=0,frames=0,__SETCA_AUTH_TICK_ACC=0,__SETCA_AUTH_TICK_SEQ=0;
+const __SETCA_AUTH_TICK_SEC = 1;
+function __SETCA_isAuthoritativeSimulationHost(){
+  try{ if(window.__SETCA_isPlanningMode && window.__SETCA_isPlanningMode()) return true; }catch(_){ }
+  try{ if(window.__SETCA_isFreePlayMode && window.__SETCA_isFreePlayMode()) return true; }catch(_){ }
+  try{ if(window.__SETCA_isInstructorAuthority) return !!window.__SETCA_isInstructorAuthority(); }catch(_){ }
+  try{
+    const access = window.__setcaAccess || {};
+    if(access.planning || access.freeplay) return true;
+    return String(access.role || '').toLowerCase() === 'default';
+  }catch(_){ }
+  return false;
+}
+function __SETCA_publishAuthoritativeTick(){
+  try{
+    if(window._SETCA_SYNC && typeof window._SETCA_SYNC.pushNow === 'function') return window._SETCA_SYNC.pushNow();
+    if(typeof window.__SETCA_scheduleAircraftSync1s === 'function') return window.__SETCA_scheduleAircraftSync1s();
+    if(window._SETCA_SYNC && typeof window._SETCA_SYNC.push === 'function') return window._SETCA_SYNC.push();
+  }catch(_){ }
+  return false;
+}
 function loop(ts){
   const dt=Math.max(0,(ts-lastTS)/1000); lastTS=ts;
   try{ __SETCA_pruneDelayLag && __SETCA_pruneDelayLag(); }catch(_){ }
   const planningMode = !!(window.__SETCA_isPlanningMode && window.__SETCA_isPlanningMode());
+  const authHost = __SETCA_isAuthoritativeSimulationHost();
   const serverPaused = __SETCA_isServerPaused();
-  if(!planningMode && !serverPaused){ st.elapsed = performance.now() - st.t0; telTick += dt; if(telTick>5){logTel(); telTick=0;} }
-  if(!planningMode && !serverPaused){ st.planes.forEach(p=>updatePlane(p,dt)); updateMissiles(dt); updatePairs(); sweepDetect(dt); }
+  if(!planningMode && !serverPaused && authHost){
+    st.elapsed = performance.now() - st.t0;
+    telTick += dt;
+    if(telTick>5){logTel(); telTick=0;}
+    __SETCA_AUTH_TICK_ACC = Math.min(3, __SETCA_AUTH_TICK_ACC + Math.max(0, dt));
+    let __setcaDidAuthTick = false;
+    let __setcaTickGuard = 0;
+    while(__SETCA_AUTH_TICK_ACC >= __SETCA_AUTH_TICK_SEC && __setcaTickGuard < 3){
+      __SETCA_AUTH_TICK_ACC -= __SETCA_AUTH_TICK_SEC;
+      __setcaTickGuard++;
+      __SETCA_AUTH_TICK_SEQ++;
+      st.planes.forEach(p=>updatePlane(p,__SETCA_AUTH_TICK_SEC));
+      updateMissiles(__SETCA_AUTH_TICK_SEC);
+      updatePairs();
+      sweepDetect(__SETCA_AUTH_TICK_SEC);
+      st.__authoritativeTick = __SETCA_AUTH_TICK_SEQ;
+      st.__authoritativeTickAt = Date.now();
+      __setcaDidAuthTick = true;
+    }
+    if(__setcaDidAuthTick) __SETCA_publishAuthoritativeTick();
+  }else if(!planningMode){
+    __SETCA_AUTH_TICK_ACC = 0;
+    updatePairs();
+  }
   if(!planningMode && !(st && st.localPause)){
     try{ __refreshLocalDelaySnapshot(false); }catch(_){ }
   }
@@ -18444,6 +18692,22 @@ document.querySelectorAll('#pCmdBody .btn').forEach(btn=>{
     const beVal = String(beSel && beSel.value || '');
     const missileVal = String(missileSel && missileSel.value || 'AMRAAM');
 
+    if(window.__SETCA_shouldRouteAircraftCommand && window.__SETCA_shouldRouteAircraftCommand()){
+      const patch = {};
+      if(Number.isFinite(altVal)) patch.tgtAlt = altFromUi(altVal);
+      if(Number.isFinite(spdVal)) patch.tgtSpd = spdFromUi(spdVal);
+      if(Number.isFinite(turnVal)) patch.turn = Math.max(0, turnVal);
+      patch.name = callsignVal || String(p.id || '');
+      patch.tipo = tipoVal;
+      patch.xpdr = iffVal;
+      patch.ctxMissileType = missileVal || 'AMRAAM';
+      patch.targetId = tgtVal;
+      patch.beAssignedId = beVal;
+      __SETCA_routeAircraftPatchToInstructor(p, patch, 'context-menu', roleVal);
+      repaintAll();
+      return true;
+    }
+
     if(Number.isFinite(altVal)) setPlaneAltNow(p, altFromUi(altVal));
     if(Number.isFinite(spdVal)) setPlaneSpeedNow(p, spdFromUi(spdVal));
     if(Number.isFinite(turnVal)) p.turn = Math.max(0, turnVal);
@@ -20086,8 +20350,22 @@ import { getAuth } from "https://www.gstatic.com/firebasejs/10.12.3/firebase-aut
   async function fetchRooms(){
     const byId = new Map();
     PRESET_ROOMS.forEach(id=> byId.set(id, { id, private:false, source:'preset', label:roomLabel(id) }));
+    const publishRoomList = ()=>{
+      roomsCache = Array.from(byId.values()).sort((a,b)=>{
+        const ap = PRESET_ROOMS.includes(a.id) ? 0 : 1;
+        const bp = PRESET_ROOMS.includes(b.id) ? 0 : 1;
+        if(ap !== bp) return ap - bp;
+        return String(a.id).localeCompare(String(b.id));
+      });
+      renderRooms();
+    };
+    // Las salas base deben aparecer de inmediato, incluso si Firebase tarda.
+    publishRoomList();
     try{
-      const snap = await get(ref(db, 'rooms_meta'));
+      const snap = await Promise.race([
+        get(ref(db, 'rooms_meta')),
+        new Promise((_, reject)=>setTimeout(()=>reject(new Error('rooms_meta timeout')), 2500))
+      ]);
       const meta = snap.exists() ? (snap.val() || {}) : {};
       Object.keys(meta).forEach(id=>{
         const item = meta[id] || {};
@@ -20102,14 +20380,8 @@ import { getAuth } from "https://www.gstatic.com/firebasejs/10.12.3/firebase-aut
     }catch(err){
       console.warn('SETCA access gate: no se pudieron cargar salas', err);
     }
-    roomsCache = Array.from(byId.values()).sort((a,b)=>{
-      const ap = PRESET_ROOMS.includes(a.id) ? 0 : 1;
-      const bp = PRESET_ROOMS.includes(b.id) ? 0 : 1;
-      if(ap !== bp) return ap - bp;
-      return String(a.id).localeCompare(String(b.id));
-    });
+    publishRoomList();
     __observeInstructorLocksForRooms();
-    renderRooms();
   }
   window.fetchRooms = fetchRooms;
 
@@ -20472,6 +20744,7 @@ import { getAuth } from "https://www.gstatic.com/firebasejs/10.12.3/firebase-aut
     refreshAfterAccess();
     try{ __observeInstructorOnline(window.__setcaAccess.room); }catch(_){ }
     try{ __startInstructorLockHeartbeat(window.__setcaAccess); }catch(_){ }
+    try{ if(window.__SETCA_startAircraftOrderListener) window.__SETCA_startAircraftOrderListener(); }catch(_){ }
 
     const salasBtn = document.getElementById('salasBtn');
     if(salasBtn){
