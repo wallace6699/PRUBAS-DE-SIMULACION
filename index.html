@@ -20727,19 +20727,31 @@ import { getAuth } from "https://www.gstatic.com/firebasejs/10.12.3/firebase-aut
       if(role === 'odt'){
         const panel = document.getElementById('pGTC');
         const bodyEl = document.getElementById('pGTCBody');
+        const toggleEl = panel ? panel.querySelector('.toggle[data-target="#pGTCBody"]') : null;
         const btn = document.getElementById('gtcAssetListBtn');
         const list = document.getElementById('gtcList');
-        if(panel) panel.style.display = '';
-        if(bodyEl) bodyEl.style.display = '';
+        if(panel){
+          panel.style.display = '';
+          panel.style.overflow = 'visible';
+          panel.style.maxHeight = '';
+        }
+        if(bodyEl && panel && panel.classList.contains('setca-odt-gtc-open')){
+          bodyEl.style.display = 'flex';
+          bodyEl.style.overflow = 'auto';
+          bodyEl.style.maxHeight = '';
+        }
+        if(bodyEl && panel && !panel.classList.contains('setca-odt-gtc-open')){
+          bodyEl.style.display = 'none';
+        }
+        if(toggleEl) toggleEl.textContent = '▾';
         if(btn){
           btn.disabled = false;
           btn.style.pointerEvents = '';
           btn.style.display = '';
         }
-        if(list && btn && !btn.dataset.setcaOdtAutoOpened){
-          list.classList.add('gtcAssetSideOpen');
-          btn.classList.add('active');
-          btn.dataset.setcaOdtAutoOpened = '1';
+        if(list && btn && panel && !panel.classList.contains('setca-odt-gtc-open')){
+          list.classList.remove('gtcAssetSideOpen');
+          btn.classList.remove('active');
         }
       }
     }catch(_){ }
@@ -22304,21 +22316,55 @@ import { getDatabase, ref, get, set } from "https://www.gstatic.com/firebasejs/1
 <style id="setca-odt-gtc-asset-list-wide-fix">
 body.mode-odt-overlay #pGTC,
 body[data-setca-role="odt"] #pGTC{
+  display:flex !important;
+  position:fixed !important;
+  left:calc(var(--setca-center-left, 8px) + 12px) !important;
+  top:calc(var(--setca-header-h, 78px) + 10px) !important;
+  width:min(760px, calc(100vw - 24px)) !important;
+  height:calc(100vh - var(--setca-header-h, 78px) - 22px) !important;
+  max-height:calc(100vh - var(--setca-header-h, 78px) - 22px) !important;
+  min-height:420px !important;
+  z-index:120 !important;
   overflow:visible !important;
 }
 body.mode-odt-overlay #pGTCBody,
 body[data-setca-role="odt"] #pGTCBody{
-  overflow:visible !important;
+  display:flex !important;
+  flex:1 1 auto !important;
+  min-height:0 !important;
+  height:auto !important;
+  max-height:none !important;
+  overflow:auto !important;
+  padding:10px 12px 12px !important;
+}
+body.mode-odt-overlay #pGTCBody .gtc-toolbar,
+body[data-setca-role="odt"] #pGTCBody .gtc-toolbar{
+  grid-template-columns:minmax(0,1fr) minmax(130px, auto) !important;
+  gap:10px !important;
+}
+body.mode-odt-overlay #pGTCBody .gtcPresetBtns,
+body[data-setca-role="odt"] #pGTCBody .gtcPresetBtns{
+  display:grid !important;
+  grid-template-columns:repeat(auto-fit, minmax(68px, 1fr)) !important;
+  gap:6px !important;
+}
+body.mode-odt-overlay #pGTCBody .gtcPresetBtn.btn.mini,
+body[data-setca-role="odt"] #pGTCBody .gtcPresetBtn.btn.mini,
+body.mode-odt-overlay #gtcAssetListBtn,
+body[data-setca-role="odt"] #gtcAssetListBtn{
+  min-height:30px !important;
+  height:auto !important;
+  white-space:nowrap !important;
 }
 body.mode-odt-overlay #pGTCBody #gtcList.gtc-list.gtcAssetSideOpen,
 body[data-setca-role="odt"] #pGTCBody #gtcList.gtc-list.gtcAssetSideOpen{
   display:block !important;
   position:fixed !important;
-  left:max(12px, calc(var(--setca-center-left, 0px) + 12px)) !important;
+  left:calc(var(--setca-center-left, 8px) + 18px) !important;
   top:calc(var(--setca-header-h, 78px) + 10px) !important;
   bottom:12px !important;
-  width:min(720px, calc(100vw - 24px)) !important;
-  max-width:calc(100vw - 24px) !important;
+  width:min(700px, calc(100vw - 36px)) !important;
+  max-width:calc(100vw - 36px) !important;
   max-height:calc(100vh - var(--setca-header-h, 78px) - 22px) !important;
   margin:0 !important;
   padding:52px 14px 16px !important;
@@ -22348,6 +22394,21 @@ body[data-setca-role="odt"] #pGTCBody #gtcList.gtcAssetSideOpen .gtcGroupInput{
   width:100% !important;
 }
 @media (max-width: 760px){
+  body.mode-odt-overlay #pGTC,
+  body[data-setca-role="odt"] #pGTC{
+    left:8px !important;
+    right:8px !important;
+    top:calc(var(--setca-header-h, 64px) + 8px) !important;
+    bottom:8px !important;
+    width:auto !important;
+    height:auto !important;
+    min-height:0 !important;
+    max-height:none !important;
+  }
+  body.mode-odt-overlay #pGTCBody .gtc-toolbar,
+  body[data-setca-role="odt"] #pGTCBody .gtc-toolbar{
+    grid-template-columns:1fr !important;
+  }
   body.mode-odt-overlay #pGTCBody #gtcList.gtc-list.gtcAssetSideOpen,
   body[data-setca-role="odt"] #pGTCBody #gtcList.gtc-list.gtcAssetSideOpen{
     left:8px !important;
@@ -22367,6 +22428,161 @@ body[data-setca-role="odt"] #pGTCBody #gtcList.gtcAssetSideOpen .gtcGroupInput{
   }
 }
 </style>
+
+<script id="setca-odt-gtc-force-open">
+(function(){
+  if(window.__SETCA_ODT_GTC_FORCE_OPEN__) return;
+  window.__SETCA_ODT_GTC_FORCE_OPEN__ = true;
+  function isOdt(){
+    try{
+      const a = window.__setcaAccess || {};
+      return !a.planning && !a.freeplay && String(a.role || '').toLowerCase() === 'odt';
+    }catch(_){ return false; }
+  }
+  function openGtcForOdt(){
+    if(!isOdt()) return;
+    try{
+      const panel = document.getElementById('pGTC');
+      const body = document.getElementById('pGTCBody');
+      const toggle = panel ? panel.querySelector('.toggle[data-target="#pGTCBody"]') : null;
+      const btn = document.getElementById('gtcAssetListBtn');
+      if(panel){
+        panel.style.display = '';
+        panel.style.overflow = 'visible';
+      }
+      if(body){
+        body.style.display = (panel && panel.classList.contains('setca-odt-gtc-open')) ? 'flex' : 'none';
+        body.style.overflow = (panel && panel.classList.contains('setca-odt-gtc-open')) ? 'auto' : '';
+      }
+      if(panel && !panel.classList.contains('setca-odt-gtc-open')){
+        const list = document.getElementById('gtcList');
+        if(list) list.classList.remove('gtcAssetSideOpen');
+      }
+      if(toggle) toggle.textContent = '▾';
+      if(btn){
+        btn.disabled = false;
+        btn.style.display = '';
+        btn.style.pointerEvents = '';
+      }
+    }catch(_){ }
+  }
+  document.addEventListener('click', function(ev){
+    const t = ev.target && ev.target.closest ? ev.target.closest('.toggle[data-target="#pGTCBody"]') : null;
+    if(!t || !isOdt()) return;
+    const panel = document.getElementById('pGTC');
+    if(panel) panel.classList.toggle('setca-odt-gtc-open');
+    setTimeout(openGtcForOdt, 0);
+    setTimeout(openGtcForOdt, 80);
+  }, true);
+  setInterval(openGtcForOdt, 650);
+  setTimeout(openGtcForOdt, 0);
+  setTimeout(openGtcForOdt, 300);
+})();
+</script>
+
+<style id="setca-odt-gtc-retracted-final">
+body.mode-odt-overlay #pGTC:not(.setca-odt-gtc-open),
+body[data-setca-role="odt"] #pGTC:not(.setca-odt-gtc-open){
+  width:clamp(260px, calc(var(--setca-center-w, 100vw) * 0.28), 360px) !important;
+  height:auto !important;
+  min-height:0 !important;
+  max-height:none !important;
+  bottom:auto !important;
+  overflow:hidden !important;
+}
+body.mode-odt-overlay #pGTC:not(.setca-odt-gtc-open) #pGTCBody,
+body[data-setca-role="odt"] #pGTC:not(.setca-odt-gtc-open) #pGTCBody{
+  display:none !important;
+}
+body.mode-odt-overlay #pGTC.setca-odt-gtc-open,
+body[data-setca-role="odt"] #pGTC.setca-odt-gtc-open{
+  display:flex !important;
+  width:min(760px, calc(100vw - 24px)) !important;
+  height:calc(100vh - var(--setca-header-h, 78px) - 22px) !important;
+  min-height:420px !important;
+  max-height:calc(100vh - var(--setca-header-h, 78px) - 22px) !important;
+  overflow:visible !important;
+}
+body.mode-odt-overlay #pGTC.setca-odt-gtc-open #pGTCBody,
+body[data-setca-role="odt"] #pGTC.setca-odt-gtc-open #pGTCBody{
+  display:flex !important;
+  flex:1 1 auto !important;
+  min-height:0 !important;
+  overflow:auto !important;
+}
+</style>
+
+<script id="setca-odi-instructor-pairing-final">
+(function(){
+  if(window.__SETCA_ODI_INSTRUCTOR_PAIRING_FINAL__) return;
+  window.__SETCA_ODI_INSTRUCTOR_PAIRING_FINAL__ = true;
+  function canUsePairs(){
+    try{
+      const a = window.__setcaAccess || {};
+      if(a.planning || a.freeplay) return true;
+      const role = String(a.role || 'default').toLowerCase();
+      return role === 'default' || role === 'odi';
+    }catch(_){ return false; }
+  }
+  function enablePairUi(){
+    if(!canUsePairs()) return;
+    try{
+      const panel = document.getElementById('pPair');
+      const body = document.getElementById('pPairBody');
+      if(panel) panel.style.pointerEvents = '';
+      if(body && String(body.style.display || '') === 'none') body.style.display = '';
+      ['pairA','pairB','doPair','unPair'].forEach(id=>{
+        const el = document.getElementById(id);
+        if(!el) return;
+        el.disabled = false;
+        el.style.pointerEvents = '';
+        if(typeof el.readOnly === 'boolean') el.readOnly = false;
+      });
+      const pairA = document.getElementById('pairA');
+      if(pairA && (!pairA.options || pairA.options.length < 1) && typeof repaintPairs === 'function') repaintPairs();
+    }catch(_){ }
+  }
+  function repaintPairSurfaces(){
+    try{ if(typeof repaintPairList === 'function') repaintPairList(); }catch(_){ }
+    try{ if(typeof repaintPairs === 'function') repaintPairs(); }catch(_){ }
+    try{ if(typeof draw === 'function') draw(); }catch(_){ }
+  }
+  function doPair(){
+    if(!canUsePairs()) return false;
+    enablePairUi();
+    const sA = document.getElementById('pairA');
+    const sB = document.getElementById('pairB');
+    const a = sA ? String(sA.value || '') : '';
+    const b = sB ? String(sB.value || '') : '';
+    if(!a || !b || a === b){ alert('Seleccione dos distintos.'); return true; }
+    window.st = window.st || {};
+    st.pairs = Array.isArray(st.pairs) ? st.pairs : [];
+    const exists = st.pairs.some(pr=>(pr && pr.a===a && pr.b===b) || (pr && pr.a===b && pr.b===a));
+    if(!exists) st.pairs.push({a,b});
+    else alert('Ya emparejados.');
+    repaintPairSurfaces();
+    return true;
+  }
+  function unPair(){
+    if(!canUsePairs()) return false;
+    window.st = window.st || {};
+    st.pairs = [];
+    repaintPairSurfaces();
+    return true;
+  }
+  document.addEventListener('click', function(ev){
+    const btn = ev.target && ev.target.closest ? ev.target.closest('#doPair,#unPair') : null;
+    if(!btn || !canUsePairs()) return;
+    if(ev.preventDefault) ev.preventDefault();
+    if(ev.stopImmediatePropagation) ev.stopImmediatePropagation(); else ev.stopPropagation();
+    if(btn.id === 'doPair') doPair();
+    if(btn.id === 'unPair') unPair();
+  }, true);
+  setInterval(enablePairUi, 800);
+  setTimeout(enablePairUi, 0);
+  setTimeout(enablePairUi, 350);
+})();
+</script>
 
 <style>
 body.setca-observer-readonly-strict #vuelosList .vuelosNameInput,
