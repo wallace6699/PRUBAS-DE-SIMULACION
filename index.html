@@ -22301,6 +22301,73 @@ import { getDatabase, ref, get, set } from "https://www.gstatic.com/firebasejs/1
 })();
 </script>
 
+<style id="setca-odt-gtc-asset-list-wide-fix">
+body.mode-odt-overlay #pGTC,
+body[data-setca-role="odt"] #pGTC{
+  overflow:visible !important;
+}
+body.mode-odt-overlay #pGTCBody,
+body[data-setca-role="odt"] #pGTCBody{
+  overflow:visible !important;
+}
+body.mode-odt-overlay #pGTCBody #gtcList.gtc-list.gtcAssetSideOpen,
+body[data-setca-role="odt"] #pGTCBody #gtcList.gtc-list.gtcAssetSideOpen{
+  display:block !important;
+  position:fixed !important;
+  left:max(12px, calc(var(--setca-center-left, 0px) + 12px)) !important;
+  top:calc(var(--setca-header-h, 78px) + 10px) !important;
+  bottom:12px !important;
+  width:min(720px, calc(100vw - 24px)) !important;
+  max-width:calc(100vw - 24px) !important;
+  max-height:calc(100vh - var(--setca-header-h, 78px) - 22px) !important;
+  margin:0 !important;
+  padding:52px 14px 16px !important;
+  overflow-y:auto !important;
+  overflow-x:hidden !important;
+  z-index:10080 !important;
+  border-radius:14px !important;
+  contain:none !important;
+}
+body.mode-odt-overlay #pGTCBody #gtcList.gtcAssetSideOpen .gtc-row,
+body[data-setca-role="odt"] #pGTCBody #gtcList.gtcAssetSideOpen .gtc-row{
+  grid-template-columns:minmax(210px, 1.35fr) minmax(170px, .95fr) auto !important;
+  min-height:46px !important;
+  align-items:center !important;
+}
+body.mode-odt-overlay #pGTCBody #gtcList.gtcAssetSideOpen .gtc-cfg-grid,
+body[data-setca-role="odt"] #pGTCBody #gtcList.gtcAssetSideOpen .gtc-cfg-grid{
+  grid-template-columns:repeat(2, minmax(190px, 1fr)) !important;
+}
+body.mode-odt-overlay #pGTCBody #gtcList.gtcAssetSideOpen .gtcNameInput,
+body.mode-odt-overlay #pGTCBody #gtcList.gtcAssetSideOpen .gtcPlaneSel,
+body.mode-odt-overlay #pGTCBody #gtcList.gtcAssetSideOpen .gtcGroupInput,
+body[data-setca-role="odt"] #pGTCBody #gtcList.gtcAssetSideOpen .gtcNameInput,
+body[data-setca-role="odt"] #pGTCBody #gtcList.gtcAssetSideOpen .gtcPlaneSel,
+body[data-setca-role="odt"] #pGTCBody #gtcList.gtcAssetSideOpen .gtcGroupInput{
+  min-width:0 !important;
+  width:100% !important;
+}
+@media (max-width: 760px){
+  body.mode-odt-overlay #pGTCBody #gtcList.gtc-list.gtcAssetSideOpen,
+  body[data-setca-role="odt"] #pGTCBody #gtcList.gtc-list.gtcAssetSideOpen{
+    left:8px !important;
+    right:8px !important;
+    top:calc(var(--setca-header-h, 64px) + 8px) !important;
+    bottom:8px !important;
+    width:auto !important;
+    max-width:none !important;
+  }
+  body.mode-odt-overlay #pGTCBody #gtcList.gtcAssetSideOpen .gtc-row,
+  body[data-setca-role="odt"] #pGTCBody #gtcList.gtcAssetSideOpen .gtc-row{
+    grid-template-columns:minmax(0,1fr) !important;
+  }
+  body.mode-odt-overlay #pGTCBody #gtcList.gtcAssetSideOpen .gtc-cfg-grid,
+  body[data-setca-role="odt"] #pGTCBody #gtcList.gtcAssetSideOpen .gtc-cfg-grid{
+    grid-template-columns:1fr !important;
+  }
+}
+</style>
+
 <style>
 body.setca-observer-readonly-strict #vuelosList .vuelosNameInput,
 body.setca-observer-readonly-strict #vuelosList .vuelosTipoInput,
