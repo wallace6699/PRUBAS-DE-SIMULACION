@@ -1,4 +1,4 @@
-ESTE SIMULADOR SE ENCUENTRA EN FASE DE PRUEBA - PUEDEN OCURRIR ERRORES DURANTE EL FUNCIONAMIENTO 2.7
+ESTE SIMULADOR SE ENCUENTRA EN FASE DE PRUEBA - PUEDEN OCURRIR ERRORES DURANTE EL FUNCIONAMIENTO 2.5.2 040326
 <!DOCTYPE html>
 <html lang="es">
 <head>
@@ -119,6 +119,12 @@ document.getElementById('cancelDelete').onclick = ()=>{
   function __SETCA_shouldRouteAircraftCommand(){
     return __SETCA_canSendAircraftOrder() && !__SETCA_isInstructorAuthority();
   }
+  function __SETCA_canSendGtcOrder(){
+    if(__localOnlyMode) return false;
+    const access = __SETCA_getAccessForSync();
+    if(access && (access.planning || access.freeplay)) return false;
+    return String((access && access.role) || '').toLowerCase() === 'odt';
+  }
   function __SETCA_canWriteSharedState(){
     if(__localOnlyMode) return false;
     const access = __SETCA_getAccessForSync();
@@ -129,6 +135,7 @@ document.getElementById('cancelDelete').onclick = ()=>{
   try{ window.__SETCA_canSendAircraftOrder = __SETCA_canSendAircraftOrder; }catch(_){ }
   try{ window.__SETCA_isInstructorAuthority = __SETCA_isInstructorAuthority; }catch(_){ }
   try{ window.__SETCA_shouldRouteAircraftCommand = __SETCA_shouldRouteAircraftCommand; }catch(_){ }
+  try{ window.__SETCA_canSendGtcOrder = __SETCA_canSendGtcOrder; }catch(_){ }
   try{ window.__SETCA_canWriteSharedState = __SETCA_canWriteSharedState; }catch(_){ }
   let currentUID = null;
 
@@ -346,12 +353,13 @@ document.getElementById('cancelDelete').onclick = ()=>{
 
   const __SETCA_AIRCRAFT_ORDER_NUMBER_FIELDS = new Set([
     'x','y','hdg','tgtHdg','spd','tgtSpd','alt','tgtAlt','turn',
+    'routeIdx','routeLastChange','routeLastReached','routeFinishedAt',
     'routeManualUntil','vsFpm','speedRateKmhps','awacsSweepAng','fuel','__cmdAt'
   ]);
   const __SETCA_AIRCRAFT_ORDER_STRING_FIELDS = new Set([
     'turnBias','targetId','beAssignedId','ctxMissileType','xpdr','name','tipo'
   ]);
-  const __SETCA_AIRCRAFT_ORDER_BOOL_FIELDS = new Set(['jamming','awacsCoverage']);
+  const __SETCA_AIRCRAFT_ORDER_BOOL_FIELDS = new Set(['jamming','awacsCoverage','routeEnabled','routeLoop','routeCompleted']);
 
   function __setcaPlaneWithDynamicFields(base, dynamicSrc){
     const out = {...(base || {})};
@@ -391,6 +399,18 @@ document.getElementById('cancelDelete').onclick = ()=>{
           bird: !!val.bird
         };
       }
+      if(key === 'routePlan' && Array.isArray(val)){
+        out.routePlan = val.slice(0, 80).map((wp, idx)=>{
+          const src = (wp && typeof wp === 'object') ? wp : {};
+          return {
+            id:String(src.id || ('WP-' + (idx+1))).slice(0, 24),
+            x:Number.isFinite(+src.x) ? +src.x : 0,
+            y:Number.isFinite(+src.y) ? +src.y : 0,
+            alt:Number.isFinite(+src.alt) ? +src.alt : null,
+            spd:Number.isFinite(+src.spd) ? +src.spd : null
+          };
+        });
+      }
     });
     out.__cmdAt = Math.max(Number(out.__cmdAt || 0) || 0, Date.now());
     return out;
@@ -423,6 +443,38 @@ document.getElementById('cancelDelete').onclick = ()=>{
       return false;
     }
   }
+  function __SETCA_applyGtcLaunchOrder(order){
+    try{
+      if(!__SETCA_isInstructorAuthority()) return false;
+      if(!order || typeof order !== 'object') return false;
+      const launcherId = String(order.launcherId || '').trim();
+      const targetId = String(order.targetId || '').trim();
+      if(!launcherId || !targetId || !window.st || !Array.isArray(window.st.gtc)) return false;
+      const launcher = window.st.gtc.find(u=>u && String(u.id || '') === launcherId);
+      if(!launcher) return false;
+      launcher.trackPlaneId = targetId;
+      if(typeof window.gtcLaunchMissile === 'function'){
+        window.gtcLaunchMissile(launcher);
+      }else if(typeof gtcLaunchMissile === 'function'){
+        gtcLaunchMissile(launcher);
+      }else{
+        return false;
+      }
+      return true;
+    }catch(e){
+      console.warn('SETCA GTC launch order apply error:', e);
+      return false;
+    }
+  }
+  function __SETCA_applyIncomingOrder(order){
+    try{
+      const kind = String(order && order.kind || 'aircraft-command').toLowerCase();
+      if(kind === 'gtc-launch') return __SETCA_applyGtcLaunchOrder(order);
+      return __SETCA_applyAircraftOrder(order);
+    }catch(_){
+      return false;
+    }
+  }
 
   async function __SETCA_submitAircraftCommand(cmd){
     try{
@@ -449,7 +501,31 @@ document.getElementById('cancelDelete').onclick = ()=>{
       return false;
     }
   }
+  async function __SETCA_submitGtcLaunchCommand(cmd){
+    try{
+      if(!__SETCA_canSendGtcOrder()) return false;
+      const launcherId = String(cmd && cmd.launcherId || '').trim();
+      const targetId = String(cmd && cmd.targetId || '').trim();
+      if(!launcherId || !targetId) return false;
+      const id = `${Date.now()}_${Math.random().toString(36).slice(2, 9)}`;
+      await set(ref(db, `rooms/${ROOM_ID}/orders/${id}`), {
+        id,
+        kind:'gtc-launch',
+        launcherId,
+        targetId,
+        by:currentUID || 'pending',
+        byRole:__SETCA_getSharedWriteRole() || 'odt',
+        tsClient:Date.now(),
+        serverAt:serverTimestamp()
+      });
+      return true;
+    }catch(e){
+      console.warn('SETCA GTC launch submit error:', e);
+      return false;
+    }
+  }
   try{ window.__SETCA_submitAircraftCommand = __SETCA_submitAircraftCommand; }catch(_){ }
+  try{ window.__SETCA_submitGtcLaunchCommand = __SETCA_submitGtcLaunchCommand; }catch(_){ }
   try{ window.__SETCA_sanitizeAircraftPatch = __SETCA_sanitizeAircraftPatch; }catch(_){ }
 
   function __setcaMergePlanesByAuthority(currentPlanes, nextPlanes, writerRole){
@@ -686,7 +762,8 @@ let __setcaLastAppliedRemoteTs = 0;
           try{
             // Las rutas V+click solo existen/son visibles en el puesto Instructor.
             const a = window.__setcaAccess || {};
-            return String(a.role || '').toLowerCase() === 'default';
+            const role = String(a.role || '').toLowerCase();
+            return role === 'default' || role === 'pseudopilot';
           }catch(_){ return false; }
         })();
         const __localRoutePlans = new Map();
@@ -734,6 +811,12 @@ let __setcaLastAppliedRemoteTs = 0;
         rolesChanged = (__setcaSafeJson(st.roles) !== __setcaSafeJson(v.roles));
         if(rolesChanged) st.roles = v.roles;
       }
+      try{
+        if(window.__SETCA_applyOdiLocalVuelosOverrides && window.__SETCA_applyOdiLocalVuelosOverrides(st.planes, st.roles)){
+          planesChanged = true;
+          rolesChanged = true;
+        }
+      }catch(_){ }
 
       {
         const nextServerPause = (v.serverPause && v.serverPause.active) ? {
@@ -772,7 +855,29 @@ let __setcaLastAppliedRemoteTs = 0;
       }
 
       if (Array.isArray(v.gtc)) {
-        const nextGtc = __setcaMergeRemoteArray(st.gtc, v.gtc, { prefix:'gtc' });
+        const keepLocalGtcTarget = (()=> {
+          try{
+            const a = window.__setcaAccess || {};
+            return !a.planning && !a.freeplay && String(a.role || '').toLowerCase() === 'odt';
+          }catch(_){ return false; }
+        })();
+        const localGtcTargets = new Map();
+        if(keepLocalGtcTarget && Array.isArray(st.gtc)){
+          st.gtc.forEach(u=>{
+            if(!u || !u.id) return;
+            localGtcTargets.set(String(u.id), String(u.trackPlaneId || ''));
+          });
+        }
+        const nextGtc = __setcaMergeRemoteArray(st.gtc, v.gtc, {
+          prefix:'gtc',
+          normalize:(u)=>{
+            const q = (u && typeof u === 'object') ? {...u} : u;
+            if(keepLocalGtcTarget && q && q.id && localGtcTargets.has(String(q.id))){
+              q.trackPlaneId = localGtcTargets.get(String(q.id)) || '';
+            }
+            return q;
+          }
+        });
         gtcChanged = !__setcaSameArrayRefs(st.gtc, nextGtc);
         if(gtcChanged) st.gtc = nextGtc;
       }
@@ -885,7 +990,7 @@ let __setcaLastAppliedRemoteTs = 0;
       const orderId = String(row.value.id || row.key);
       if(__setcaProcessedOrderIds.has(orderId)) return;
       __setcaProcessedOrderIds.add(orderId);
-      if(__SETCA_applyAircraftOrder(row.value)) changed = true;
+      if(__SETCA_applyIncomingOrder(row.value)) changed = true;
       try{ set(ref(db, `rooms/${ROOM_ID}/orders/${row.key}`), null); }catch(_){ }
     });
     if(changed){
@@ -893,6 +998,8 @@ let __setcaLastAppliedRemoteTs = 0;
       try{ repaintNav && repaintNav(); }catch(_){ }
       try{ repaintAlt && repaintAlt(); }catch(_){ }
       try{ repaintVuelos && repaintVuelos(); }catch(_){ }
+      try{ repaintGTC && repaintGTC(); }catch(_){ }
+      try{ paintAlerts && paintAlerts(); }catch(_){ }
       try{ if(window._SETCA_SYNC && typeof window._SETCA_SYNC.push === 'function') window._SETCA_SYNC.push(); }catch(_){ }
     }
     return changed;
@@ -10471,6 +10578,61 @@ function getPlaneTipoDisplay(p){
   return '';
 }
 
+function __SETCA_isOdiLocalVuelosRole(){
+  try{
+    const access = window.__setcaAccess || {};
+    return !access.planning && !access.freeplay && String(access.role || '').toLowerCase() === 'odi';
+  }catch(_){ return false; }
+}
+function __SETCA_getOdiLocalVuelosMap(){
+  try{
+    window.st = window.st || {};
+    if(!st.__odiLocalVuelos || typeof st.__odiLocalVuelos !== 'object') st.__odiLocalVuelos = {};
+    return st.__odiLocalVuelos;
+  }catch(_){ return {}; }
+}
+function __SETCA_getOdiLocalVuelos(id){
+  const sid = String(id || '');
+  const map = __SETCA_getOdiLocalVuelosMap();
+  return sid ? (map[sid] || null) : null;
+}
+function __SETCA_markOdiLocalVuelos(p, fields){
+  try{
+    if(!__SETCA_isOdiLocalVuelosRole() || !p || !p.id) return false;
+    const sid = String(p.id);
+    const map = __SETCA_getOdiLocalVuelosMap();
+    const row = map[sid] || (map[sid] = {});
+    (Array.isArray(fields) ? fields : [fields]).forEach(field=>{
+      if(field === 'name') row.name = String(p.name || '');
+      else if(field === 'tipo') row.tipo = String(p.tipo || '');
+      else if(field === 'xpdr') row.xpdr = getPlaneXpdr(p);
+      else if(field === 'role') row.role = normalizePlaneRole((st.roles && st.roles[sid]) || 'Neutral');
+      else if(field && typeof field === 'object' && field.m1 !== undefined) row.m1 = String(field.m1 || '').replace(/\D+/g,'').slice(0,2);
+    });
+    return true;
+  }catch(_){ return false; }
+}
+function __SETCA_applyOdiLocalVuelosOverrides(planes, roles){
+  try{
+    if(!__SETCA_isOdiLocalVuelosRole()) return false;
+    const map = __SETCA_getOdiLocalVuelosMap();
+    const arr = Array.isArray(planes) ? planes : [];
+    const roleMap = (roles && typeof roles === 'object') ? roles : (st.roles || {});
+    let changed = false;
+    arr.forEach(p=>{
+      if(!p || !p.id) return;
+      const row = map[String(p.id)];
+      if(!row) return;
+      if(Object.prototype.hasOwnProperty.call(row, 'name') && p.name !== row.name){ p.name = row.name; changed = true; }
+      if(Object.prototype.hasOwnProperty.call(row, 'tipo') && p.tipo !== row.tipo){ p.tipo = row.tipo; changed = true; }
+      if(Object.prototype.hasOwnProperty.call(row, 'xpdr') && getPlaneXpdr(p) !== row.xpdr){ setPlaneXpdr(p, row.xpdr); changed = true; }
+      if(Object.prototype.hasOwnProperty.call(row, 'role') && roleMap && roleMap[p.id] !== row.role){ roleMap[p.id] = row.role; changed = true; }
+    });
+    return changed;
+  }catch(_){ return false; }
+}
+try{ window.__SETCA_applyOdiLocalVuelosOverrides = __SETCA_applyOdiLocalVuelosOverrides; }catch(_){ }
+
 function repaintVuelos(){
   const wrap = $('#vuelosList');
   if(!wrap) return;
@@ -10522,6 +10684,8 @@ function repaintVuelos(){
   const tbody = table.querySelector('tbody');
 
   st.planes.forEach(p=>{
+    try{ __SETCA_applyOdiLocalVuelosOverrides([p], st.roles); }catch(_){ }
+    const odiLocalRow = __SETCA_getOdiLocalVuelos(p.id) || {};
     const tr = document.createElement('tr');
     tr.dataset.id = p.id;
 
@@ -10544,7 +10708,7 @@ function repaintVuelos(){
         </select>
       </td>
       <td>
-        <input class="ghost focusable focusAlt vuelosM1Input" type="text" inputmode="numeric" maxlength="2" placeholder="00" value="">
+        <input class="ghost focusable focusAlt vuelosM1Input" type="text" inputmode="numeric" maxlength="2" placeholder="00" value="${String(odiLocalRow.m1 || '').replace(/"/g,'&quot;')}">
       </td>
       <td>
         <div class="xpdrWrap">
@@ -10584,6 +10748,7 @@ function repaintVuelos(){
         return;
       }
       p.name = e.target.value;
+      __SETCA_markOdiLocalVuelos(p, 'name');
       syncPlaneEditsToNav(p);
       __setcaRefreshPlaneNameViews({ plane:p, skipNav:true });
     });
@@ -10593,20 +10758,24 @@ function repaintVuelos(){
         return;
       }
       __setcaCommitPlaneNameChange(p, e.target.value, { skipNav:false });
+      __SETCA_markOdiLocalVuelos(p, 'name');
     });
 
     tipoInput.addEventListener('input', e=>{
       p.tipo = (e.target.value || '').trimStart();
+      __SETCA_markOdiLocalVuelos(p, 'tipo');
       // Solo dato adicional en panel de vuelos (no se pinta en data block por ahora)
     });
     tipoInput.addEventListener('change', e=>{
       p.tipo = (e.target.value || '').trim();
       e.target.value = p.tipo;
+      __SETCA_markOdiLocalVuelos(p, 'tipo');
     });
 
     m1Input.addEventListener('input', e=>{
       const v = (e.target.value || '').replace(/\D+/g,'').slice(0,2);
       if(e.target.value !== v) e.target.value = v;
+      __SETCA_markOdiLocalVuelos(p, {m1:v});
       // M1 es campo local del panel de vuelos (no sincroniza por ahora)
     });
 
@@ -10622,6 +10791,7 @@ function repaintVuelos(){
       }
       applyVuelosRoleVisual(roleSelect, tr, newRole, centerBtn);
       nameInput.value = String(p.name || '');
+      __SETCA_markOdiLocalVuelos(p, 'role');
       syncPlaneEditsToNav(p);
       repaintNav();
       repaintAlt();
@@ -10634,6 +10804,7 @@ function repaintVuelos(){
       if(e.target.value !== v) e.target.value = v;
       setPlaneXpdr(p, v);
       setEmergencyRowState(tr, v);
+      __SETCA_markOdiLocalVuelos(p, 'xpdr');
       syncPlaneEditsToNav(p);
       // Alerta visual de aeronave se actualiza en el próximo frame (usa p.xpdr)
     });
@@ -10642,6 +10813,7 @@ function repaintVuelos(){
       e.target.value = v;
       setPlaneXpdr(p, v);
       setEmergencyRowState(tr, v);
+      __SETCA_markOdiLocalVuelos(p, 'xpdr');
       syncPlaneEditsToNav(p);
     });
 
@@ -13050,7 +13222,7 @@ requestAnimationFrame(()=>{ repaintPlanesList(); repaintNav(); repaintStudent();
     const allPanels = ['#pCmd','#pPlanes','#pNav','#pVuelos','#pPair','#pAlt','#pDraw','#pGTC','#pAlerts'];
     const odiOnlyPanels = ['#pVuelos','#pPair','#pAlt','#pAlerts'];
     const odtOnlyPanels = ['#pAlt','#pGTC','#pAlerts'];
-    const pseudoOnlyPanels = ['#pUnitMgr','#pPlanes','#pNav','#pVuelos','#pPair','#pDraw'];
+    const pseudoOnlyPanels = ['#pUnitMgr','#pPlanes','#pNav','#pVuelos','#pPair','#pAlt','#pDraw','#pAlerts'];
 
     function updateHeaderOverlayMetric(){
       try{
@@ -17081,7 +17253,8 @@ document.querySelectorAll('#pCmdBody .btn').forEach(btn=>{
       // V+click / puntos de control de navegación: SOLO INSTRUCTOR real.
       // No Planning Tool, no Free Play, no Pseudo Piloto, no ODT/ODI-CO/Observador.
       const a = window.__setcaAccess || {};
-      return String(a.role || '').toLowerCase() === 'default';
+      const role = String(a.role || '').toLowerCase();
+      return role === 'default' || role === 'pseudopilot';
     }catch(_){ return false; }
   }
   function canUseFlightPlanner(){ return isInstructorRouteOwner() && !isObserver(); }
@@ -17137,6 +17310,24 @@ document.querySelectorAll('#pCmdBody .btn').forEach(btn=>{
   }
   function syncSharedState(){
     try{
+      if(window.__SETCA_shouldRouteAircraftCommand && window.__SETCA_shouldRouteAircraftCommand() && typeof __SETCA_routeAircraftPatchToInstructor === 'function'){
+        const planes = (window.st && Array.isArray(st.planes)) ? st.planes : [];
+        planes.forEach(p=>{
+          if(!p || !p.id || !Number.isFinite(+p.routeLastChange)) return;
+          __SETCA_routeAircraftPatchToInstructor(p, {
+            routePlan:Array.isArray(p.routePlan) ? p.routePlan : [],
+            routeIdx:Number.isFinite(+p.routeIdx) ? +p.routeIdx : 0,
+            routeEnabled:!!p.routeEnabled,
+            routeLoop:!!p.routeLoop,
+            routeCompleted:!!p.routeCompleted,
+            routeLastChange:+p.routeLastChange || Date.now(),
+            tgtHdg:Number.isFinite(+p.tgtHdg) ? +p.tgtHdg : undefined,
+            tgtAlt:Number.isFinite(+p.tgtAlt) ? +p.tgtAlt : undefined,
+            tgtSpd:Number.isFinite(+p.tgtSpd) ? +p.tgtSpd : undefined
+          }, 'aircraft-route-plan');
+        });
+        return;
+      }
       if(window._SETCA_SYNC && typeof window._SETCA_SYNC.push === 'function') window._SETCA_SYNC.push();
       else if(typeof scheduleSync === 'function') scheduleSync();
     }catch(_){ }
@@ -18947,6 +19138,30 @@ function gtcNextDartName(prefix='DART'){
 function gtcLaunchMissile(u){
   try{
     if(!u || !u.id) return;
+    const shouldRouteToInstructor = !!(
+      window.__SETCA_canSendGtcOrder &&
+      window.__SETCA_canSendGtcOrder() &&
+      window.__SETCA_submitGtcLaunchCommand
+    );
+    if(shouldRouteToInstructor){
+      if(!__gtcCanLaunch(u)){
+        try{ logEvent(`${(u.name||'RADAR')} es solo deteccion.`); }catch(_){ }
+        return;
+      }
+      const requestedTarget = String(u.trackPlaneId || '').trim();
+      if(!requestedTarget){
+        try{ logEvent(`ODT: ${(u.name||'LANZADOR')} sin blanco seleccionado`); }catch(_){ }
+        return;
+      }
+      try{
+        window.__SETCA_submitGtcLaunchCommand({ launcherId:String(u.id || ''), targetId:requestedTarget })
+          .then(ok=>{
+            try{ logEvent(ok ? `ODT -> INSTRUCTOR: lanzamiento solicitado ${(u.name||'LANZADOR')} -> ${requestedTarget}` : `ODT: no se pudo enviar lanzamiento ${(u.name||'LANZADOR')}`); }catch(_){ }
+          })
+          .catch(()=>{ try{ logEvent(`ODT: error enviando lanzamiento ${(u.name||'LANZADOR')}`); }catch(_){ } });
+      }catch(_){ }
+      return;
+    }
     if(!__gtcCanLaunch(u)){
       try{ logEvent(`${(u.name||'RADAR')} es solo detección.`); }catch(_){ }
       return;
@@ -20490,6 +20705,46 @@ import { getAuth } from "https://www.gstatic.com/firebasejs/10.12.3/firebase-aut
     }catch(_){ }
   }
 
+  function __SETCA_refreshLocalWorkstationPanels(access){
+    try{
+      const role = String((access && access.role) || '').toLowerCase();
+      const localPanelSelector = role === 'odi'
+        ? '#vuelosList input,#vuelosList select,#vuelosList button,#pairA,#pairB,#doPair,#unPair'
+        : (role === 'odt'
+            ? '#pGTC input,#pGTC select,#pGTC button'
+            : (role === 'pseudopilot'
+                ? '#navCards input,#navCards select,#navCards button,#pAlt input,#pAlt select,#pAlt button'
+                : ''));
+      if(localPanelSelector){
+        document.querySelectorAll(localPanelSelector).forEach(el=>{
+          try{
+            el.disabled = false;
+            if(typeof el.readOnly === 'boolean') el.readOnly = false;
+            el.style.pointerEvents = '';
+          }catch(_){ }
+        });
+      }
+      if(role === 'odt'){
+        const panel = document.getElementById('pGTC');
+        const bodyEl = document.getElementById('pGTCBody');
+        const btn = document.getElementById('gtcAssetListBtn');
+        const list = document.getElementById('gtcList');
+        if(panel) panel.style.display = '';
+        if(bodyEl) bodyEl.style.display = '';
+        if(btn){
+          btn.disabled = false;
+          btn.style.pointerEvents = '';
+          btn.style.display = '';
+        }
+        if(list && btn && !btn.dataset.setcaOdtAutoOpened){
+          list.classList.add('gtcAssetSideOpen');
+          btn.classList.add('active');
+          btn.dataset.setcaOdtAutoOpened = '1';
+        }
+      }
+    }catch(_){ }
+  }
+
   function applyRoleAccess(access){
     const planning = !!(access && access.planning);
     const freeplay = !!(access && access.freeplay);
@@ -20538,6 +20793,7 @@ import { getAuth } from "https://www.gstatic.com/firebasejs/10.12.3/firebase-aut
       unitMgr.style.display = showUnitMgr ? '' : 'none';
     }
     try{ __SETCA_applyPseudoPilotUnitMgrRestrictions(access); }catch(_){ }
+    try{ __SETCA_refreshLocalWorkstationPanels(access); }catch(_){ }
     if(planning || freeplay){
       try{
         const chip = document.getElementById('stateChip');
@@ -20721,6 +20977,7 @@ import { getAuth } from "https://www.gstatic.com/firebasejs/10.12.3/firebase-aut
     try{ if(typeof window.repaintGTC === 'function') window.repaintGTC(); }catch(_){ }
     try{ if(typeof window.paintAlerts === 'function') window.paintAlerts(); }catch(_){ }
     try{ if(typeof window.repaintAll === 'function') window.repaintAll(); }catch(_){ }
+    try{ __SETCA_refreshLocalWorkstationPanels(window.__setcaAccess || {}); }catch(_){ }
   }
   window.__SETCA_applyAccessFilters = refreshAfterAccess;
 
@@ -22091,11 +22348,11 @@ body.setca-observer-readonly-strict #unPair{
     try{
       const access = window.__setcaAccess || {};
       const accessRole = String((access.role || '')).toLowerCase();
-      if(!access.planning && !access.freeplay && (accessRole === 'observer' || accessRole === 'odi' || accessRole === 'odt')) return true;
+      if(!access.planning && !access.freeplay && accessRole === 'observer') return true;
     }catch(_){ }
     try{
       const bodyRole = String(document.body && document.body.getAttribute('data-setca-role') || '').toLowerCase();
-      if(bodyRole === 'observer' || bodyRole === 'odi' || bodyRole === 'odt') return true;
+      if(bodyRole === 'observer') return true;
     }catch(_){ }
     try{ if(window.st && st.modoObservador) return true; }catch(_){ }
     return false;
@@ -22231,7 +22488,8 @@ body.setca-observer-readonly-strict #unPair{
   function isInstructor(){
     try{
       const a = window.__setcaAccess || {};
-      return String(a.role || '').toLowerCase() === 'default';
+      const role = String(a.role || '').toLowerCase();
+      return role === 'default' || role === 'pseudopilot';
     }catch(_){ return false; }
   }
   function restoreNavUi(){
@@ -22270,7 +22528,10 @@ body.setca-observer-readonly-strict #unPair{
   if(window.__SETCA_VCLICK_INSTRUCTOR_PRIVATE_FINAL_GUARD__) return;
   window.__SETCA_VCLICK_INSTRUCTOR_PRIVATE_FINAL_GUARD__ = true;
   function isInstructor(){
-    try{ return String(((window.__setcaAccess||{}).role)||'').toLowerCase() === 'default'; }catch(_){ return false; }
+    try{
+      const role = String(((window.__setcaAccess||{}).role)||'').toLowerCase();
+      return role === 'default' || role === 'pseudopilot';
+    }catch(_){ return false; }
   }
   function stripLocalRoutesForNonInstructor(){
     if(isInstructor()) return;
