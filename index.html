@@ -1,4 +1,4 @@
-ESTE SIMULADOR SE ENCUENTRA EN FASE DE PRUEBA - PUEDEN OCURRIR ERRORES DURANTE EL FUNCIONAMIENTO 2.7
+ESTE SIMULADOR SE ENCUENTRA EN FASE DE PRUEBA - PUEDEN OCURRIR ERRORES DURANTE EL FUNCIONAMIENTO 2.5.2 040326
 <!DOCTYPE html>
 <html lang="es">
 <head>
@@ -125,6 +125,13 @@ document.getElementById('cancelDelete').onclick = ()=>{
     if(access && (access.planning || access.freeplay)) return false;
     return String((access && access.role) || '').toLowerCase() === 'odt';
   }
+  function __SETCA_canLaunchGtcMissile(){
+    if(__localOnlyMode) return false;
+    const access = __SETCA_getAccessForSync();
+    if(access && (access.planning || access.freeplay)) return false;
+    const role = String((access && access.role) || '').toLowerCase();
+    return role === 'default' || role === 'odt';
+  }
   function __SETCA_canWriteSharedState(){
     if(__localOnlyMode) return false;
     const access = __SETCA_getAccessForSync();
@@ -136,6 +143,7 @@ document.getElementById('cancelDelete').onclick = ()=>{
   try{ window.__SETCA_isInstructorAuthority = __SETCA_isInstructorAuthority; }catch(_){ }
   try{ window.__SETCA_shouldRouteAircraftCommand = __SETCA_shouldRouteAircraftCommand; }catch(_){ }
   try{ window.__SETCA_canSendGtcOrder = __SETCA_canSendGtcOrder; }catch(_){ }
+  try{ window.__SETCA_canLaunchGtcMissile = __SETCA_canLaunchGtcMissile; }catch(_){ }
   try{ window.__SETCA_canWriteSharedState = __SETCA_canWriteSharedState; }catch(_){ }
   let currentUID = null;
 
@@ -538,8 +546,64 @@ document.getElementById('cancelDelete').onclick = ()=>{
       return false;
     }
   }
+
+  function __SETCA_cleanGtcMissileForDirectSync(missile){
+    const src = (missile && typeof missile === 'object') ? missile : {};
+    const id = String(src.id || '').trim();
+    if(!id) return null;
+    const out = {...src};
+    delete out.__syncAfter;
+    out.id = id;
+    out.name = String(out.name || id).slice(0, 80);
+    out.launcher = String(out.launcher || '').slice(0, 80);
+    out.launcherType = String(out.launcherType || 'gtc').slice(0, 30);
+    out.launcherName = String(out.launcherName || out.launcher || 'LANZADOR').slice(0, 80);
+    out.targetName = String(out.targetName || out.tgt || 'BLANCO').slice(0, 80);
+    out.tgt = String(out.tgt || '').slice(0, 80);
+    ['x','y','tx','ty','alt','spd','drift','travKM','rangeKM','maxAltFt','courseDeg'].forEach(key=>{
+      if(Object.prototype.hasOwnProperty.call(out, key)){
+        const n = Number(out[key]);
+        out[key] = Number.isFinite(n) ? n : 0;
+      }
+    });
+    out.status = String(out.status || 'fly').slice(0, 20);
+    out.syncByRole = __SETCA_getSharedWriteRole() || 'odt';
+    out.syncAt = Date.now();
+    return out;
+  }
+
+  async function __SETCA_publishGtcMissileLaunch(missile){
+    try{
+      if(!__SETCA_canLaunchGtcMissile()) return false;
+      const role = __SETCA_getSharedWriteRole() || 'odt';
+      if(role !== 'odt' && role !== 'default') return false;
+      const clean = __SETCA_cleanGtcMissileForDirectSync(missile);
+      if(!clean || !clean.id) return false;
+      await runTransaction(stateRef, current=>{
+        const base = (current && typeof current === 'object') ? {...current} : {};
+        const missiles = Array.isArray(base.missiles) ? base.missiles.slice() : [];
+        const exists = missiles.some(m=>m && String(m.id || '') === clean.id);
+        if(!exists) missiles.push(clean);
+        base.missiles = missiles;
+        const stats = __normalizeMissileStats(base.missileStats || {});
+        if(!exists) stats.dart += 1;
+        base.missileStats = stats;
+        base.lastWriteBy = currentUID || 'pending';
+        base.lastWriteRole = role;
+        base.instructorAuthority = true;
+        base.lastUpdate = serverTimestamp();
+        return base;
+      });
+      return true;
+    }catch(e){
+      console.warn('SETCA GTC missile direct sync error:', e);
+      return false;
+    }
+  }
+
   try{ window.__SETCA_submitAircraftCommand = __SETCA_submitAircraftCommand; }catch(_){ }
   try{ window.__SETCA_submitGtcLaunchCommand = __SETCA_submitGtcLaunchCommand; }catch(_){ }
+  try{ window.__SETCA_publishGtcMissileLaunch = __SETCA_publishGtcMissileLaunch; }catch(_){ }
   try{ window.__SETCA_sanitizeAircraftPatch = __SETCA_sanitizeAircraftPatch; }catch(_){ }
 
   function __setcaMergePlanesByAuthority(currentPlanes, nextPlanes, writerRole){
@@ -577,6 +641,20 @@ document.getElementById('cancelDelete').onclick = ()=>{
     return merged;
   }
 
+  function __setcaMergeMissilesById(currentMissiles, payloadMissiles){
+    const out = Array.isArray(payloadMissiles) ? payloadMissiles.slice() : [];
+    const seen = new Set(out.map(m=>String(m && m.id || '')).filter(Boolean));
+    (Array.isArray(currentMissiles) ? currentMissiles : []).forEach(m=>{
+      const id = String(m && m.id || '');
+      if(!id || seen.has(id)) return;
+      if(m && (!m.status || String(m.status).toLowerCase() === 'fly')){
+        out.push(m);
+        seen.add(id);
+      }
+    });
+    return out;
+  }
+
   function __setcaMergeAuthoritativePayload(current, payload){
     if(!current || typeof current !== 'object') return payload;
     const role = String(payload && payload.lastWriteRole || '').toLowerCase();
@@ -590,6 +668,7 @@ document.getElementById('cancelDelete').onclick = ()=>{
         }
       : {...payload};
     out.planes = __setcaMergePlanesByAuthority(current.planes, payload.planes, payload.lastWriteRole);
+    out.missiles = __setcaMergeMissilesById(current.missiles, payload.missiles);
     return out;
   }
   try{ window.__SETCA_markAircraftDirty = __SETCA_markAircraftDirty; }catch(_){ }
@@ -19178,36 +19257,8 @@ function gtcLaunchMissile(u, opts={}){
       try{ logEvent(`LANZAMIENTO GTC bloqueado: solo ODT e INSTRUCTOR pueden disparar.`); }catch(_){ }
       return false;
     }
-    const shouldRouteToSyncOrder = !fromOrder && !!(
-      window.__SETCA_canSendGtcOrder &&
-      window.__SETCA_canSendGtcOrder() &&
-      window.__SETCA_submitGtcLaunchCommand
-    );
-    if(shouldRouteToSyncOrder){
-      if(!__gtcCanLaunch(u)){
-        try{ logEvent(`${(u.name||'RADAR')} es solo deteccion.`); }catch(_){ }
-        return false;
-      }
-      const requestedTarget = String(u.trackPlaneId || '').trim();
-      if(!requestedTarget){
-        try{ logEvent(`ODT: ${(u.name||'LANZADOR')} sin blanco seleccionado`); }catch(_){ }
-        return false;
-      }
-      const orderMissileId = 'gtcm_' + Date.now().toString(36) + '_' + Math.random().toString(36).slice(2,6);
-      const orderMissileName = (typeof gtcNextDartName === 'function') ? gtcNextDartName(u.missileCode || u.shortLabel || 'DART') : ('DART-' + Date.now().toString().slice(-6));
-      try{
-        window.__SETCA_submitGtcLaunchCommand({ launcherId:String(u.id || ''), targetId:requestedTarget, missileId:orderMissileId, missileName:orderMissileName })
-          .then(ok=>{
-            try{ logEvent(ok ? `ODT: lanzamiento sincronizado ${(u.name||'LANZADOR')} -> ${requestedTarget}` : `ODT: no se pudo sincronizar lanzamiento ${(u.name||'LANZADOR')}`); }catch(_){ }
-          })
-          .catch(()=>{ try{ logEvent(`ODT: error sincronizando lanzamiento ${(u.name||'LANZADOR')}`); }catch(_){ } });
-      }catch(_){ }
-      return true;
-    }
-    if(!fromOrder && accessRole === 'odt'){
-      try{ logEvent(`ODT: no hay canal de sincronización disponible para lanzar.`); }catch(_){ }
-      return false;
-    }
+    // ODT e Instructor ejecutan el lanzamiento local autorizado; luego se sincroniza el misil.
+    // No se aborta por distancia/altura antes del disparo: eso lo resuelve updateMissiles como SPLASH o FALLA/ERROR.
     if(!__gtcCanLaunch(u)){
       try{ logEvent(`${(u.name||'RADAR')} es solo detección.`); }catch(_){ }
       return false;
@@ -19261,6 +19312,18 @@ function gtcLaunchMissile(u, opts={}){
     try{ if(typeof __navRecordMissile === 'function') __navRecordMissile(__setcaLocalMissile, true); }catch(_){ }
     try{ if(document.getElementById('navReport') && document.getElementById('navReport').style.display==='block' && typeof renderNavReport === 'function') renderNavReport(false); }catch(_){ }
     try{ if(typeof __setcaMarkSyncStaged === 'function') __setcaMarkSyncStaged(__setcaLocalMissile, (__SETCA_SYNC_STAGING && __SETCA_SYNC_STAGING.missileAddMs) || 900); }catch(_){ }
+    try{
+      const syncRole = String(launchOpts.byRole || accessRole || '').toLowerCase();
+      if(!fromOrder && syncRole === 'odt' && window.__SETCA_publishGtcMissileLaunch){
+        window.__SETCA_publishGtcMissileLaunch(__setcaLocalMissile).then(ok=>{
+          if(!ok){ try{ logEvent(`ODT: lanzamiento creado localmente, pero no se pudo publicar a la sala.`); }catch(_){ } }
+        }).catch(()=>{ try{ logEvent(`ODT: error publicando lanzamiento a la sala.`); }catch(_){ } });
+      }else if(!fromOrder && syncRole === 'default' && window._SETCA_SYNC && typeof window._SETCA_SYNC.push === 'function'){
+        window._SETCA_SYNC.push();
+      }else if(fromOrder && window._SETCA_SYNC && typeof window._SETCA_SYNC.push === 'function'){
+        window._SETCA_SYNC.push();
+      }
+    }catch(_){ }
     try{ logEvent(`LANZAMIENTO: ${(u.name||u.label||'LANZADOR')} -> ${(T.name||pid)} (${name})`); }catch(_){ }
     return true;
   }catch(e){ return false; }
@@ -23524,5 +23587,30 @@ body.setca-observer-readonly-strict #unPair{
 })();
 </script>
 
+
+<script id="setca-odt-instructor-gtc-launch-authority-final-fix">
+(function(){
+  if(window.__SETCA_ODT_INSTRUCTOR_GTC_LAUNCH_AUTHORITY_FINAL_FIX__) return;
+  window.__SETCA_ODT_INSTRUCTOR_GTC_LAUNCH_AUTHORITY_FINAL_FIX__ = true;
+  function canLaunchRole(){
+    try{
+      const a = window.__setcaAccess || {};
+      if(a.planning || a.freeplay) return false;
+      const role = String(a.role || document.body.getAttribute('data-setca-role') || '').toLowerCase();
+      return role === 'odt' || role === 'default';
+    }catch(_){ return false; }
+  }
+  document.addEventListener('click', function(ev){
+    const btn = ev.target && ev.target.closest ? ev.target.closest('#pGTC .gtc-green-btn') : null;
+    if(!btn || !canLaunchRole()) return;
+    if(btn.classList.contains('radar')) return;
+    if(!btn.__setcaLaunchGuard){
+      btn.__setcaLaunchGuard = true;
+      setTimeout(()=>{ btn.__setcaLaunchGuard = false; }, 350);
+      return;
+    }
+  }, true);
+})();
+</script>
 </body>
 </html>
