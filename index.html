@@ -1,4 +1,4 @@
-ESTE SIMULADOR SE ENCUENTRA EN FASE DE PRUEBA - PUEDEN OCURRIR ERRORES DURANTE EL FUNCIONAMIENTO 2.5.2 040326
+ESTE SIMULADOR SE ENCUENTRA EN FASE DE PRUEBA - PUEDEN OCURRIR ERRORES DURANTE EL FUNCIONAMIENTO 2.7
 <!DOCTYPE html>
 <html lang="es">
 <head>
@@ -8068,7 +8068,11 @@ function updateMissiles(dt){
 
     const maxAlt = (m.maxAltFt!==undefined && isFinite(m.maxAltFt) && +m.maxAltFt>0) ? (+m.maxAltFt) : Infinity;
     const tgtAltNow = hasLiveTarget ? __entityAltFt(TRef) : Number.isFinite(+m.alt) ? +m.alt : 0;
-    if(hasLiveTarget && isFinite(tgtAltNow) && isFinite(maxAlt) && maxAlt<Infinity && tgtAltNow > maxAlt){ m.status='alt'; return; }
+    if(hasLiveTarget && isFinite(tgtAltNow) && isFinite(maxAlt) && maxAlt<Infinity && tgtAltNow > maxAlt){
+      try{ logEvent(`FALLA/ERROR: ${(m.name||'MISIL')} no alcanzó a ${__entityName(TRef, m.targetName || m.tgt)} (fuera de altura)`); }catch(_){ }
+      m.status='alt';
+      return;
+    }
 
     if(hasLiveTarget && TRef && TRef.kind === 'plane' && T.jamming && Math.random()<0.25*dt){m.drift+=(Math.random()-0.5)*10;}
 
@@ -8092,7 +8096,11 @@ function updateMissiles(dt){
 
     const nmps=(m.spd/NM2KM)/3600; const step=nmps*dt;
     m.travKM+=step*NM2KM;
-    if(m.travKM>=m.rangeKM){m.status='oor';return;}
+    if(m.travKM>=m.rangeKM){
+      try{ logEvent(`FALLA/ERROR: ${(m.name||'MISIL')} no alcanzó a ${(m.targetName || (TRef ? __entityName(TRef, m.tgt) : m.tgt) || 'BLANCO')} (fuera de alcance)`); }catch(_){ }
+      m.status='oor';
+      return;
+    }
 
     const distNM=Math.hypot(dx,dy);
     if(hasLiveTarget && distNM<1.0){
@@ -19186,15 +19194,9 @@ function gtcLaunchMissile(u){
     const dx = (+T.x||0) - (+u.x||0);
     const dy = (+T.y||0) - (+u.y||0);
     const dNm = Math.hypot(dx, dy);
-    if(dNm > maxRNm){
-      try{ logEvent(`LANZAMIENTO: ${(u.name||'LANZADOR')} -> ${(T.name||pid)} ABORTADO (fuera de alcance)`); }catch(_){ }
-      return;
-    }
     const tAlt = +T.alt;
-    if(isFinite(tAlt) && tAlt > maxHFt){
-      try{ logEvent(`LANZAMIENTO: ${(u.name||'LANZADOR')} -> ${(T.name||pid)} ABORTADO (fuera de altura)`); }catch(_){ }
-      return;
-    }
+    // Instructor/ODT: se permite el lanzamiento aunque el blanco esté fuera del sobre.
+    // Si el misil no llega por alcance/altura, updateMissiles lo registra como FALLA/ERROR.
     st.missiles = Array.isArray(st.missiles) ? st.missiles : [];
     st.missileStats = __normalizeMissileStats(st.missileStats);
     st.missileStats.dart += 1;
@@ -22511,6 +22513,641 @@ body[data-setca-role="odt"] #pGTC.setca-odt-gtc-open #pGTCBody{
   overflow:auto !important;
 }
 </style>
+
+<style id="setca-gtc-modern-compact-final">
+#pGTC{
+  background:linear-gradient(180deg, rgba(7,12,18,.98), rgba(2,7,10,.96)) !important;
+  border:1px solid rgba(82,203,255,.22) !important;
+  border-radius:9px !important;
+  box-shadow:0 12px 28px rgba(0,0,0,.42), inset 0 1px 0 rgba(255,255,255,.035) !important;
+  color:#dff7ff !important;
+}
+#pGTC .panel-header{
+  min-height:28px !important;
+  padding:4px 7px !important;
+  gap:6px !important;
+  border-bottom:1px solid rgba(82,203,255,.16) !important;
+  background:linear-gradient(180deg, rgba(11,23,31,.96), rgba(6,13,18,.92)) !important;
+}
+#pGTC .panel-header h3{
+  margin:0 !important;
+  color:#c9f4ff !important;
+  font:800 10px/1.1 ui-monospace,SFMono-Regular,Consolas,monospace !important;
+  letter-spacing:.12em !important;
+  text-transform:uppercase !important;
+}
+#pGTC .panel-header .toggle{
+  width:22px !important;
+  height:22px !important;
+  min-width:22px !important;
+  padding:0 !important;
+  display:grid !important;
+  place-items:center !important;
+  border-radius:6px !important;
+  border:1px solid rgba(82,203,255,.24) !important;
+  background:rgba(8,20,28,.92) !important;
+  color:#75e6ff !important;
+  line-height:1 !important;
+}
+#pGTCBody{
+  gap:5px !important;
+  padding:7px !important;
+  background:linear-gradient(180deg, rgba(5,12,17,.78), rgba(3,8,12,.70)) !important;
+  font-family:ui-monospace,SFMono-Regular,Consolas,monospace !important;
+}
+#pGTCBody .gtc-toolbar{
+  display:grid !important;
+  grid-template-columns:minmax(0,1fr) auto !important;
+  align-items:start !important;
+  gap:6px !important;
+}
+#pGTCBody .gtcPresetStack{
+  display:grid !important;
+  gap:4px !important;
+  min-width:0 !important;
+}
+#pGTCBody .gtcPresetRow{
+  display:grid !important;
+  grid-template-columns:34px minmax(0,1fr) !important;
+  align-items:center !important;
+  gap:4px !important;
+}
+#pGTCBody .gtcPresetLbl{
+  color:#8fb2bf !important;
+  font-size:8px !important;
+  font-weight:800 !important;
+  letter-spacing:.08em !important;
+  text-transform:uppercase !important;
+}
+#pGTCBody .gtcPresetBtns{
+  display:flex !important;
+  flex-wrap:wrap !important;
+  gap:3px !important;
+  min-width:0 !important;
+}
+#pGTCBody .gtcPresetBtn.btn.mini,
+#gtcAssetListBtn{
+  min-height:22px !important;
+  height:22px !important;
+  padding:0 7px !important;
+  border-radius:6px !important;
+  border:1px solid rgba(82,203,255,.20) !important;
+  background:linear-gradient(180deg, rgba(17,37,47,.94), rgba(8,19,27,.94)) !important;
+  color:#dff7ff !important;
+  box-shadow:inset 0 1px 0 rgba(255,255,255,.05) !important;
+  font:800 9px/1 ui-monospace,SFMono-Regular,Consolas,monospace !important;
+  letter-spacing:.04em !important;
+  text-transform:uppercase !important;
+}
+#pGTCBody .gtcPresetBtn.btn.mini:hover,
+#gtcAssetListBtn:hover{
+  border-color:rgba(112,231,255,.55) !important;
+  background:linear-gradient(180deg, rgba(20,51,64,.98), rgba(9,26,37,.98)) !important;
+}
+#pGTCBody .gtcPresetBtn.btn.mini:disabled,
+#gtcAssetListBtn:disabled{
+  opacity:.42 !important;
+  cursor:not-allowed !important;
+  filter:saturate(.45) !important;
+}
+#pGTCBody .gtcPresetBtn.active{
+  border-color:rgba(51,255,145,.70) !important;
+  background:linear-gradient(180deg, rgba(18,92,47,.98), rgba(8,55,30,.98)) !important;
+  color:#eafff1 !important;
+  box-shadow:0 0 0 1px rgba(51,255,145,.16), 0 0 12px rgba(51,255,145,.18) !important;
+}
+#pGTCBody .gtcPresetBtn.gtcPresetBtn-missile{
+  border-color:rgba(255,167,64,.24) !important;
+  background:linear-gradient(180deg, rgba(54,35,16,.96), rgba(30,21,13,.96)) !important;
+  color:#ffe4bc !important;
+}
+#pGTCBody .gtcPresetBtn.gtcPresetBtn-missile.active{
+  border-color:rgba(255,96,96,.72) !important;
+  background:linear-gradient(180deg, rgba(118,33,33,.98), rgba(65,18,18,.98)) !important;
+  color:#fff3f3 !important;
+  box-shadow:0 0 0 1px rgba(255,96,96,.14), 0 0 13px rgba(255,96,96,.20) !important;
+}
+#pGTCBody .gtc-toolbar-side{
+  min-width:0 !important;
+  display:flex !important;
+  align-items:center !important;
+  justify-content:flex-end !important;
+  gap:4px !important;
+  padding-top:0 !important;
+}
+#gtcAssetListBtn{
+  width:auto !important;
+  min-width:92px !important;
+  padding:0 9px !important;
+}
+#gtcAssetListBtn.active{
+  border-color:rgba(51,255,145,.58) !important;
+  color:#dfffea !important;
+  background:linear-gradient(180deg, rgba(17,80,48,.96), rgba(9,43,29,.96)) !important;
+}
+#pGTCBody #gtcCount.pill,
+#pGTCBody #gtcModeChip{
+  min-height:20px !important;
+  padding:2px 6px !important;
+  border-radius:6px !important;
+  border:1px solid rgba(82,203,255,.18) !important;
+  background:rgba(2,9,14,.70) !important;
+  color:#9fdff0 !important;
+  font:800 9px/1.15 ui-monospace,SFMono-Regular,Consolas,monospace !important;
+}
+#pGTCBody #gtcModeChip{
+  max-width:118px !important;
+  text-align:right !important;
+}
+#pGTCBody .gtc-list{
+  display:none !important;
+  margin-top:4px !important;
+  min-height:28px !important;
+  max-height:34vh !important;
+}
+#pGTCBody #gtcList.gtc-list.gtcAssetSideOpen{
+  display:block !important;
+  position:fixed !important;
+  left:calc(var(--setca-center-left, 8px) + 12px) !important;
+  top:calc(var(--setca-header-h, 78px) + 10px) !important;
+  bottom:12px !important;
+  width:min(620px, calc(100vw - 28px)) !important;
+  max-width:calc(100vw - 28px) !important;
+  max-height:calc(100vh - var(--setca-header-h, 78px) - 22px) !important;
+  margin:0 !important;
+  padding:36px 8px 8px !important;
+  overflow-y:auto !important;
+  overflow-x:hidden !important;
+  z-index:10090 !important;
+  border:1px solid rgba(82,203,255,.26) !important;
+  border-radius:10px !important;
+  background:
+    linear-gradient(180deg, rgba(9,18,26,.97), rgba(3,9,14,.96)),
+    repeating-linear-gradient(90deg, rgba(82,203,255,.035) 0, rgba(82,203,255,.035) 1px, transparent 1px, transparent 32px) !important;
+  box-shadow:0 20px 52px rgba(0,0,0,.56), inset 0 1px 0 rgba(255,255,255,.04) !important;
+  backdrop-filter:blur(10px) !important;
+  -webkit-backdrop-filter:blur(10px) !important;
+}
+#pGTCBody #gtcList.gtcAssetSideOpen::before{
+  content:'GROUND ASSET / GTC' !important;
+  position:absolute !important;
+  left:10px !important;
+  top:8px !important;
+  right:42px !important;
+  height:20px !important;
+  display:flex !important;
+  align-items:center !important;
+  color:#c9f4ff !important;
+  font:900 10px/1 ui-monospace,SFMono-Regular,Consolas,monospace !important;
+  letter-spacing:.14em !important;
+  text-transform:uppercase !important;
+}
+#pGTCBody #gtcList.gtcAssetSideOpen::after{
+  content:'X' !important;
+  position:absolute !important;
+  right:8px !important;
+  top:6px !important;
+  width:22px !important;
+  height:22px !important;
+  border-radius:6px !important;
+  border:1px solid rgba(82,203,255,.25) !important;
+  color:#75e6ff !important;
+  background:rgba(2,9,14,.72) !important;
+  display:grid !important;
+  place-items:center !important;
+  font:900 11px/1 ui-monospace,SFMono-Regular,Consolas,monospace !important;
+  pointer-events:none !important;
+  opacity:.88 !important;
+}
+#pGTCBody #gtcList.gtcAssetSideOpen .gtc-empty{
+  padding:8px !important;
+  border:1px dashed rgba(82,203,255,.22) !important;
+  border-radius:8px !important;
+  background:rgba(2,9,14,.48) !important;
+  color:#93bdc9 !important;
+  font-size:10px !important;
+  text-align:center !important;
+}
+#pGTCBody .gtc-row,
+#pGTCBody #gtcList.gtcAssetSideOpen .gtc-row{
+  display:grid !important;
+  grid-template-columns:minmax(180px,1.15fr) minmax(126px,.72fr) max-content !important;
+  align-items:center !important;
+  gap:5px !important;
+  min-height:34px !important;
+  margin:0 0 4px !important;
+  padding:4px 5px !important;
+  border:1px solid rgba(82,203,255,.13) !important;
+  border-radius:7px !important;
+  background:linear-gradient(180deg, rgba(12,26,34,.82), rgba(5,14,20,.78)) !important;
+  box-shadow:inset 0 1px 0 rgba(255,255,255,.025) !important;
+}
+#pGTCBody .gtc-row:hover,
+#pGTCBody #gtcList.gtcAssetSideOpen .gtc-row:hover{
+  border-color:rgba(112,231,255,.36) !important;
+  background:linear-gradient(180deg, rgba(15,36,47,.92), rgba(6,19,27,.88)) !important;
+}
+#pGTCBody .gtc-row.open,
+#pGTCBody #gtcList.gtcAssetSideOpen .gtc-row.open{
+  border-color:rgba(51,255,145,.34) !important;
+  background:linear-gradient(180deg, rgba(12,42,31,.92), rgba(5,22,18,.88)) !important;
+}
+#pGTCBody .gtc-nameWrap{
+  display:grid !important;
+  grid-template-columns:auto minmax(0,1fr) !important;
+  grid-template-areas:"badge name" "badge group" !important;
+  align-items:center !important;
+  column-gap:5px !important;
+  row-gap:1px !important;
+  min-width:0 !important;
+}
+#pGTCBody .gtc-planeWrap{
+  min-width:0 !important;
+}
+#pGTCBody .gtcTypeBadge{
+  grid-area:badge !important;
+  align-self:center !important;
+  min-width:34px !important;
+  justify-content:center !important;
+  padding:2px 4px !important;
+  border-radius:5px !important;
+  border:1px solid rgba(82,203,255,.36) !important;
+  background:rgba(8,36,48,.78) !important;
+  color:#9eeaff !important;
+  font:900 8px/1 ui-monospace,SFMono-Regular,Consolas,monospace !important;
+  letter-spacing:.06em !important;
+  text-transform:uppercase !important;
+}
+#pGTCBody .gtcTypeBadge.launcher{
+  border-color:rgba(255,96,96,.44) !important;
+  background:rgba(70,18,18,.82) !important;
+  color:#ffd2d2 !important;
+}
+#pGTCBody .gtcNameInput,
+#pGTCBody .gtcGroupInput,
+#pGTCBody .gtcPlaneSel,
+#pGTCBody .gtcTargetHint{
+  width:100% !important;
+  min-width:0 !important;
+  margin:0 !important;
+  border-radius:4px !important;
+  border:1px solid transparent !important;
+  background:transparent !important;
+  box-shadow:none !important;
+  outline:none !important;
+  color:#e8fbff !important;
+  font-family:ui-monospace,SFMono-Regular,Consolas,monospace !important;
+}
+#pGTCBody .gtcNameInput{
+  grid-area:name !important;
+  height:17px !important;
+  padding:0 3px !important;
+  font-size:10px !important;
+  font-weight:900 !important;
+  line-height:1 !important;
+  letter-spacing:.02em !important;
+  text-transform:uppercase !important;
+}
+#pGTCBody .gtcGroupInput{
+  grid-area:group !important;
+  height:14px !important;
+  padding:0 3px !important;
+  color:#8fb2bf !important;
+  font-size:8px !important;
+  line-height:1 !important;
+  letter-spacing:.05em !important;
+  text-transform:uppercase !important;
+}
+#pGTCBody .gtcPlaneSel,
+#pGTCBody .gtcTargetHint{
+  height:22px !important;
+  padding:0 6px !important;
+  border-color:rgba(82,203,255,.14) !important;
+  background:rgba(2,9,14,.48) !important;
+  color:#cdf6ff !important;
+  font-size:9px !important;
+  font-weight:800 !important;
+  text-align:center !important;
+  text-align-last:center !important;
+}
+#pGTCBody .gtcTargetHint{
+  display:flex !important;
+  align-items:center !important;
+  justify-content:center !important;
+  color:#89dfff !important;
+  letter-spacing:.08em !important;
+  text-transform:uppercase !important;
+}
+#pGTCBody .gtcNameInput:focus,
+#pGTCBody .gtcGroupInput:focus,
+#pGTCBody .gtcPlaneSel:focus{
+  border-color:rgba(112,231,255,.42) !important;
+  background:rgba(7,22,30,.82) !important;
+}
+#pGTCBody .gtcPlaneSel option{
+  background:#071018 !important;
+  color:#e8fbff !important;
+}
+#pGTCBody .gtcActions{
+  display:flex !important;
+  align-items:center !important;
+  justify-content:flex-end !important;
+  gap:3px !important;
+  min-width:0 !important;
+  flex-wrap:nowrap !important;
+}
+#pGTCBody .gtcActionBtn,
+#pGTCBody .gtc-green-btn,
+#pGTCBody .gtc-center-dot{
+  width:22px !important;
+  height:22px !important;
+  min-width:22px !important;
+  padding:0 !important;
+  border-radius:5px !important;
+  display:inline-grid !important;
+  place-items:center !important;
+  font:900 10px/1 ui-monospace,SFMono-Regular,Consolas,monospace !important;
+  letter-spacing:0 !important;
+  transition:filter .12s ease, transform .08s ease, border-color .12s ease, background .12s ease !important;
+}
+#pGTCBody .gtcActionBtn{
+  border:1px solid rgba(82,203,255,.22) !important;
+  background:linear-gradient(180deg, rgba(18,38,50,.94), rgba(8,19,27,.94)) !important;
+  color:#dff7ff !important;
+}
+#pGTCBody .gtc-center-dot{
+  border:1px solid rgba(180,202,211,.34) !important;
+  background:linear-gradient(180deg, rgba(180,202,211,.92), rgba(92,114,124,.88)) !important;
+  color:#041017 !important;
+}
+#pGTCBody .gtc-green-btn{
+  border:1px solid rgba(51,255,145,.46) !important;
+  background:linear-gradient(180deg, #35f07c, #109c4b) !important;
+  color:#03170a !important;
+  box-shadow:0 0 10px rgba(51,255,145,.24) !important;
+}
+#pGTCBody .gtc-green-btn.radar{
+  border-color:rgba(82,203,255,.44) !important;
+  background:linear-gradient(180deg, #2f9df0, #17528d) !important;
+  color:#eefbff !important;
+  box-shadow:0 0 10px rgba(82,203,255,.20) !important;
+}
+#pGTCBody .gtc-green-btn.alert{
+  border-color:rgba(255,96,96,.72) !important;
+  background:linear-gradient(180deg, #ff5757, #b51f1f) !important;
+  color:#fffafa !important;
+  box-shadow:0 0 12px rgba(255,96,96,.30) !important;
+}
+#pGTCBody .gtcActionBtn:hover,
+#pGTCBody .gtc-green-btn:hover,
+#pGTCBody .gtc-center-dot:hover{
+  filter:brightness(1.14) !important;
+}
+#pGTCBody .gtcActionBtn:active,
+#pGTCBody .gtc-green-btn:active,
+#pGTCBody .gtc-center-dot:active{
+  transform:scale(.94) !important;
+}
+#pGTCBody .gtcActionBtn:disabled,
+#pGTCBody .gtc-green-btn:disabled,
+#pGTCBody .gtc-center-dot:disabled{
+  opacity:.42 !important;
+  filter:saturate(.35) !important;
+  cursor:not-allowed !important;
+}
+#pGTCBody .gtc-cfg-panel,
+#pGTCBody #gtcList.gtcAssetSideOpen .gtc-cfg-panel{
+  margin:-1px 0 5px !important;
+  padding:0 5px 5px !important;
+  border:0 !important;
+}
+#pGTCBody .gtc-cfg,
+#pGTCBody #gtcList.gtcAssetSideOpen .gtc-cfg{
+  margin:0 !important;
+  padding:6px !important;
+  border:1px solid rgba(82,203,255,.16) !important;
+  border-radius:7px !important;
+  background:linear-gradient(180deg, rgba(3,13,18,.88), rgba(2,8,12,.84)) !important;
+}
+#pGTCBody .gtc-cfg-grid,
+#pGTCBody #gtcList.gtcAssetSideOpen .gtc-cfg-grid{
+  display:grid !important;
+  grid-template-columns:repeat(3, minmax(118px,1fr)) !important;
+  gap:5px !important;
+}
+#pGTCBody .gtc-cfg-block{
+  gap:3px !important;
+  min-width:0 !important;
+  padding:5px !important;
+  border:1px solid rgba(82,203,255,.10) !important;
+  border-radius:6px !important;
+  background:rgba(8,20,28,.54) !important;
+}
+#pGTCBody .gtc-cfg-head{
+  gap:4px !important;
+  min-width:0 !important;
+}
+#pGTCBody .gtc-cfg-head .mini,
+#pGTCBody .gtc-cfg-foot .mini{
+  color:#91b7c2 !important;
+  font-size:8px !important;
+  font-weight:800 !important;
+  text-transform:uppercase !important;
+}
+#pGTCBody .gtc-cfg-head input[type="number"]{
+  width:56px !important;
+  height:19px !important;
+  padding:0 4px !important;
+  border-radius:5px !important;
+  border:1px solid rgba(82,203,255,.18) !important;
+  background:rgba(2,9,14,.66) !important;
+  color:#dff7ff !important;
+  font-size:9px !important;
+}
+#pGTCBody .gtc-cfg input[type="range"]{
+  height:12px !important;
+  margin:0 !important;
+}
+#pGTCBody .gtc-cfg-foot{
+  margin-top:5px !important;
+  gap:5px !important;
+}
+body.mode-odt-overlay #pGTC:not(.setca-odt-gtc-open),
+body[data-setca-role="odt"] #pGTC:not(.setca-odt-gtc-open){
+  width:clamp(230px, calc(var(--setca-center-w, 100vw) * .24), 320px) !important;
+}
+body.mode-odt-overlay #pGTC.setca-odt-gtc-open,
+body[data-setca-role="odt"] #pGTC.setca-odt-gtc-open{
+  width:min(560px, calc(100vw - 24px)) !important;
+  height:auto !important;
+  min-height:0 !important;
+  max-height:calc(100vh - var(--setca-header-h, 78px) - 22px) !important;
+}
+body.mode-odt-overlay #pGTC.setca-odt-gtc-open #pGTCBody,
+body[data-setca-role="odt"] #pGTC.setca-odt-gtc-open #pGTCBody{
+  max-height:calc(100vh - var(--setca-header-h, 78px) - 58px) !important;
+  overflow:auto !important;
+}
+@media (max-width: 760px){
+  #pGTCBody .gtc-toolbar{
+    grid-template-columns:1fr !important;
+  }
+  #pGTCBody .gtc-toolbar-side{
+    justify-content:flex-start !important;
+    flex-wrap:wrap !important;
+  }
+  #pGTCBody #gtcModeChip{
+    max-width:none !important;
+    text-align:left !important;
+  }
+  #pGTCBody #gtcList.gtc-list.gtcAssetSideOpen{
+    left:8px !important;
+    right:8px !important;
+    top:calc(var(--setca-header-h, 64px) + 8px) !important;
+    bottom:8px !important;
+    width:auto !important;
+    max-width:none !important;
+  }
+  #pGTCBody .gtc-row,
+  #pGTCBody #gtcList.gtcAssetSideOpen .gtc-row{
+    grid-template-columns:minmax(0,1fr) max-content !important;
+  }
+  #pGTCBody .gtc-planeWrap{
+    grid-column:1 / -1 !important;
+  }
+  #pGTCBody .gtc-cfg-grid,
+  #pGTCBody #gtcList.gtcAssetSideOpen .gtc-cfg-grid{
+    grid-template-columns:1fr !important;
+  }
+}
+</style>
+
+<style id="setca-odt-gtc-instructor-replica-final">
+body:is(.mode-odt-overlay, [data-setca-role="odt"]) #pGTC,
+body:is(.mode-odt-overlay, [data-setca-role="odt"]) #pGTC:not(.setca-odt-gtc-open),
+body:is(.mode-odt-overlay, [data-setca-role="odt"]) #pGTC.setca-odt-gtc-open{
+  display:flex !important;
+  position:fixed !important;
+  left:calc(var(--setca-center-left, 8px) + 16px) !important;
+  right:auto !important;
+  top:calc(var(--setca-center-top, var(--setca-header-h, 78px)) + 16px) !important;
+  bottom:auto !important;
+  width:360px !important;
+  max-width:calc(var(--setca-center-w, 100vw) - 32px) !important;
+  height:auto !important;
+  min-height:0 !important;
+  max-height:calc(var(--setca-center-h, 100vh) - 32px) !important;
+  overflow:visible !important;
+}
+body:is(.mode-odt-overlay, [data-setca-role="odt"]) #pGTCBody{
+  height:auto !important;
+  max-height:calc(var(--setca-center-h, 100vh) - 84px) !important;
+  padding:7px !important;
+  overflow:auto !important;
+}
+body:is(.mode-odt-overlay, [data-setca-role="odt"]) #pGTCBody .gtc-toolbar{
+  display:grid !important;
+  grid-template-columns:minmax(0,1fr) auto !important;
+  align-items:start !important;
+  gap:6px !important;
+}
+body:is(.mode-odt-overlay, [data-setca-role="odt"]) #pGTCBody .gtcPresetBtns{
+  display:flex !important;
+  flex-wrap:wrap !important;
+  gap:3px !important;
+}
+body:is(.mode-odt-overlay, [data-setca-role="odt"]) #pGTCBody .gtcPresetBtn.btn.mini,
+body:is(.mode-odt-overlay, [data-setca-role="odt"]) #gtcAssetListBtn{
+  min-height:22px !important;
+  height:22px !important;
+  padding:0 7px !important;
+  white-space:nowrap !important;
+}
+body:is(.mode-odt-overlay, [data-setca-role="odt"]) #pGTCBody #gtcList.gtc-list.gtcAssetSideOpen{
+  left:calc(var(--setca-center-left, 8px) + 16px) !important;
+  right:auto !important;
+  top:calc(var(--setca-center-top, var(--setca-header-h, 78px)) + 16px) !important;
+  bottom:auto !important;
+  width:min(620px, calc(var(--setca-center-w, 100vw) - 32px)) !important;
+  max-width:calc(var(--setca-center-w, 100vw) - 32px) !important;
+  max-height:calc(var(--setca-center-h, 100vh) - 32px) !important;
+  padding:36px 8px 8px !important;
+  border-radius:10px !important;
+}
+body:is(.mode-odt-overlay, [data-setca-role="odt"]) #pGTCBody #gtcList.gtcAssetSideOpen .gtc-row{
+  grid-template-columns:minmax(180px,1.15fr) minmax(126px,.72fr) max-content !important;
+  min-height:34px !important;
+  gap:5px !important;
+  padding:4px 5px !important;
+  margin:0 0 4px !important;
+  border-radius:7px !important;
+}
+body:is(.mode-odt-overlay, [data-setca-role="odt"]) #pGTCBody #gtcList.gtcAssetSideOpen .gtc-cfg-grid{
+  grid-template-columns:repeat(3, minmax(118px,1fr)) !important;
+  gap:5px !important;
+}
+@media (max-width: 760px){
+  body:is(.mode-odt-overlay, [data-setca-role="odt"]) #pGTC,
+  body:is(.mode-odt-overlay, [data-setca-role="odt"]) #pGTC:not(.setca-odt-gtc-open),
+  body:is(.mode-odt-overlay, [data-setca-role="odt"]) #pGTC.setca-odt-gtc-open{
+    left:8px !important;
+    right:8px !important;
+    top:calc(var(--setca-center-top, var(--setca-header-h, 64px)) + 8px) !important;
+    bottom:auto !important;
+    width:auto !important;
+    max-width:none !important;
+  }
+  body:is(.mode-odt-overlay, [data-setca-role="odt"]) #pGTCBody #gtcList.gtc-list.gtcAssetSideOpen{
+    left:8px !important;
+    right:8px !important;
+    top:calc(var(--setca-center-top, var(--setca-header-h, 64px)) + 8px) !important;
+    bottom:auto !important;
+    width:auto !important;
+    max-width:none !important;
+  }
+}
+body:is(.mode-odt-overlay, [data-setca-role="odt"]) #pNav{
+  display:none !important;
+}
+</style>
+
+<script id="setca-odt-gtc-instructor-replica-final">
+(function(){
+  if(window.__SETCA_ODT_GTC_INSTRUCTOR_REPLICA_FINAL__) return;
+  window.__SETCA_ODT_GTC_INSTRUCTOR_REPLICA_FINAL__ = true;
+  function isOdt(){
+    try{
+      const a = window.__setcaAccess || {};
+      const role = String((a && a.role) || document.body.getAttribute('data-setca-role') || '').toLowerCase();
+      if(a && (a.planning || a.freeplay)) return false;
+      return role === 'odt' || document.body.classList.contains('mode-odt-overlay');
+    }catch(_){
+      return false;
+    }
+  }
+  function syncOdtGtcReplica(){
+    if(!isOdt()) return;
+    try{
+      const panel = document.getElementById('pGTC');
+      const body = document.getElementById('pGTCBody');
+      const toggle = panel ? panel.querySelector('.toggle[data-target="#pGTCBody"]') : null;
+      if(!panel) return;
+      panel.style.display = '';
+      panel.style.overflow = 'visible';
+      if(!panel.dataset.setcaOdtReplicaInit){
+        panel.classList.add('setca-odt-gtc-open');
+        if(body && body.style.display === 'none') body.style.display = '';
+        if(toggle) toggle.textContent = '▾';
+        panel.dataset.setcaOdtReplicaInit = '1';
+      }
+    }catch(_){ }
+  }
+  setInterval(syncOdtGtcReplica, 650);
+  setTimeout(syncOdtGtcReplica, 0);
+  setTimeout(syncOdtGtcReplica, 250);
+  window.addEventListener('resize', syncOdtGtcReplica, {passive:true});
+})();
+</script>
 
 <script id="setca-odi-instructor-pairing-final">
 (function(){
