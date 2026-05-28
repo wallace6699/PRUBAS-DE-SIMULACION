@@ -445,22 +445,29 @@ document.getElementById('cancelDelete').onclick = ()=>{
   }
   function __SETCA_applyGtcLaunchOrder(order){
     try{
-      if(!__SETCA_isInstructorAuthority()) return false;
       if(!order || typeof order !== 'object') return false;
+      const byRole = String(order.byRole || '').toLowerCase();
+      // Solo ODT e INSTRUCTOR pueden originar lanzamientos GTC sincronizados.
+      if(byRole !== 'odt' && byRole !== 'default') return false;
       const launcherId = String(order.launcherId || '').trim();
       const targetId = String(order.targetId || '').trim();
       if(!launcherId || !targetId || !window.st || !Array.isArray(window.st.gtc)) return false;
       const launcher = window.st.gtc.find(u=>u && String(u.id || '') === launcherId);
       if(!launcher) return false;
       launcher.trackPlaneId = targetId;
+      const opts = {
+        fromOrder:true,
+        orderId:String(order.id || ''),
+        missileId:String(order.missileId || ''),
+        missileName:String(order.missileName || ''),
+        byRole:byRole || 'odt'
+      };
       if(typeof window.gtcLaunchMissile === 'function'){
-        window.gtcLaunchMissile(launcher);
+        return !!window.gtcLaunchMissile(launcher, opts);
       }else if(typeof gtcLaunchMissile === 'function'){
-        gtcLaunchMissile(launcher);
-      }else{
-        return false;
+        return !!gtcLaunchMissile(launcher, opts);
       }
-      return true;
+      return false;
     }catch(e){
       console.warn('SETCA GTC launch order apply error:', e);
       return false;
@@ -507,17 +514,24 @@ document.getElementById('cancelDelete').onclick = ()=>{
       const launcherId = String(cmd && cmd.launcherId || '').trim();
       const targetId = String(cmd && cmd.targetId || '').trim();
       if(!launcherId || !targetId) return false;
-      const id = `${Date.now()}_${Math.random().toString(36).slice(2, 9)}`;
+      const now = Date.now();
+      const id = `${now}_${Math.random().toString(36).slice(2, 9)}`;
+      const missileId = String(cmd && cmd.missileId || `gtcm_${id}`);
+      const missileName = String(cmd && cmd.missileName || 'DART-' + String(now).slice(-6));
       await set(ref(db, `rooms/${ROOM_ID}/orders/${id}`), {
         id,
         kind:'gtc-launch',
         launcherId,
         targetId,
+        missileId,
+        missileName,
         by:currentUID || 'pending',
-        byRole:__SETCA_getSharedWriteRole() || 'odt',
-        tsClient:Date.now(),
+        byRole:'odt',
+        tsClient:now,
+        expiresAt:now + 30000,
         serverAt:serverTimestamp()
       });
+      try{ setTimeout(()=>set(ref(db, `rooms/${ROOM_ID}/orders/${id}`), null), 45000); }catch(_){ }
       return true;
     }catch(e){
       console.warn('SETCA GTC launch submit error:', e);
@@ -976,7 +990,7 @@ let __setcaLastAppliedRemoteTs = 0;
 
   const __setcaProcessedOrderIds = new Set();
   function __SETCA_processAircraftOrders(raw){
-    if(__localOnlyMode || !__SETCA_isInstructorAuthority()) return false;
+    if(__localOnlyMode) return false;
     if(!window.st || !Array.isArray(window.st.planes)){
       setTimeout(()=>__SETCA_processAircraftOrders(raw), 250);
       return false;
@@ -988,10 +1002,20 @@ let __setcaLastAppliedRemoteTs = 0;
     let changed = false;
     rows.forEach(row=>{
       const orderId = String(row.value.id || row.key);
+      const kind = String(row.value.kind || 'aircraft-command').toLowerCase();
+      const isGtcLaunch = kind === 'gtc-launch';
+      const isInstructor = __SETCA_isInstructorAuthority();
+      const expiresAt = Number(row.value.expiresAt || 0);
+      if(expiresAt && expiresAt < Date.now()){
+        if(isInstructor) try{ set(ref(db, `rooms/${ROOM_ID}/orders/${row.key}`), null); }catch(_){ }
+        return;
+      }
+      // Comandos de avión solo los aplica el Instructor. Lanzamientos GTC los aplican todos para que sean visibles y sincronizados.
+      if(!isGtcLaunch && !isInstructor) return;
       if(__setcaProcessedOrderIds.has(orderId)) return;
       __setcaProcessedOrderIds.add(orderId);
       if(__SETCA_applyIncomingOrder(row.value)) changed = true;
-      try{ set(ref(db, `rooms/${ROOM_ID}/orders/${row.key}`), null); }catch(_){ }
+      if(isInstructor) try{ set(ref(db, `rooms/${ROOM_ID}/orders/${row.key}`), null); }catch(_){ }
     });
     if(changed){
       try{ repaintPlanesList && repaintPlanesList(); }catch(_){ }
@@ -1000,14 +1024,14 @@ let __setcaLastAppliedRemoteTs = 0;
       try{ repaintVuelos && repaintVuelos(); }catch(_){ }
       try{ repaintGTC && repaintGTC(); }catch(_){ }
       try{ paintAlerts && paintAlerts(); }catch(_){ }
-      try{ if(window._SETCA_SYNC && typeof window._SETCA_SYNC.push === 'function') window._SETCA_SYNC.push(); }catch(_){ }
+      try{ if(__SETCA_isInstructorAuthority() && window._SETCA_SYNC && typeof window._SETCA_SYNC.push === 'function') window._SETCA_SYNC.push(); }catch(_){ }
     }
     return changed;
   }
 
   let __setcaOrdersUnsub = null;
   function __SETCA_startAircraftOrderListener(){
-    if(__localOnlyMode || !__SETCA_isInstructorAuthority()) return false;
+    if(__localOnlyMode) return false;
     if(__setcaOrdersUnsub) return true;
     __setcaOrdersUnsub = onValue(ordersRef, (snap) => {
       const v = snap.val();
@@ -19143,65 +19167,76 @@ function gtcNextDartName(prefix='DART'){
   return `${String(prefix||'DART').toUpperCase()}-${++gtcMissileSeq}`;
 }
 
-function gtcLaunchMissile(u){
+function gtcLaunchMissile(u, opts={}){
   try{
-    if(!u || !u.id) return;
-    const shouldRouteToInstructor = !!(
+    if(!u || !u.id) return false;
+    const launchOpts = (opts && typeof opts === 'object') ? opts : {};
+    const fromOrder = !!launchOpts.fromOrder;
+    const accessRole = String(((window.__setcaAccess||{}).role)||'').toLowerCase();
+    const userCanLaunch = accessRole === 'default' || accessRole === 'odt';
+    if(!fromOrder && !userCanLaunch){
+      try{ logEvent(`LANZAMIENTO GTC bloqueado: solo ODT e INSTRUCTOR pueden disparar.`); }catch(_){ }
+      return false;
+    }
+    const shouldRouteToSyncOrder = !fromOrder && !!(
       window.__SETCA_canSendGtcOrder &&
       window.__SETCA_canSendGtcOrder() &&
       window.__SETCA_submitGtcLaunchCommand
     );
-    if(shouldRouteToInstructor){
+    if(shouldRouteToSyncOrder){
       if(!__gtcCanLaunch(u)){
         try{ logEvent(`${(u.name||'RADAR')} es solo deteccion.`); }catch(_){ }
-        return;
+        return false;
       }
       const requestedTarget = String(u.trackPlaneId || '').trim();
       if(!requestedTarget){
         try{ logEvent(`ODT: ${(u.name||'LANZADOR')} sin blanco seleccionado`); }catch(_){ }
-        return;
+        return false;
       }
+      const orderMissileId = 'gtcm_' + Date.now().toString(36) + '_' + Math.random().toString(36).slice(2,6);
+      const orderMissileName = (typeof gtcNextDartName === 'function') ? gtcNextDartName(u.missileCode || u.shortLabel || 'DART') : ('DART-' + Date.now().toString().slice(-6));
       try{
-        window.__SETCA_submitGtcLaunchCommand({ launcherId:String(u.id || ''), targetId:requestedTarget })
+        window.__SETCA_submitGtcLaunchCommand({ launcherId:String(u.id || ''), targetId:requestedTarget, missileId:orderMissileId, missileName:orderMissileName })
           .then(ok=>{
-            try{ logEvent(ok ? `ODT -> INSTRUCTOR: lanzamiento solicitado ${(u.name||'LANZADOR')} -> ${requestedTarget}` : `ODT: no se pudo enviar lanzamiento ${(u.name||'LANZADOR')}`); }catch(_){ }
+            try{ logEvent(ok ? `ODT: lanzamiento sincronizado ${(u.name||'LANZADOR')} -> ${requestedTarget}` : `ODT: no se pudo sincronizar lanzamiento ${(u.name||'LANZADOR')}`); }catch(_){ }
           })
-          .catch(()=>{ try{ logEvent(`ODT: error enviando lanzamiento ${(u.name||'LANZADOR')}`); }catch(_){ } });
+          .catch(()=>{ try{ logEvent(`ODT: error sincronizando lanzamiento ${(u.name||'LANZADOR')}`); }catch(_){ } });
       }catch(_){ }
-      return;
+      return true;
+    }
+    if(!fromOrder && accessRole === 'odt'){
+      try{ logEvent(`ODT: no hay canal de sincronización disponible para lanzar.`); }catch(_){ }
+      return false;
     }
     if(!__gtcCanLaunch(u)){
       try{ logEvent(`${(u.name||'RADAR')} es solo detección.`); }catch(_){ }
-      return;
+      return false;
     }
     const pid = String(u.trackPlaneId || '');
     if(!pid){
       try{ logEvent(`LANZAMIENTO: ${(u.name||'LANZADOR')} sin objetivo seleccionado`); }catch(_){ }
-      return;
+      return false;
     }
     const planes = (typeof gtcActivePlanes==='function') ? gtcActivePlanes() : ((window.st && Array.isArray(st.planes))?st.planes:[]);
     const T = planes.find(p=>p && String(p.id||'')===pid) || null;
     if(!T){
       try{ logEvent(`LANZAMIENTO: ${(u.name||'LANZADOR')} objetivo no activo (${pid})`); }catch(_){ }
-      return;
+      return false;
     }
     const maxRNm = +u.misR || 0;
     const maxHFt = +u.misH || 0;
     if(!(isFinite(maxRNm) && maxRNm > 0 && isFinite(maxHFt) && maxHFt > 0)){
       try{ logEvent(`LANZAMIENTO: ${(u.name||'LANZADOR')} sin perfil de misil`); }catch(_){ }
-      return;
+      return false;
     }
-    const dx = (+T.x||0) - (+u.x||0);
-    const dy = (+T.y||0) - (+u.y||0);
-    const dNm = Math.hypot(dx, dy);
-    const tAlt = +T.alt;
     // Instructor/ODT: se permite el lanzamiento aunque el blanco esté fuera del sobre.
     // Si el misil no llega por alcance/altura, updateMissiles lo registra como FALLA/ERROR.
     st.missiles = Array.isArray(st.missiles) ? st.missiles : [];
+    const id = String(launchOpts.missileId || ('gtcm_' + Date.now().toString(36) + '_' + Math.random().toString(36).slice(2,6)));
+    if(id && st.missiles.some(m=>m && String(m.id || '') === id)) return false;
     st.missileStats = __normalizeMissileStats(st.missileStats);
     st.missileStats.dart += 1;
-    const id = 'gtcm_' + Date.now().toString(36) + '_' + Math.random().toString(36).slice(2,6);
-    const name = gtcNextDartName(u.missileCode || u.shortLabel || 'DART');
+    const name = String(launchOpts.missileName || ((typeof gtcNextDartName === 'function') ? gtcNextDartName(u.missileCode || u.shortLabel || 'DART') : 'DART'));
     const __setcaLocalMissile = {
       id,
       name,
@@ -19227,7 +19262,8 @@ function gtcLaunchMissile(u){
     try{ if(document.getElementById('navReport') && document.getElementById('navReport').style.display==='block' && typeof renderNavReport === 'function') renderNavReport(false); }catch(_){ }
     try{ if(typeof __setcaMarkSyncStaged === 'function') __setcaMarkSyncStaged(__setcaLocalMissile, (__SETCA_SYNC_STAGING && __SETCA_SYNC_STAGING.missileAddMs) || 900); }catch(_){ }
     try{ logEvent(`LANZAMIENTO: ${(u.name||u.label||'LANZADOR')} -> ${(T.name||pid)} (${name})`); }catch(_){ }
-  }catch(e){}
+    return true;
+  }catch(e){ return false; }
 }
 
 function gtcNextName(){
