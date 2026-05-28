@@ -1,4 +1,4 @@
-ESTE SIMULADOR SE ENCUENTRA EN FASE DE PRUEBA - PUEDEN OCURRIR ERRORES DURANTE EL FUNCIONAMIENTO 2.5.2 040326
+ESTE SIMULADOR SE ENCUENTRA EN FASE DE PRUEBA - PUEDEN OCURRIR ERRORES DURANTE EL FUNCIONAMIENTO 2.7
 <!DOCTYPE html>
 <html lang="es">
 <head>
@@ -601,9 +601,79 @@ document.getElementById('cancelDelete').onclick = ()=>{
     }
   }
 
+  // SETCA_GTC_GLOBAL_SYNC: ODT e Instructor comparten GLOBALMENTE solo GTC/Ground Asset List y dibujos.
+  function __SETCA_isGtcGlobalWriterRole(role){
+    const rv = String(role || '').toLowerCase();
+    return rv === 'default' || rv === 'odt';
+  }
+
+  function __SETCA_cleanDrawingForGtcGlobalSync(d, role){
+    if(!d || typeof d !== 'object') return null;
+    const q = (typeof __clonePlain === 'function') ? __clonePlain(d) : {...d};
+    // Para Instructor y ODT los graficos operativos de GTC viajan como globales.
+    if(__SETCA_isGtcGlobalWriterRole(role)) q.visibility = 'global';
+    if(!String(q.createdBy || '').trim()){
+      q.createdBy = (role === 'odt') ? 'ODT' : (role === 'default' ? 'INSTRUCTOR' : 'global');
+    }
+    return (typeof __normalizeDrawingScope === 'function') ? __normalizeDrawingScope(q) : q;
+  }
+
+  function __SETCA_cleanGtcForGlobalSync(u){
+    if(!u || typeof u !== 'object') return null;
+    const q = (typeof __clonePlain === 'function') ? __clonePlain(u) : {...u};
+    if(!String(q.id || '').trim()) q.id = 'GTC-' + Math.random().toString(36).slice(2,8).toUpperCase();
+    q.id = String(q.id || '').slice(0, 80);
+    q.name = String(q.name || q.id || 'GTC').slice(0, 120);
+    q.kind = String(q.kind || ((+q.misR > 0 || +q.misH > 0) ? 'launcher' : 'radar')).slice(0, 40);
+    q.canLaunch = !!q.canLaunch || String(q.kind || '').toLowerCase() === 'launcher';
+    q.label = String(q.label || (q.canLaunch ? 'LANZA' : 'RADAR')).slice(0, 80);
+    q.shortLabel = String(q.shortLabel || q.label || '').slice(0, 40);
+    q.missileCode = String(q.missileCode || '').slice(0, 40);
+    q.statusGlyph = String(q.statusGlyph || (q.canLaunch ? '▲' : '⌁')).slice(0, 8);
+    q.groupName = String(q.groupName || '').slice(0, 80);
+    q.trackPlaneId = String(q.trackPlaneId || '').slice(0, 80);
+    ['x','y','covR','covH','covOpacity','misR','misH'].forEach(key=>{
+      const n = Number(q[key]);
+      q[key] = Number.isFinite(n) ? n : 0;
+    });
+    q.covOpacity = Math.max(0, Math.min(1, +q.covOpacity || 0));
+    return q;
+  }
+
+  async function __SETCA_publishGtcGlobalState(local){
+    try{
+      if(__localOnlyMode) return false;
+      const role = __SETCA_getSharedWriteRole() || '';
+      if(!__SETCA_isGtcGlobalWriterRole(role)) return false;
+      const snap = (local && typeof local === 'object') ? local : (window.st || {});
+      const drawings = Array.isArray(snap.drawings)
+        ? snap.drawings.map(d=>__SETCA_cleanDrawingForGtcGlobalSync(d, role)).filter(Boolean)
+        : [];
+      const gtc = Array.isArray(snap.gtc)
+        ? snap.gtc.map(u=>__SETCA_cleanGtcForGlobalSync(u)).filter(Boolean)
+        : [];
+      await runTransaction(stateRef, current=>{
+        const base = (current && typeof current === 'object') ? {...current} : {};
+        base.drawings = drawings;
+        base.gtc = gtc;
+        base.lastWriteBy = currentUID || 'pending';
+        base.lastWriteRole = role;
+        // Permite que el Instructor reciba cambios GTC del ODT sin rechazar el paquete.
+        base.instructorAuthority = true;
+        base.lastUpdate = serverTimestamp();
+        return base;
+      });
+      return true;
+    }catch(e){
+      console.warn('SETCA GTC global sync error:', e);
+      return false;
+    }
+  }
+
   try{ window.__SETCA_submitAircraftCommand = __SETCA_submitAircraftCommand; }catch(_){ }
   try{ window.__SETCA_submitGtcLaunchCommand = __SETCA_submitGtcLaunchCommand; }catch(_){ }
   try{ window.__SETCA_publishGtcMissileLaunch = __SETCA_publishGtcMissileLaunch; }catch(_){ }
+  try{ window.__SETCA_publishGtcGlobalState = __SETCA_publishGtcGlobalState; }catch(_){ }
   try{ window.__SETCA_sanitizeAircraftPatch = __SETCA_sanitizeAircraftPatch; }catch(_){ }
 
   function __setcaMergePlanesByAuthority(currentPlanes, nextPlanes, writerRole){
@@ -675,7 +745,11 @@ document.getElementById('cancelDelete').onclick = ()=>{
 
   async function pushStateToCloud(local) {
     if (__localOnlyMode) return false;
-    if (!__SETCA_canWriteSharedState()) return false;
+    if (!__SETCA_canWriteSharedState()) {
+      // El ODT no toma autoridad total del estado; solo publica GTC/Ground Asset List y dibujos globales.
+      if(__SETCA_isGtcGlobalWriterRole(__SETCA_getSharedWriteRole())) return __SETCA_publishGtcGlobalState(local);
+      return false;
+    }
     if (!local) return;
     __pushLast = local;
 
@@ -950,8 +1024,8 @@ let __setcaLastAppliedRemoteTs = 0;
       if (Array.isArray(v.gtc)) {
         const keepLocalGtcTarget = (()=> {
           try{
-            const a = window.__setcaAccess || {};
-            return !a.planning && !a.freeplay && String(a.role || '').toLowerCase() === 'odt';
+            // GTC/Ground Asset List es GLOBAL para Instructor y ODT: no preservar objetivos locales del ODT.
+            return false;
           }catch(_){ return false; }
         })();
         const localGtcTargets = new Map();
@@ -8161,6 +8235,28 @@ function __registerMissileImpact(target, missile, targetKind='plane'){
   }
   return impact;
 }
+function __registerMissileMiss(missile, reason='range'){
+  if(!missile) return null;
+  if(!Array.isArray(st.impactMarks)) st.impactMarks = [];
+  const id = 'MISS_' + String(missile.id || Date.now());
+  const existing = st.impactMarks.find(mark => mark && String(mark.id || '') === id);
+  if(existing) return existing;
+  const mark = {
+    id,
+    type:'miss',
+    reason:String(reason || 'range'),
+    x:Number.isFinite(+missile.x) ? +missile.x : 0,
+    y:Number.isFinite(+missile.y) ? +missile.y : 0,
+    by:String(missile.launcher || ''),
+    missileId:String(missile.id || ''),
+    missileName:String(missile.name || 'MISIL'),
+    targetId:String(missile.tgt || ''),
+    targetName:String(missile.targetName || missile.tgt || 'BLANCO'),
+    ts:Date.now()
+  };
+  st.impactMarks.push(mark);
+  return mark;
+}
 function updateMissiles(dt){
   let __impactChanged = false;
   st.missiles.forEach(m=>{
@@ -8171,11 +8267,8 @@ function updateMissiles(dt){
 
     const maxAlt = (m.maxAltFt!==undefined && isFinite(m.maxAltFt) && +m.maxAltFt>0) ? (+m.maxAltFt) : Infinity;
     const tgtAltNow = hasLiveTarget ? __entityAltFt(TRef) : Number.isFinite(+m.alt) ? +m.alt : 0;
-    if(hasLiveTarget && isFinite(tgtAltNow) && isFinite(maxAlt) && maxAlt<Infinity && tgtAltNow > maxAlt){
-      try{ logEvent(`FALLA/ERROR: ${(m.name||'MISIL')} no alcanzó a ${__entityName(TRef, m.targetName || m.tgt)} (fuera de altura)`); }catch(_){ }
-      m.status='alt';
-      return;
-    }
+    const altitudeBlocked = !!(hasLiveTarget && isFinite(tgtAltNow) && isFinite(maxAlt) && maxAlt<Infinity && tgtAltNow > maxAlt);
+    if(altitudeBlocked) m.outOfAlt = true;
 
     if(hasLiveTarget && TRef && TRef.kind === 'plane' && T.jamming && Math.random()<0.25*dt){m.drift+=(Math.random()-0.5)*10;}
 
@@ -8198,15 +8291,28 @@ function updateMissiles(dt){
     const ang=angDeg*Math.PI/180;
 
     const nmps=(m.spd/NM2KM)/3600; const step=nmps*dt;
-    m.travKM+=step*NM2KM;
-    if(m.travKM>=m.rangeKM){
-      try{ logEvent(`FALLA/ERROR: ${(m.name||'MISIL')} no alcanzó a ${(m.targetName || (TRef ? __entityName(TRef, m.tgt) : m.tgt) || 'BLANCO')} (fuera de alcance)`); }catch(_){ }
+    const rangeKM = Number.isFinite(+m.rangeKM) ? +m.rangeKM : 0;
+    const travelledKM = Number.isFinite(+m.travKM) ? +m.travKM : 0;
+    const stepKM = step * NM2KM;
+    const remainingKM = rangeKM > 0 ? Math.max(0, rangeKM - travelledKM) : Infinity;
+    if(rangeKM > 0 && stepKM >= remainingKM){
+      const finalStepNM = Math.max(0, remainingKM / NM2KM);
+      m.x += Math.cos(ang) * finalStepNM;
+      m.y += Math.sin(ang) * finalStepNM;
+      m.travKM = rangeKM;
+      const reason = (altitudeBlocked || m.outOfAlt) ? 'alt' : 'range';
+      try{ logEvent(`FALLA/ERROR: ${(m.name||'MISIL')} no alcanzó a ${(m.targetName || (TRef ? __entityName(TRef, m.tgt) : m.tgt) || 'BLANCO')} (${reason === 'alt' ? 'fuera de altura' : 'fuera de alcance'})`); }catch(_){ }
+      if(String(m.launcherType || '').toLowerCase() === 'gtc'){
+        __registerMissileMiss(m, reason);
+        __impactChanged = true;
+      }
       m.status='oor';
       return;
     }
+    m.travKM = travelledKM + stepKM;
 
     const distNM=Math.hypot(dx,dy);
-    if(hasLiveTarget && distNM<1.0){
+    if(hasLiveTarget && !altitudeBlocked && distNM<1.0){
       const targetName = __entityName(TRef, m.targetName || m.tgt);
       const targetX = +T.x||0;
       const targetY = +T.y||0;
@@ -13935,15 +14041,18 @@ requestAnimationFrame(()=>{ repaintPlanesList(); repaintNav(); repaintStudent();
     try{
       const s = window.st || {};
       const missiles = Array.isArray(s.missiles) ? s.missiles : [];
+      const impactMarks = Array.isArray(s.impactMarks) ? s.impactMarks : [];
       const jammers = s.planes ? s.planes.filter(p=>p.jamming).map(p=>p.id).sort() : [];
       const sig = JSON.stringify({
         missiles: missiles.map(m=>[m && m.id, m && m.x, m && m.y, m && m.tx, m && m.ty, m && m.travKM, m && m.status, m && m.tgt, m && m.launcher]),
+        impactMarks: impactMarks.map(mark=>[mark && mark.id, mark && mark.x, mark && mark.y, mark && mark.type, mark && mark.reason, mark && mark.missileId]),
         jammers
       });
       if(sig === __setcaDynamicSig) return;
       __setcaDynamicSig = sig;
       const payload = {
         missiles,
+        impactMarks,
         jammers,
         by: currentUID,
         ts: Date.now()
@@ -13976,6 +14085,17 @@ requestAnimationFrame(()=>{ repaintPlanesList(); repaintNav(); repaintStudent();
             if(!existing.has(m.id)){
               (window.st.missiles||[]).push(Object.assign({}, m));
               if(window.showLaunchNotice) window.showLaunchNotice(m);
+            }
+          });
+        }
+        if(Array.isArray(next.impactMarks)){
+          window.st.impactMarks = Array.isArray(window.st.impactMarks) ? window.st.impactMarks : [];
+          const existingMarks = new Set(window.st.impactMarks.map(mark=>String(mark && mark.id || '')).filter(Boolean));
+          next.impactMarks.forEach(mark=>{
+            const id = String(mark && mark.id || '');
+            if(id && !existingMarks.has(id)){
+              window.st.impactMarks.push(Object.assign({}, mark));
+              existingMarks.add(id);
             }
           });
         }
