@@ -5,7 +5,7 @@ ESTE SIMULADOR SE ENCUENTRA EN FASE DE PRUEBA - PUEDEN OCURRIR ERRORES DURANTE E
 <head>
 <meta charset="utf-8"/>
 <meta name="viewport" content="width=device-width, initial-scale=1"/>
-<title>SETCA v43.1</title>
+<title>SETCA v43.18</title>
 <link rel="preconnect" href="https://cdn.jsdelivr.net" crossorigin>
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js">
 
@@ -27938,101 +27938,7 @@ body.setca-local-panel-active .modal.setca-local-subsystem{
   .setcaNav360Orbit{width:100%;justify-content:flex-start;}
   .setcaNav360YawRange{width:100%;min-width:120px;}
 }
-/* Planning Tool · programación de aeronaves diferidas */
-#setcaPlanningScheduler{
-  display:none;
-  border:1px solid rgba(125,211,252,.20);
-  border-radius:12px;
-  padding:8px;
-  background:linear-gradient(180deg,rgba(15,23,42,.62),rgba(2,6,23,.42));
-}
-body.setca-planning-mode #setcaPlanningScheduler,
-body[data-setca-role="default"] #setcaPlanningScheduler{
-  display:block;
-}
-.setcaSchedTitle{
-  color:#dbeafe;
-  font:900 10px/1.2 ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
-  letter-spacing:.12em;
-  text-transform:uppercase;
-  margin-bottom:6px;
-}
-.setcaSchedGrid{
-  display:grid;
-  grid-template-columns:minmax(0,1fr) 76px;
-  gap:6px;
-  align-items:center;
-}
-#setcaSchedType,
-#setcaSchedDelay{
-  width:100%;
-  min-height:28px;
-  border-radius:8px;
-  border:1px solid rgba(148,163,184,.32);
-  background:#f8fafc;
-  color:#0f172a;
-  font:800 11px/1.1 system-ui,-apple-system,Segoe UI,sans-serif;
-  padding:4px 7px;
-}
-#setcaSchedArmBtn{
-  grid-column:1 / -1;
-  min-height:29px;
-  border-radius:9px;
-  border:1px solid rgba(34,211,238,.32);
-  background:linear-gradient(180deg,rgba(14,165,233,.24),rgba(8,47,73,.26));
-  color:#e0f2fe;
-  font:900 10px/1 ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
-  letter-spacing:.08em;
-}
-#setcaSchedArmBtn.is-armed{
-  background:linear-gradient(180deg,rgba(250,204,21,.95),rgba(202,138,4,.90));
-  border-color:rgba(250,204,21,.70);
-  color:#111827;
-}
-#setcaSchedList{
-  margin-top:7px;
-  display:flex;
-  flex-direction:column;
-  gap:4px;
-  max-height:120px;
-  overflow:auto;
-}
-.setcaSchedRow{
-  display:grid;
-  grid-template-columns:minmax(0,1fr) auto auto;
-  gap:6px;
-  align-items:center;
-  min-height:26px;
-  padding:4px 6px;
-  border:1px solid rgba(148,163,184,.18);
-  border-radius:8px;
-  background:rgba(15,23,42,.48);
-  color:#e5f6ff;
-  font:800 10px/1.15 ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
-}
-.setcaSchedName{white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
-.setcaSchedTime{color:#fef08a;}
-.setcaSchedDel{
-  width:22px;height:22px;min-width:22px;padding:0;border-radius:7px;
-  border:1px solid rgba(248,113,113,.34);background:rgba(127,29,29,.26);color:#fecaca;
-}
-#setcaSchedBanner{
-  position:fixed;
-  left:50%;
-  bottom:22px;
-  transform:translateX(-50%);
-  z-index:9700;
-  display:none;
-  padding:9px 14px;
-  border-radius:999px;
-  border:1px solid rgba(250,204,21,.54);
-  background:rgba(15,23,42,.92);
-  color:#fef3c7;
-  font:900 11px/1 ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
-  letter-spacing:.08em;
-  box-shadow:0 14px 32px rgba(0,0,0,.46);
-}
-body.setca-sched-armed #setcaSchedBanner{display:block;}
+/* Alta diferida retirada a solicitud del usuario. */
 </style>
 <script id="setca-v43-10-local-nav-planning-js">
 (function(){
@@ -28192,7 +28098,7 @@ body.setca-sched-armed #setcaSchedBanner{display:block;}
       group.classList.add('setcaNav360Group');
       const orbit=document.createElement('div');
       orbit.className='setcaNav360Orbit';
-      orbit.innerHTML = '<button id="setcaNavYawLeft" class="navMiniBtn" type="button" title="Orbitar izquierda 15°">⟲</button><input id="setcaNavYawRange" class="setcaNav360YawRange" type="range" min="0" max="359" step="1" value="0" aria-label="Azimut 3D 360"><button id="setcaNavYawRight" class="navMiniBtn" type="button" title="Orbitar derecha 15°">⟳</button><div id="setcaNavYawReadout" class="setcaNav360Readout">AZ 000°</div><span class="setcaNav360Hint">SHIFT/ALT + arrastrar = orbitar</span>';
+      orbit.innerHTML = '<button id="setcaNavYawLeft" class="navMiniBtn" type="button" title="Orbitar izquierda 15°">⟲</button><input id="setcaNavYawRange" class="setcaNav360YawRange" type="range" min="0" max="359" step="1" value="0" aria-label="Azimut 3D 360"><button id="setcaNavYawRight" class="navMiniBtn" type="button" title="Orbitar derecha 15°">⟳</button><div id="setcaNavYawReadout" class="setcaNav360Readout">AZ 000°</div>';
       group.appendChild(orbit);
       $('#setcaNavYawLeft').onclick=()=>{ const s=ensureStore(); setYaw(((s&&s.profile3d&&+s.profile3d.yawDeg)||0)-15); };
       $('#setcaNavYawRight').onclick=()=>{ const s=ensureStore(); setYaw(((s&&s.profile3d&&+s.profile3d.yawDeg)||0)+15); };
@@ -28248,142 +28154,333 @@ body.setca-sched-armed #setcaSchedBanner{display:block;}
     }catch(_){ }
   })();
 
-  /* 3) Planning Tool: aeronaves diferidas que aparecen cuando el Instructor da play. */
-  (function installScheduledAircraft(){
-    const SCHED_TPL = {
-      fighter:{label:'CAZA', tipo:'Caza', role:'Bandit', spd:1050, altMin:24000, altVar:16000, turn:4.8, prefix:'SCF'},
-      commercial:{label:'COMERCIAL', tipo:'Comercial', role:'Commercial', spd:850, altMin:30000, altVar:8000, turn:1.2, prefix:'SCC'},
-      transport:{label:'TRANSPORTE', tipo:'Transporte', role:'Friend', spd:560, altMin:16000, altVar:14000, turn:1.8, prefix:'SCT'},
-      unknown:{label:'DESCONOCIDO', tipo:'Desconocido', role:'Unknown', spd:760, altMin:18000, altVar:18000, turn:2.4, prefix:'SCU'}
-    };
-    let pendingScheduled=null;
-    function uniquePlaneId(prefix){
-      const arr=(window.st&&Array.isArray(st.planes))?st.planes:[];
-      let n=arr.length+1, id=String(prefix||'S')+n;
-      while(arr.some(p=>String(p&&p.id||'')===id)){ n++; id=String(prefix||'S')+n; }
-      return id;
-    }
-    function callsign(){
-      try{ if(typeof nextSequentialCallsign==='function') return nextSequentialCallsign(); }catch(_){ }
-      return 'SCH'+String(Math.floor(100+Math.random()*900));
-    }
-    function makeScheduledPlane(tpl,x,y,delayMin){
-      const id=uniquePlaneId(tpl.prefix||'SCH');
-      const alt0=Math.max(0,(Number(tpl.altMin)||12000)+(Math.random()*(Number(tpl.altVar)||0))|0);
-      const spd0=Math.max(0,Number(tpl.spd)||500);
-      return {
-        id, name:callsign(), x:+x||0, y:+y||0,
-        hdg:Math.random()*360, tgtHdg:Math.random()*360,
-        spd:spd0, tgtSpd:spd0, alt:alt0, tgtAlt:alt0,
-        turn:Number(tpl.turn)||2, turnBias:null,
-        ghosts:[], lastDet:0,
-        fail:{comms:false,eng:'none',cab:'none',gear:false,bird:false},
-        kills:0, fuel:100, jamming:false, xpdr:'', tipo:String(tpl.tipo||''), tagDx:12, tagDy:-6,
-        __setcaScheduled:true,
-        __setcaScheduledActive:false,
-        __setcaScheduleDelayMs:Math.max(0,Number(delayMin)||0)*60000,
-        __setcaScheduleRunAccumMs:0,
-        __setcaScheduleCreatedAt:Date.now(),
-        __setcaScheduleLabel:String(tpl.label||tpl.tipo||'AERONAVE')
-      };
-    }
-    function injectUI(){
-      const body=$('#pUnitMgrBody'); if(!body || $('#setcaPlanningScheduler')) return;
-      const box=document.createElement('div');
-      box.id='setcaPlanningScheduler';
-      box.innerHTML='<div class="setcaSchedTitle">Planning Tool · Alta diferida</div><div class="setcaSchedGrid"><select id="setcaSchedType"><option value="fighter">CAZA</option><option value="commercial">COMERCIAL</option><option value="transport">TRANSPORTE</option><option value="unknown">DESCONOCIDO</option></select><input id="setcaSchedDelay" type="number" min="0" max="240" step="1" value="5" title="Minutos después del PLAY del Instructor"><button id="setcaSchedArmBtn" type="button">PROGRAMAR POR CLICK EN RADAR</button></div><div id="setcaSchedList"></div>';
-      body.appendChild(box);
-      const banner=document.createElement('div'); banner.id='setcaSchedBanner'; banner.textContent='ALTA DIFERIDA ARMADA · HAGA CLICK EN EL RADAR PARA FIJAR POSICIÓN'; document.body.appendChild(banner);
-      $('#setcaSchedArmBtn').onclick=function(){
-        if(!isInstructor() && !isPlanning()){ alert('Solo Instructor o Planning Tool pueden programar aeronaves diferidas.'); return; }
-        const key=String($('#setcaSchedType').value||'fighter');
-        const delay=Math.max(0, Number($('#setcaSchedDelay').value)||0);
-        pendingScheduled={tpl:SCHED_TPL[key]||SCHED_TPL.fighter, delay};
-        document.body.classList.add('setca-sched-armed');
-        this.classList.add('is-armed');
-        this.textContent='ARMADO · CLICK EN RADAR';
-      };
-      renderSchedList();
-    }
-    function cancelPending(){
-      pendingScheduled=null;
-      document.body.classList.remove('setca-sched-armed');
-      const b=$('#setcaSchedArmBtn'); if(b){ b.classList.remove('is-armed'); b.textContent='PROGRAMAR POR CLICK EN RADAR'; }
-    }
-    function renderSchedList(){
-      const list=$('#setcaSchedList'); if(!list || !window.st) return;
-      const arr=(Array.isArray(st.planes)?st.planes:[]).filter(p=>p&&p.__setcaScheduled&&!p.__setcaScheduledActive);
-      if(!arr.length){ list.innerHTML='<div class="setcaSchedRow"><span class="setcaSchedName">Sin aeronaves programadas</span><span class="setcaSchedTime">--</span><span></span></div>'; return; }
-      list.innerHTML=arr.map(p=>{
-        const left=Math.max(0,(+p.__setcaScheduleDelayMs||0)-(+p.__setcaScheduleRunAccumMs||0));
-        const min=Math.floor(left/60000), sec=Math.floor((left%60000)/1000);
-        return '<div class="setcaSchedRow" data-sched-id="'+String(p.id).replace(/"/g,'&quot;')+'"><span class="setcaSchedName">'+String(p.name||p.id)+' · '+String(p.__setcaScheduleLabel||p.tipo||'')+'</span><span class="setcaSchedTime">T-'+String(min).padStart(2,'0')+':'+String(sec).padStart(2,'0')+'</span><button class="setcaSchedDel" type="button" data-sched-del="'+String(p.id).replace(/"/g,'&quot;')+'">×</button></div>';
-      }).join('');
-    }
-    document.addEventListener('click', function(e){
-      const del=e.target&&e.target.closest?e.target.closest('[data-sched-del]'):null;
-      if(!del) return;
-      const id=String(del.dataset.schedDel||'');
-      if(window.st&&Array.isArray(st.planes)) st.planes=st.planes.filter(p=>String(p&&p.id||'')!==id);
-      renderSchedList(); refreshAll();
-    }, true);
-    document.addEventListener('keydown', e=>{ if(e.key==='Escape'&&pendingScheduled) cancelPending(); }, true);
-    function bindRadar(){
-      const canvas=$('#radar'); if(!canvas || canvas.__setcaV4310SchedBound) return;
-      canvas.addEventListener('mousedown', function(ev){
-        if(!pendingScheduled || ev.button!==0) return;
-        try{
-          const rect=canvas.getBoundingClientRect();
-          const w=(typeof toWorld==='function') ? toWorld(ev.clientX-rect.left, ev.clientY-rect.top) : {x:0,y:0};
-          const p=makeScheduledPlane(pendingScheduled.tpl,w.x,w.y,pendingScheduled.delay);
-          st.planes=Array.isArray(st.planes)?st.planes:[]; st.roles=st.roles||{};
-          st.planes.push(p); st.roles[p.id]=pendingScheduled.tpl.role||'Friend';
-          markAircraftDirty(p);
-          renderSchedList(); refreshAll();
-        }catch(e){ console.warn('SETCA scheduled aircraft creation error:', e); }
-        cancelPending();
-        ev.preventDefault(); ev.stopImmediatePropagation();
-      }, true);
-      canvas.__setcaV4310SchedBound=true;
-    }
-    const prevCanRender=window.__SETCA_canRenderPlane;
-    window.__SETCA_canRenderPlane=function(p){
-      if(p && p.__setcaScheduled && !p.__setcaScheduledActive) return false;
-      return typeof prevCanRender==='function' ? prevCanRender(p) : true;
-    };
-    function isRunningForSchedule(){
-      try{ if(!window.st) return false; if(st.paused) return false; if(typeof __SETCA_isServerPaused==='function' && __SETCA_isServerPaused()) return false; return true; }catch(_){ return false; }
-    }
-    function canActivate(){
-      try{ if(isPlanning()) return false; if(role()==='default' || role()==='' || (window.__SETCA_canWriteSharedState&&window.__SETCA_canWriteSharedState())) return true; }catch(_){ }
-      return false;
-    }
-    let lastTick=performance.now();
-    function tickSchedules(){
-      injectUI(); bindRadar(); renderSchedList();
-      if(!window.st || !Array.isArray(st.planes) || !canActivate()) { lastTick=performance.now(); return; }
-      const t=performance.now(); const dt=Math.max(0, Math.min(1000, t-lastTick)); lastTick=t;
-      if(!isRunningForSchedule()) return;
-      let changed=false;
-      st.planes.forEach(p=>{
-        if(!p || !p.__setcaScheduled || p.__setcaScheduledActive) return;
-        p.__setcaScheduleRunAccumMs=(+p.__setcaScheduleRunAccumMs||0)+dt;
-        if((+p.__setcaScheduleRunAccumMs||0) >= (+p.__setcaScheduleDelayMs||0)){
-          p.__setcaScheduledActive=true;
-          p.__setcaScheduled=false;
-          p.__setcaActivatedAt=Date.now();
-          p.lastDet=0; p.ghosts=[];
-          markAircraftDirty(p);
-          try{ if(typeof __setcaMarkSyncStaged==='function') __setcaMarkSyncStaged(p, (window.__SETCA_SYNC_STAGING&&window.__SETCA_SYNC_STAGING.planeAddMs)||1000); }catch(_){ }
-          changed=true;
-        }
-      });
-      if(changed){ renderSchedList(); refreshAll(); pushSharedSoft(); }
-    }
-    document.addEventListener('DOMContentLoaded', ()=>{ injectUI(); bindRadar(); renderSchedList(); });
-    setTimeout(()=>{ injectUI(); bindRadar(); renderSchedList(); }, 700);
-    setInterval(tickSchedules, 500);
+  /* Alta diferida retirada: no se inserta UI ni programación automática de aeronaves. */
   })();
+})();
+</script>
+
+
+<script id="setca-v43-13-remove-delayed-planning-cleanup">
+(function(){
+  function cleanup(){
+    try{ document.body && document.body.classList.remove('setca-sched-armed'); }catch(_){ }
+    try{ var a=document.getElementById('setcaPlanningScheduler'); if(a) a.remove(); }catch(_){ }
+    try{ var b=document.getElementById('setcaSchedBanner'); if(b) b.remove(); }catch(_){ }
+  }
+  if(document.readyState==='loading') document.addEventListener('DOMContentLoaded', cleanup);
+  cleanup();
+})();
+</script>
+
+
+<!-- ===== SETCA v43.18 · Planning Tool / Alta diferida retirada definitivamente ===== -->
+<style id="setca-v43-18-remove-planning-departure-css">
+/* Retiro solicitado: no existe alta diferida ni hora de salida en Instructor ni Planning Tool. */
+#setcaPlaneBeCtx .setcaPlanningDepartureBox,
+#setcaPlaneBeCtx .setcaPlanningDepartureTitle,
+#setcaPlaneBeCtx .setcaPlanningDepartureGrid,
+#setcaPlaneBeCtx .setcaPlanningDepartureNote,
+#setcaPlaneBeCtx #setcaPlanningDepartureTime,
+#setcaPlaneBeCtx #setcaPlanningDepartureClear{display:none!important;}
+</style>
+<script id="setca-v43-18-remove-planning-departure-js">
+(function(){
+  if(window.__SETCA_V43_18_REMOVE_PLANNING_DEPARTURE__) return;
+  window.__SETCA_V43_18_REMOVE_PLANNING_DEPARTURE__ = true;
+
+  function allPlanes(){
+    try{ return (window.st && Array.isArray(st.planes)) ? st.planes : []; }catch(_){ return []; }
+  }
+  function cleanPlane(p){
+    if(!p || typeof p !== 'object') return false;
+    var keys = [
+      '__planningDepartureEnabled','__planningDepartureReleased','__planningDepartureTime','__planningDepartureClock',
+      '__planningDepartureSpawn','__planningDepartureHiddenNow','__planningDepartureActivatedAt',
+      '__planningDepartureDelaySec','__planningDepartureDelayMs','__planningDepartureDueAt','__planningDepartureDueSimMs',
+      '__planningDepartureStartedAt','__planningDeferred','__deferredSpawn','__deferredSpawnAt','__scheduledSpawn',
+      'planningDepartureEnabled','planningDepartureTime','planningDepartureClock','planningDepartureSpawn'
+    ];
+    var changed=false;
+    keys.forEach(function(k){ if(Object.prototype.hasOwnProperty.call(p,k)){ try{ delete p[k]; changed=true; }catch(_){ p[k]=undefined; changed=true; } } });
+    return changed;
+  }
+  function cleanAll(){
+    var changed=false;
+    allPlanes().forEach(function(p){ if(cleanPlane(p)) changed=true; });
+    if(changed){
+      try{ if(typeof repaintPlanesList==='function') repaintPlanesList(); }catch(_){ }
+      try{ if(typeof repaintNav==='function') repaintNav(); }catch(_){ }
+      try{ if(typeof repaintAlt==='function') repaintAlt(); }catch(_){ }
+      try{ if(typeof repaintVuelos==='function') repaintVuelos(); }catch(_){ }
+      try{ if(typeof draw==='function') draw(); }catch(_){ }
+    }
+    return changed;
+  }
+
+  // Anula solo las funciones de alta diferida/hora de salida, sin tocar NAV 360 ni otros módulos.
+  window.__SETCA_isPlanningDeparturePending = function(){ return false; };
+  window.__SETCA_isPlanningDepartureVisible = function(){ return true; };
+  window.__SETCA_planningDepartureDisabled = true;
+
+  function removeDepartureUi(){
+    try{
+      document.querySelectorAll('.setcaPlanningDepartureBox,.setcaPlanningDepartureTitle,.setcaPlanningDepartureGrid,.setcaPlanningDepartureNote,#setcaPlanningDepartureTime,#setcaPlanningDepartureClear').forEach(function(el){ el.remove(); });
+    }catch(_){ }
+  }
+  document.addEventListener('DOMContentLoaded', function(){ cleanAll(); removeDepartureUi(); });
+  document.addEventListener('contextmenu', function(){ setTimeout(removeDepartureUi, 20); setTimeout(removeDepartureUi, 160); }, true);
+  document.addEventListener('click', function(){ setTimeout(removeDepartureUi, 20); }, true);
+  setInterval(function(){ cleanAll(); removeDepartureUi(); }, 1500);
+})();
+</script>
+
+<!-- ===== SETCA v43.17 · Restauración exclusiva NAV azimut 360° ===== -->
+<style id="setca-v43-17-nav360-restore-css">
+#navReport .nav3DViewGroup.setcaNav360Group{
+  grid-template-columns:auto auto auto auto minmax(120px, 1fr) auto auto auto !important;
+}
+#navReport .setcaNav360Orbit{
+  display:flex;
+  align-items:center;
+  gap:5px;
+  min-width:230px;
+}
+#navReport .setcaNav360YawRange{
+  width:min(190px, 18vw);
+  min-width:120px;
+  accent-color:#7feeff;
+}
+#navReport .setcaNav360Readout{
+  min-width:78px;
+  text-align:center;
+  font:800 11px/1.2 ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
+  color:#334155;
+}
+#navReportCanvas.setca-nav-orbiting{cursor:grabbing!important;}
+@media (max-width: 900px){
+  #navReport .setcaNav360Orbit{width:100%;min-width:0;}
+  #navReport .setcaNav360YawRange{width:100%;min-width:110px;}
+}
+</style>
+<script id="setca-v43-17-nav360-restore-js">
+(function(){
+  if(window.__SETCA_V43_17_NAV360_RESTORE_ONLY__) return;
+  window.__SETCA_V43_17_NAV360_RESTORE_ONLY__ = true;
+
+  function qs(s,r){ return (r||document).querySelector(s); }
+  function navStore(){
+    try{
+      if(typeof __NAV_STORE !== 'undefined'){
+        try{ window.__NAV_STORE = __NAV_STORE; }catch(_){ }
+        if(!__NAV_STORE.profile3d) __NAV_STORE.profile3d = { enabled:false, altFtPerNm:6000, pitchDeg:58, yawDeg:0, depthShear:0, liftBoost:1.15 };
+        if(!Number.isFinite(+__NAV_STORE.profile3d.pitchDeg)) __NAV_STORE.profile3d.pitchDeg = 58;
+        if(!Number.isFinite(+__NAV_STORE.profile3d.yawDeg)) __NAV_STORE.profile3d.yawDeg = 0;
+        return __NAV_STORE;
+      }
+    }catch(_){ }
+    try{
+      if(window.__NAV_STORE){
+        if(!window.__NAV_STORE.profile3d) window.__NAV_STORE.profile3d = { enabled:false, altFtPerNm:6000, pitchDeg:58, yawDeg:0, depthShear:0, liftBoost:1.15 };
+        return window.__NAV_STORE;
+      }
+    }catch(_){ }
+    return null;
+  }
+  function norm360(v){ const n=Number.isFinite(+v)?+v:0; return ((n%360)+360)%360; }
+  function signedDeg(v){ const n=norm360(v); return n>180 ? n-360 : n; }
+  function describePitch(p){
+    const n=Math.round(Math.max(0.5, Math.min(89, Number.isFinite(+p)?+p:58)));
+    return String(n).padStart(2,'0')+'°';
+  }
+  function renderNavSoft(force){
+    try{ if(typeof renderNavReport === 'function') renderNavReport(!!force); }catch(_){ }
+  }
+
+  function patch3DMath(){
+    try{
+      const patchedGet3DConfig = function(){
+        const s = navStore();
+        const cfg = (s && s.profile3d) || {};
+        const pitchDeg = Math.max(0.5, Math.min(89, Number.isFinite(+cfg.pitchDeg) ? +cfg.pitchDeg : 58));
+        const yawDeg = signedDeg(Number.isFinite(+cfg.yawDeg) ? +cfg.yawDeg : 0);
+        const pitchRad = pitchDeg * Math.PI / 180;
+        const yawRad = yawDeg * Math.PI / 180;
+        const liftBoost = Math.max(0.6, Math.min(2.4, Number.isFinite(+cfg.liftBoost) ? +cfg.liftBoost : 1.15));
+        const topBlend = Math.sin(pitchRad);
+        const sideBlend = Math.cos(pitchRad);
+        return {
+          enabled: !!cfg.enabled,
+          altFtPerNm: Math.max(1500, Number.isFinite(+cfg.altFtPerNm) ? +cfg.altFtPerNm : 6000),
+          pitchDeg, yawDeg, pitchRad, yawRad,
+          depthShear: Number.isFinite(+cfg.depthShear) ? +cfg.depthShear : 0,
+          liftBoost, topBlend, sideBlend,
+          groundScaleY: Math.max(0.015, (0.015 + (topBlend * 1.05))),
+          altitudeScale: Math.max(0.28, (0.36 + (sideBlend * 2.45 * liftBoost)))
+        };
+      };
+      try{ __navGet3DConfig = patchedGet3DConfig; }catch(_){ }
+      window.__navGet3DConfig = patchedGet3DConfig;
+    }catch(_){ }
+
+    try{
+      const patchedSet3DEnabled = function(enabled){
+        const s = navStore(); if(!s) return;
+        s.profile3d.enabled = !!enabled;
+        if(!Number.isFinite(+s.profile3d.pitchDeg)) s.profile3d.pitchDeg = 58;
+        if(!Number.isFinite(+s.profile3d.yawDeg)) s.profile3d.yawDeg = 0;
+        try{
+          if(enabled && s.measure){
+            s.measure.enabled=false; s.measure.dragging=false; s.measure.start=null; s.measure.end=null; s.measure.pointerId=null;
+            const canvas=qs('#navReportCanvas'); if(canvas) canvas.classList.remove('is-measuring');
+          }
+        }catch(_){ }
+        syncUI();
+        try{ if(typeof __navUpdateReplayUI === 'function') __navUpdateReplayUI(); }catch(_){ }
+        renderNavSoft(true);
+      };
+      try{ __navSet3DEnabled = patchedSet3DEnabled; }catch(_){ }
+      window.__navSet3DEnabled = patchedSet3DEnabled;
+    }catch(_){ }
+
+    try{
+      const patchedPitch = function(value, rerender){
+        const s=navStore(); if(!s) return;
+        s.profile3d.pitchDeg = Math.max(0.5, Math.min(89, Number.isFinite(+value)?+value:58));
+        syncUI();
+        try{ if(typeof __navUpdateReplayUI === 'function') __navUpdateReplayUI(); }catch(_){ }
+        if(rerender !== false) renderNavSoft(false);
+      };
+      try{ __navSet3DPitchDeg = patchedPitch; }catch(_){ }
+      window.__navSet3DPitchDeg = patchedPitch;
+    }catch(_){ }
+  }
+
+  function setYaw(value, rerender){
+    const s=navStore(); if(!s) return;
+    s.profile3d.yawDeg = signedDeg(value);
+    syncUI();
+    try{ if(typeof __navUpdateReplayUI === 'function') __navUpdateReplayUI(); }catch(_){ }
+    if(rerender !== false) renderNavSoft(false);
+  }
+  function setPitch(value, rerender){
+    const s=navStore(); if(!s) return;
+    s.profile3d.pitchDeg = Math.max(0.5, Math.min(89, Number.isFinite(+value)?+value:58));
+    syncUI();
+    try{ if(typeof __navUpdateReplayUI === 'function') __navUpdateReplayUI(); }catch(_){ }
+    if(rerender !== false) renderNavSoft(false);
+  }
+
+  function ensureControls(){
+    const group = qs('#navReport .nav3DViewGroup');
+    if(!group) return;
+    group.classList.add('setcaNav360Group');
+    let orbit = qs('#setcaNav360Orbit');
+    if(!orbit){
+      orbit = document.createElement('div');
+      orbit.id = 'setcaNav360Orbit';
+      orbit.className = 'setcaNav360Orbit';
+      orbit.innerHTML = '<button id="setcaNavYawLeft" class="navMiniBtn" type="button" title="Orbitar izquierda 15°">⟲</button><input id="setcaNavYawRange" class="setcaNav360YawRange" type="range" min="0" max="359" step="1" value="0" aria-label="Azimut 3D 360"><button id="setcaNavYawRight" class="navMiniBtn" type="button" title="Orbitar derecha 15°">⟳</button><div id="setcaNavYawReadout" class="setcaNav360Readout">AZ 000°</div>';
+      group.appendChild(orbit);
+    }
+    syncUI();
+  }
+
+  function syncUI(){
+    const s=navStore(); if(!s || !s.profile3d) return;
+    const yaw = norm360(s.profile3d.yawDeg || 0);
+    const pitch = Math.max(0.5, Math.min(89, Number.isFinite(+s.profile3d.pitchDeg)?+s.profile3d.pitchDeg:58));
+    const yr=qs('#setcaNavYawRange');
+    const yo=qs('#setcaNavYawReadout');
+    const pr=qs('#nav3DPitch');
+    const rd=qs('#nav3DReadout');
+    if(yr && String(Math.round(yaw)) !== String(yr.value)) yr.value=String(Math.round(yaw));
+    if(yo) yo.textContent='AZ '+String(Math.round(yaw)).padStart(3,'0')+'°';
+    if(pr && document.activeElement !== pr) pr.value=String(Math.round(pitch));
+    if(rd){
+      const enabled = !!s.profile3d.enabled;
+      rd.textContent = enabled ? ('3D '+describePitch(pitch)+' · AZ '+String(Math.round(yaw)).padStart(3,'0')+'°') : ('3D '+describePitch(pitch));
+    }
+  }
+
+  function bindDelegatedControls(){
+    if(document.__setcaV4317Nav360Delegated) return;
+    document.__setcaV4317Nav360Delegated = true;
+    document.addEventListener('click', function(ev){
+      const left = ev.target && ev.target.closest ? ev.target.closest('#setcaNavYawLeft') : null;
+      const right = ev.target && ev.target.closest ? ev.target.closest('#setcaNavYawRight') : null;
+      if(!left && !right) return;
+      const s=navStore(); if(!s) return;
+      ev.preventDefault();
+      ev.stopPropagation();
+      setYaw((Number(s.profile3d && s.profile3d.yawDeg) || 0) + (left ? -15 : 15), true);
+    }, true);
+    document.addEventListener('input', function(ev){
+      const yaw = ev.target && ev.target.closest ? ev.target.closest('#setcaNavYawRange') : null;
+      if(yaw){
+        ev.stopPropagation();
+        setYaw(+yaw.value, true);
+        return;
+      }
+      const pitch = ev.target && ev.target.closest ? ev.target.closest('#nav3DPitch') : null;
+      if(pitch){
+        setPitch(+pitch.value, true);
+      }
+    }, true);
+  }
+
+  function bindOrbitDrag(){
+    const canvas = qs('#navReportCanvas');
+    if(!canvas || canvas.__setcaV4317Nav360OrbitBound) return;
+    let orbit = null;
+    canvas.addEventListener('contextmenu', function(e){
+      try{ if(qs('#navReport') && qs('#navReport').style.display === 'block') e.preventDefault(); }catch(_){ }
+    }, true);
+    canvas.addEventListener('pointerdown', function(e){
+      if(!(e.shiftKey || e.altKey || e.button === 2)) return;
+      const s=navStore();
+      if(!s || !s.profile3d || !s.profile3d.enabled) return;
+      orbit={ id:e.pointerId, x:e.clientX, y:e.clientY, yaw:Number(s.profile3d.yawDeg)||0, pitch:Number(s.profile3d.pitchDeg)||58 };
+      canvas.classList.add('setca-nav-orbiting');
+      try{ canvas.setPointerCapture(e.pointerId); }catch(_){ }
+      e.preventDefault();
+      e.stopImmediatePropagation();
+    }, true);
+    canvas.addEventListener('pointermove', function(e){
+      if(!orbit || orbit.id !== e.pointerId) return;
+      const dx=e.clientX-orbit.x;
+      const dy=e.clientY-orbit.y;
+      setYaw(orbit.yaw + dx*0.45, false);
+      setPitch(orbit.pitch - dy*0.22, false);
+      renderNavSoft(false);
+      e.preventDefault();
+      e.stopImmediatePropagation();
+    }, true);
+    function end(e){
+      if(!orbit || (e && orbit.id !== e.pointerId)) return;
+      orbit=null;
+      canvas.classList.remove('setca-nav-orbiting');
+      syncUI();
+      try{ if(window.__saveLocalPrefs) window.__saveLocalPrefs(); }catch(_){ }
+    }
+    canvas.addEventListener('pointerup', end, true);
+    canvas.addEventListener('pointercancel', end, true);
+    canvas.addEventListener('lostpointercapture', function(){ orbit=null; canvas.classList.remove('setca-nav-orbiting'); }, true);
+    canvas.__setcaV4317Nav360OrbitBound = true;
+  }
+
+  function install(){
+    patch3DMath();
+    ensureControls();
+    bindDelegatedControls();
+    bindOrbitDrag();
+    syncUI();
+  }
+  if(document.readyState === 'loading') document.addEventListener('DOMContentLoaded', install);
+  install();
+  setTimeout(install, 300);
+  setTimeout(install, 1000);
+  setInterval(install, 1800);
+  try{ window.__SETCA_setNavYaw360 = function(deg){ setYaw(deg, true); }; }catch(_){ }
 })();
 </script>
 
