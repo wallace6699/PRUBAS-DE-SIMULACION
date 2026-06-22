@@ -1,6 +1,6 @@
 <!DOCTYPE html>
-<!-- SETCA v2.7: fix acceso instructor sala normal -->
-<!-- ESTE SIMULADOR SE ENCUENTRA EN FASE DE PRUEBA - PUEDEN OCURRIR ERRORES DURANTE EL FUNCIONAMIENTO 2.7-->
+<!-- SETCA v43.1: fix acceso instructor sala normal -->
+<!-- ESTE SIMULADOR SE ENCUENTRA EN FASE DE PRUEBA - PUEDEN OCURRIR ERRORES DURANTE EL FUNCIONAMIENTO 2.5.2 040326 -->
 <html lang="es">
 <head>
 <meta charset="utf-8"/>
@@ -8187,6 +8187,7 @@ const __ROOM_LOCAL = (location.hash || "").replace(/^#/, "").trim() || "sala-def
 const __PREF_KEY = `SETCA_local_prefs_v1_${__ROOM_LOCAL}`;
 const __TAG_KEY  = `SETCA_tag_offsets_v1_${__ROOM_LOCAL}`;
 const __DRAW_LOCAL_KEY = `SETCA_local_drawings_v1_${__ROOM_LOCAL}`;
+const __PAIR_LOCAL_KEY = `SETCA_local_pairs_v1_${__ROOM_LOCAL}`;
 
 function __lsLoad(key, fallback){
   try{
@@ -8570,8 +8571,36 @@ window.__SETCA_setLocalVisualScale = (kind, next)=>{
 };
 let __tagOffsets = __lsLoad(__TAG_KEY, {});
 let __localDrawings = __lsLoad(__DRAW_LOCAL_KEY, []);
+let __localPairs = __lsLoad(__PAIR_LOCAL_KEY, []);
 let __tagSaveT = null;
 let __drawLocalSaveT = null;
+
+function __normalizeLocalPairs(list, validIds=null){
+  const out=[];
+  const used=new Set();
+  (Array.isArray(list) ? list : []).forEach(pr=>{
+    const a=String(pr&&pr.a||''),b=String(pr&&pr.b||'');
+    if(!a||!b||a===b) return;
+    if(validIds && (!validIds.has(a)||!validIds.has(b))) return;
+    const key=[a,b].sort().join('|');
+    if(used.has(key)) return;
+    used.add(key);
+    out.push({a,b});
+  });
+  return out;
+}
+window.__SETCA_persistLocalPairs = ()=>{
+  __localPairs = __normalizeLocalPairs(window.st && st.pairs);
+  if(window.st) st.pairs = __localPairs.map(pr=>({...pr}));
+  __lsSave(__PAIR_LOCAL_KEY,__localPairs);
+  return st.pairs;
+};
+window.__SETCA_restoreLocalPairs = ()=>{
+  if(!window.st) return [];
+  st.pairs = __normalizeLocalPairs(__localPairs).map(pr=>({...pr}));
+  return st.pairs;
+};
+window.__SETCA_restoreLocalPairs();
 
 function __saveTagOffsetsSoon(){
   if(__tagSaveT) return;
@@ -11996,7 +12025,7 @@ function repaintPairList(){
     const row=document.createElement('div'); row.className='row';
     row.innerHTML=`<span class="badge">${A?A.name:pr.a}</span> ↔ <span class="badge">${B?B.name:pr.b}</span>
       <button class="mini btn focusable" data-i="${idx}">Quitar</button>`;
-    const btn=row.querySelector('button'); btn.onclick=()=>{ st.pairs.splice(idx,1); repaintPairList(); try{ repaintPairs && repaintPairs(); }catch(_){ } try{ draw && draw(); }catch(_){ } };
+    const btn=row.querySelector('button'); btn.onclick=()=>{ st.pairs.splice(idx,1); try{ if(window.__SETCA_persistLocalPairs) window.__SETCA_persistLocalPairs(); }catch(_){ } repaintPairList(); try{ repaintPairs && repaintPairs(); }catch(_){ } try{ draw && draw(); }catch(_){ } };
     list.appendChild(row);
   });
 }
@@ -12848,18 +12877,18 @@ function __hitDrawingPx(d, px, py, tolPx){
   if(d.type==='circle' && d.r!==undefined){
     const rpx = d.r * zoom * PX_PER_NM;
     const dist = Math.hypot(px-s.x, py-s.y);
-    return dist <= (rpx + tolPx);
+    return Math.abs(dist-rpx) <= tolPx;
   }
 
   if(d.type==='square' && d.a!==undefined){
     const half = (d.a * zoom * PX_PER_NM)/2;
     const local = __drawingLocalScreenPoint(d, px, py);
-    return (Math.abs(local.x) <= half + tolPx && Math.abs(local.y) <= half + tolPx);
+    if(Math.abs(local.x)>half+tolPx||Math.abs(local.y)>half+tolPx) return false;
+    return Math.min(Math.abs(Math.abs(local.x)-half),Math.abs(Math.abs(local.y)-half))<=tolPx;
   }
 
   if(d.type==='polygon' && Array.isArray(d.pts) && d.pts.length>=3){
     const poly = d.pts.map(p=>__getDrawingScreenPoint(d, p));
-    if(__pointInPolyPx(px,py,poly)) return true;
     let best=1e9;
     for(let i=0;i<poly.length;i++){
       const A=poly[i], B=poly[(i+1)%poly.length];
@@ -12900,10 +12929,11 @@ function __hitDrawingPx(d, px, py, tolPx){
   if(__isCapDrawing(d)){
     const { straightHalfPx, halfWidthPx } = __capGeometryPx(d);
     const local = __capLocalPointPx(d, px, py);
-    const inCenter = Math.abs(local.x) <= straightHalfPx && Math.abs(local.y) <= halfWidthPx + tolPx;
+    const top = __distPointToSegPx(local.x,local.y,-straightHalfPx,-halfWidthPx,straightHalfPx,-halfWidthPx);
+    const bottom = __distPointToSegPx(local.x,local.y,-straightHalfPx,halfWidthPx,straightHalfPx,halfWidthPx);
     const dLeft = Math.hypot(local.x + straightHalfPx, local.y);
     const dRight = Math.hypot(local.x - straightHalfPx, local.y);
-    return inCenter || dLeft <= (halfWidthPx + tolPx) || dRight <= (halfWidthPx + tolPx);
+    return top<=tolPx||bottom<=tolPx||Math.abs(dLeft-halfWidthPx)<=tolPx||Math.abs(dRight-halfWidthPx)<=tolPx;
   }
 
   if(d.type==='label'){
@@ -12927,7 +12957,7 @@ function __hitDrawingPx(d, px, py, tolPx){
 function pickShapePrecisePx(px, py, tolPx=7){
   for(let i = (st.drawings||[]).length - 1; i >= 0; i--){
     const d = st.drawings[i];
-    if(d && __hitDrawingPx(d, px, py, tolPx)) return d.id;
+    if(d && __hitDrawingPerimeterPx(d, px, py, tolPx)) return d.id;
   }
   return null;
 }
@@ -15004,8 +15034,19 @@ function __SETCA_setCommandAlt(p, value){
   return alt;
 }
 function repaintPairs(){
-  const sA=$('#pairA'),sB=$('#pairB'); sA.innerHTML=''; sB.innerHTML='';
+  const sA=$('#pairA'),sB=$('#pairB');
+  if(!sA||!sB) return;
+  const prevA=String(sA.value||''),prevB=String(sB.value||'');
+  const validIds=new Set((Array.isArray(st.planes)?st.planes:[]).map(p=>String(p&&p.id||'')).filter(Boolean));
+  const nextPairs=__normalizeLocalPairs(st.pairs,validIds);
+  if(JSON.stringify(nextPairs)!==JSON.stringify(st.pairs||[])){
+    st.pairs=nextPairs;
+    try{ if(window.__SETCA_persistLocalPairs) window.__SETCA_persistLocalPairs(); }catch(_){ }
+  }
+  sA.innerHTML=''; sB.innerHTML='';
   st.planes.forEach(p=>{const a=document.createElement('option');a.value=p.id;a.textContent=p.name;sA.appendChild(a);sB.appendChild(a.cloneNode(true));});
+  if(prevA&&validIds.has(prevA)) sA.value=prevA;
+  if(prevB&&validIds.has(prevB)) sB.value=prevB;
   repaintPairList();
   // SETCA_FIX_DELAYLAG_SELECTOR: el selector de Delay/Lag se sincroniza con las mismas
   // opciones activas que usan las casillas de Emparejamientos.
@@ -16145,6 +16186,7 @@ $('#doPair').onclick=()=>{
     const ex=st.pairs.find(pr=>(pr.a===a&&pr.b===b)||(pr.a===b&&pr.b===a));
     if(!ex){
       st.pairs.push({a,b});
+      try{ if(window.__SETCA_persistLocalPairs) window.__SETCA_persistLocalPairs(); }catch(_){ }
       repaintPairList();
       try{ repaintPairs && repaintPairs(); }catch(_){ }
       try{ draw && draw(); }catch(_){ }
@@ -16153,6 +16195,7 @@ $('#doPair').onclick=()=>{
 };
 $('#unPair').onclick=()=>{
   st.pairs=[];
+  try{ if(window.__SETCA_persistLocalPairs) window.__SETCA_persistLocalPairs(); }catch(_){ }
   repaintPairList();
   try{ repaintPairs && repaintPairs(); }catch(_){ }
   try{ draw && draw(); }catch(_){ }
@@ -19319,548 +19362,108 @@ document.querySelectorAll('#pCmdBody .btn').forEach(btn=>{
 </script>
 
 
-<script>
-/* === PATCH LOCAL: Data Block movible con CTRL + drag (NO sincroniza) === */
+<script id="setca-local-datablock-drag">
+/* Data Block: un unico controlador local con Z + arrastre. */
 (function(){
+  if(window.__SETCA_LOCAL_DATABLOCK_DRAG__) return;
+  window.__SETCA_LOCAL_DATABLOCK_DRAG__ = true;
+
   const cvs = document.getElementById('radar');
   if(!cvs) return;
 
-  let draggingTag = null;
-  let tagStart = null;
-
-  function ensureTag(p){
-    if(p.tagDx === undefined) p.tagDx = 12;
-    if(p.tagDy === undefined) p.tagDy = -6;
-  }
-
-  cvs.addEventListener('mousedown', e=>{
-    if(window.st && window.st.modoObservador) return;
-    if(e.button !== 0 || !e.ctrlKey) return;
-
-    if(window.__applyLocalTagOffsets) window.__applyLocalTagOffsets();
-
-    const r = cvs.getBoundingClientRect();
-    const mx = e.clientX - r.left;
-    const my = e.clientY - r.top;
-
-    const wx = (mx - window.CX - window.offX) / (window.zoom * window.PX_PER_NM);
-    const wy = (my - window.CY - window.offY) / (window.zoom * window.PX_PER_NM);
-
-    let best = null;
-    let bd = 999;
-
-    (window.st.planes || []).forEach(p=>{
-      ensureTag(p);
-      const tx = p.x + p.tagDx/(window.zoom*window.PX_PER_NM);
-      const ty = p.y + p.tagDy/(window.zoom*window.PX_PER_NM);
-      const d = Math.hypot(wx - tx, wy - ty);
-      if(d < 8/(window.zoom*window.PX_PER_NM) && d < bd){
-        bd = d;
-        best = p;
-      }
-    });
-
-    if(best){
-      draggingTag = best;
-      tagStart = { x: e.clientX, y: e.clientY };
-      e.preventDefault();
-    }
-  });
-
-  addEventListener('mousemove', e=>{
-    if(e.buttons!==1) return;
-    if(!draggingTag) return;
-    draggingTag.tagDx += (e.clientX - tagStart.x);
-    draggingTag.tagDy += (e.clientY - tagStart.y);
-    if(window.__setLocalTagOffset) window.__setLocalTagOffset(draggingTag.id, draggingTag.tagDx, draggingTag.tagDy);
-    tagStart = { x: e.clientX, y: e.clientY };
-  });
-
-  addEventListener('mouseup', ()=>{
-    draggingTag = null;
-    tagStart = null;
-  });
-})();
-</script>
-
-
-<script>
-/* === FIX REAL: CTRL + drag DATA BLOCK (LOCAL ONLY) === */
-(function(){
-  const cvs = document.getElementById('radar');
-  if(!cvs) return;
-
-  let dragging = null;
-  let start = null;
-
-  function hitTag(p, mx, my){
-    if(p.tagDx===undefined) p.tagDx=12;
-    if(p.tagDy===undefined) p.tagDy=-6;
-    const s = {x: window.CX+window.offX+p.x*window.zoom*window.PX_PER_NM,
-               y: window.CY+window.offY+p.y*window.zoom*window.PX_PER_NM};
-    const x = s.x + p.tagDx;
-    const y = s.y + p.tagDy;
-    return (mx>x && mx<x+88 && my>y-12 && my<y+44);
-  }
-
-  cvs.addEventListener('mousedown', e=>{
-    if(window.st && window.st.modoObservador) return;
-    if(e.button!==0 || !(e.key==='z' || e.key==='Z' || e.getModifierState && e.getModifierState('Z'))) return;
-    const r=cvs.getBoundingClientRect();
-    const mx=e.clientX-r.left, my=e.clientY-r.top;
-    for(const p of (window.st.planes||[])){
-      if(hitTag(p,mx,my)){
-        dragging=p;
-        start={x:e.clientX,y:e.clientY};
-        e.preventDefault();
-        break;
-      }
-    }
-  });
-
-  addEventListener('mousemove', e=>{
-    if(e.buttons!==1) return;
-    if(!dragging) return;
-    dragging.tagDx += (e.clientX-start.x);
-    dragging.tagDy += (e.clientY-start.y);
-    start={x:e.clientX,y:e.clientY};
-  });
-
-  addEventListener('mouseup', ()=>{
-    dragging=null; start=null;
-  });
-})();
-</script>
-
-
-
-
-
-<script>
-/* === ROBUST LOCAL: Z + drag DATA BLOCK (pointer events, captura, sin sync) === */
-(function(){
-  if(window.__tagDragInstalled) return;
-  window.__tagDragInstalled = true;
-
-  const cvs = document.getElementById('radar');
-  if(!cvs || !window.st) return;
-
-  // Track Z globally
-  window.__zKeyDown = false;
-  addEventListener('keydown', e=>{
-    if(e.key==='z' || e.key==='Z'){ window.__zKeyDown = true; }
-  }, true);
-  addEventListener('keyup', e=>{
-    if(e.key==='z' || e.key==='Z'){ window.__zKeyDown = false; }
-  }, true);
-  addEventListener('blur', ()=>{ window.__zKeyDown = false; }, true);
-
-  let dragging = null;
-  let lastClient = null;
-
-  function ensureTag(p){
-    if(p.tagDx===undefined) p.tagDx=12;
-    if(p.tagDy===undefined) p.tagDy=-6;
-  }
-
-  // Hitbox matches the drawn box; slightly generous
-  function hitTag(p, mx, my){
-    ensureTag(p);
-    const sx = window.CX + window.offX + p.x*window.zoom*window.PX_PER_NM;
-    const sy = window.CY + window.offY + p.y*window.zoom*window.PX_PER_NM;
-    const x  = sx + p.tagDx;
-    const y  = sy + p.tagDy;
-    const w = 96;   // a bit larger than draw
-    const h = 64;
-    return (mx > x-6 && mx < x-6+w && my > (y-18) && my < (y-18)+h);
-  }
-
-  function onPointerDown(e){
-    if(window.st && window.st.modoObservador) return;
-    if(e.button !== 0) return;
-    if(!window.__zKeyDown) return;
-
-    const r = cvs.getBoundingClientRect();
-    const mx = e.clientX - r.left;
-    const my = e.clientY - r.top;
-
-    // search top-most first (reverse)
-    const planes = (window.st.planes || []);
-    for(let i=planes.length-1;i>=0;i--){
-      const p = planes[i];
-      if(hitTag(p, mx, my)){
-        dragging = p;
-        lastClient = {x:e.clientX, y:e.clientY};
-        try{ cvs.setPointerCapture(e.pointerId); }catch(_){}
-        e.preventDefault();
-        e.stopPropagation();
-        return;
-      }
-    }
-  }
-
-  function onPointerMove(e){
-    if(window.st && window.st.modoObservador){ dragging=null; lastClient=null; return; }
-    if(!dragging) return;
-    if(!(e.buttons & 1)) return; // only while left pressed
-
-    const dx = e.clientX - lastClient.x;
-    const dy = e.clientY - lastClient.y;
-
-    dragging.tagDx += dx;
-    dragging.tagDy += dy;
-
-    lastClient = {x:e.clientX, y:e.clientY};
-    e.preventDefault();
-    e.stopPropagation();
-  }
-
-  function onPointerUp(e){
-    if(window.st && window.st.modoObservador){ dragging=null; lastClient=null; return; }
-    if(!dragging) return;
-    dragging = null;
-    lastClient = null;
-    try{ cvs.releasePointerCapture(e.pointerId); }catch(_){}
-    e.preventDefault();
-    e.stopPropagation();
-  }
-
-  // Use capture phase to beat existing handlers
-  cvs.addEventListener('pointerdown', onPointerDown, true);
-  addEventListener('pointermove', onPointerMove, true);
-  addEventListener('pointerup', onPointerUp, true);
-  addEventListener('pointercancel', onPointerUp, true);
-})();
-</script>
-
-
-<script>
-/* === DEFINITIVO: DataBlock como OBJETO LÓGICO (Z + drag, LOCAL, sin romper nada) === */
-(function(){
-  if(window.__dataBlockLogicInstalled) return;
-  window.__dataBlockLogicInstalled = true;
-
-  const cvs = document.getElementById('radar');
-  if(!cvs || !window.st) return;
-
-  // --- track Z ---
   let zDown = false;
+  let drag = null;
+  const fallbackW = 88;
+  const fallbackH = 56;
+  const fallbackTop = -11;
+
+  function currentPlane(){
+    if(!drag || !window.st || !Array.isArray(st.planes)) return null;
+    return st.planes.find(p=>p && String(p.id||'')===drag.planeId) || null;
+  }
+  function canvasPoint(e){
+    const r = cvs.getBoundingClientRect();
+    const x = e.clientX - r.left;
+    const y = e.clientY - r.top;
+    return (x>=0 && y>=0 && x<=r.width && y<=r.height) ? {x,y} : null;
+  }
+  function ensureOffset(p){
+    if(!Number.isFinite(+p.tagDx)) p.tagDx = 12;
+    if(!Number.isFinite(+p.tagDy)) p.tagDy = -6;
+  }
+  function hitDataBlock(p, x, y){
+    ensureOffset(p);
+    const s = toScreen(p.x||0, p.y||0);
+    const scale = (typeof getTacticalVisualScale === 'function') ? getTacticalVisualScale(Number.isFinite(+window.zoom) ? +window.zoom : 1) : 1;
+    const w = Number.isFinite(+p.__dbBoxW) && +p.__dbBoxW>0 ? +p.__dbBoxW : Math.max(1,Math.round(fallbackW*scale));
+    const h = Number.isFinite(+p.__dbBoxH) && +p.__dbBoxH>0 ? +p.__dbBoxH : Math.max(1,Math.round(fallbackH*scale));
+    const top = Number.isFinite(+p.__dbBoxTop) ? +p.__dbBoxTop : fallbackTop;
+    const bx = s.x + p.tagDx;
+    const by = s.y + p.tagDy + top;
+    return x>=bx && x<=bx+w && y>=by && y<=by+h;
+  }
+  function persist(p){
+    if(!p || !p.id) return;
+    if(typeof window.__setLocalTagOffset === 'function') window.__setLocalTagOffset(p.id,p.tagDx,p.tagDy);
+  }
+  function stop(e){
+    const p = currentPlane();
+    if(p) persist(p);
+    if(drag && Number.isFinite(drag.pointerId)){
+      try{ cvs.releasePointerCapture(drag.pointerId); }catch(_){ }
+    }
+    drag = null;
+    if(e){
+      try{ e.preventDefault(); }catch(_){ }
+      try{ e.stopImmediatePropagation(); }catch(_){ }
+    }
+  }
+
   addEventListener('keydown',e=>{ if(e.key==='z'||e.key==='Z') zDown=true; },true);
   addEventListener('keyup',e=>{ if(e.key==='z'||e.key==='Z') zDown=false; },true);
-  addEventListener('blur',()=>{ zDown=false; },true);
+  addEventListener('blur',()=>{ zDown=false; stop(); },true);
 
-  let draggingPlane = null;
-  let lastWorld = null;
-
-  function ensureBlock(p){
-    if(!p.dataBlock){
-      p.dataBlock = {
-        dx: (p.tagDx!==undefined?p.tagDx:12)/(window.zoom*window.PX_PER_NM),
-        dy: (p.tagDy!==undefined?p.tagDy:-6)/(window.zoom*window.PX_PER_NM),
-        w: 0.12,
-        h: 0.08
-      };
-    }
-  }
-
-  function screenToWorld(mx,my){
-    return {
-      x:(mx-window.CX-window.offX)/(window.zoom*window.PX_PER_NM),
-      y:(my-window.CY-window.offY)/(window.zoom*window.PX_PER_NM)
-    };
-  }
-
-  function hitBlock(p,wx,wy){
-    ensureBlock(p);
-    const bx = p.x + p.dataBlock.dx;
-    const by = p.y + p.dataBlock.dy;
-    return (
-      wx>bx && wx<bx+p.dataBlock.w &&
-      wy>by && wy<by+p.dataBlock.h
-    );
-  }
-
-  cvs.addEventListener('mousedown',e=>{
-    if(window.st && window.st.modoObservador) return;
-    if(e.button!==0 || !zDown) return;
-
-    const r=cvs.getBoundingClientRect();
-    const w=screenToWorld(e.clientX-r.left,e.clientY-r.top);
-
-    for(const p of (window.st.planes||[])){
-      if(hitBlock(p,w.x,w.y)){
-        draggingPlane=p;
-        lastWorld=w;
-        e.preventDefault();
-        e.stopPropagation();
-        break;
-      }
-    }
-  },true);
-
-  addEventListener('mousemove',e=>{
-    if(!draggingPlane) return;
-    const r=cvs.getBoundingClientRect();
-    const w=screenToWorld(e.clientX-r.left,e.clientY-r.top);
-
-    const dx=w.x-lastWorld.x;
-    const dy=w.y-lastWorld.y;
-
-    draggingPlane.dataBlock.dx+=dx;
-    draggingPlane.dataBlock.dy+=dy;
-
-    draggingPlane.tagDx = draggingPlane.dataBlock.dx*(window.zoom*window.PX_PER_NM);
-    draggingPlane.tagDy = draggingPlane.dataBlock.dy*(window.zoom*window.PX_PER_NM);
-
-    lastWorld=w;
-    e.preventDefault();
-    e.stopPropagation();
-  },true);
-
-  addEventListener('mouseup',()=>{
-    draggingPlane=null;
-    lastWorld=null;
-  },true);
-
-})();
-</script>
-
-
-<script>
-/* === FINAL HARD FIX: Window-level Z + drag DataBlock (LOCAL ONLY) === */
-(function(){
-  if(window.__FINAL_DATABLOCK_DRAG__) return;
-  window.__FINAL_DATABLOCK_DRAG__ = true;
-
-  let zDown = false;
-  window.addEventListener('keydown',e=>{
-    if(e.key==='z' || e.key==='Z') zDown = true;
-  }, true);
-  window.addEventListener('keyup',e=>{
-    if(e.key==='z' || e.key==='Z') zDown = false;
-  }, true);
-  window.addEventListener('blur',()=>{ zDown=false; }, true);
-
-  let dragging = null;
-  let lastWorld = null;
-
-  function screenToWorld(mx,my){
-    return {
-      x:(mx-window.CX-window.offX)/(window.zoom*window.PX_PER_NM),
-      y:(my-window.CY-window.offY)/(window.zoom*window.PX_PER_NM)
-    };
-  }
-
-  function ensureBlock(p){
-    if(!p.dataBlock){
-      p.dataBlock = {dx:0.02, dy:-0.01, w:0.12, h:0.08};
-    }
-  }
-
-  function hitBlock(p, wx, wy){
-    ensureBlock(p);
-    const bx = p.x + p.dataBlock.dx;
-    const by = p.y + p.dataBlock.dy;
-    return wx>bx && wx<bx+p.dataBlock.w && wy>by && wy<by+p.dataBlock.h;
-  }
-
-  window.addEventListener('mousedown',e=>{
-    if(e.button!==0 || !zDown || !window.st) return;
-    const w = screenToWorld(e.clientX, e.clientY);
-    for(const p of window.st.planes||[]){
-      if(hitBlock(p, w.x, w.y)){
-        dragging = p;
-        lastWorld = w;
-        e.preventDefault();
-        e.stopPropagation();
-        break;
-      }
-    }
-  }, true);
-
-  window.addEventListener('mousemove',e=>{
-    if(!dragging) return;
-    const w = screenToWorld(e.clientX, e.clientY);
-    const dx = w.x - lastWorld.x;
-    const dy = w.y - lastWorld.y;
-    dragging.dataBlock.dx += dx;
-    dragging.dataBlock.dy += dy;
-    dragging.tagDx = dragging.dataBlock.dx*(window.zoom*window.PX_PER_NM);
-    dragging.tagDy = dragging.dataBlock.dy*(window.zoom*window.PX_PER_NM);
-    lastWorld = w;
-    e.preventDefault();
-    e.stopPropagation();
-  }, true);
-
-  window.addEventListener('mouseup',()=>{
-    dragging = null;
-    lastWorld = null;
-  }, true);
-
-})();
-</script>
-
-
-<script>
-/* === FINAL FIX V2: Z + click + ARRRASTRAR Data Block (usa tagDx/tagDy + toScreen, LOCAL) === */
-(function(){
-  if(window.__DB_ZDRAG_V2__) return;
-  window.__DB_ZDRAG_V2__ = true;
-
-  const cvs = document.getElementById('radar');
-  if(!cvs || !window.st || typeof toScreen!=='function') return;
-
-  // Tecla Z global (no depende de foco)
-  let zDown=false;
-  window.addEventListener('keydown', e=>{ if(e.key==='z'||e.key==='Z') zDown=true; }, true);
-  window.addEventListener('keyup', e=>{ if(e.key==='z'||e.key==='Z') zDown=false; }, true);
-  window.addEventListener('blur', ()=>{ zDown=false; }, true);
-
-  // Drag state
-  let dragging=null;
-  let last=null;
-
-  // Caja (debe coincidir con el dibujo)
-  const BOX_W=88;
-  const BOX_H=56;
-  const BOX_TOP=-11; // y = by-11
-
-  function ensureTag(p){
-    if(p.tagDx===undefined) p.tagDx=12;
-    if(p.tagDy===undefined) p.tagDy=-6;
-  }
-
-  function getCanvasXY(ev){
-    const r = cvs.getBoundingClientRect();
-    const mx = ev.clientX - r.left;
-    const my = ev.clientY - r.top;
-    if(mx<0 || my<0 || mx>r.width || my>r.height) return null;
-    return {mx,my};
-  }
-
-  function hitPlaneBlock(p, mx, my){
-    ensureTag(p);
-    const s = toScreen(p.x, p.y);
-    const bx = s.x + p.tagDx;
-    const by = s.y + p.tagDy;
-    const currentScale = getTacticalVisualScale(Number.isFinite(+window.zoom) ? +window.zoom : 1);
-    const w = (Number.isFinite(+p.__dbBoxW) && (+p.__dbBoxW) > 0) ? (+p.__dbBoxW) : Math.max(1, Math.round(BOX_W * currentScale));
-    const h = (Number.isFinite(+p.__dbBoxH) && (+p.__dbBoxH) > 0) ? (+p.__dbBoxH) : Math.max(1, Math.round(BOX_H * currentScale));
-    const top = Number.isFinite(p.__dbBoxTop) ? p.__dbBoxTop : BOX_TOP;
-    const x0 = bx;
-    const y0 = by + top;
-    return (mx>=x0 && mx<=x0+w && my>=y0 && my<=y0+h);
-  }
-
-  // Escuchar desde WINDOW para que overlays no bloqueen
-  window.addEventListener('mousedown', (e)=>{
-    if(e.button!==0 || !zDown) return;
-    if(!window.st || !Array.isArray(st.planes)) return;
-
-    const pt = getCanvasXY(e);
-    if(!pt) return;
-
-    // Buscar el block más cercano/último (de arriba)
+  cvs.addEventListener('pointerdown',e=>{
+    if(e.button!==0 || !zDown || (window.st && st.modoObservador)) return;
+    if(typeof window.__applyLocalTagOffsets === 'function') window.__applyLocalTagOffsets();
+    const pt = canvasPoint(e);
+    if(!pt || !window.st || !Array.isArray(st.planes)) return;
     for(let i=st.planes.length-1;i>=0;i--){
       const p = st.planes[i];
-      if(hitPlaneBlock(p, pt.mx, pt.my)){
-        dragging = p;
-        last = pt;
-        e.preventDefault();
-        e.stopPropagation();
-        return;
-      }
+      if(!p || !hitDataBlock(p,pt.x,pt.y)) continue;
+      drag = {planeId:String(p.id||''),lastX:e.clientX,lastY:e.clientY,pointerId:e.pointerId};
+      persist(p);
+      try{ cvs.setPointerCapture(e.pointerId); }catch(_){ }
+      e.preventDefault();
+      e.stopImmediatePropagation();
+      return;
     }
-  }, true);
+  },true);
 
-  window.addEventListener('mousemove', (e)=>{
-    if(!dragging) return;
-    const pt = getCanvasXY(e);
-    if(!pt) return;
-
-    const dx = pt.mx - last.mx;
-    const dy = pt.my - last.my;
-
-    dragging.tagDx = (dragging.tagDx||0) + dx;
-    dragging.tagDy = (dragging.tagDy||0) + dy;
-
-    last = pt;
-
+  addEventListener('pointermove',e=>{
+    if(!drag) return;
+    if(!(e.buttons&1)){ stop(e); return; }
+    const p = currentPlane();
+    if(!p){ stop(e); return; }
+    ensureOffset(p);
+    p.tagDx += e.clientX-drag.lastX;
+    p.tagDy += e.clientY-drag.lastY;
+    drag.lastX = e.clientX;
+    drag.lastY = e.clientY;
+    persist(p);
+    try{ if(typeof draw==='function') draw(); }catch(_){ }
     e.preventDefault();
-    e.stopPropagation();
-  }, true);
+    e.stopImmediatePropagation();
+  },true);
 
-  window.addEventListener('mouseup', (e)=>{
-    if(!dragging) return;
-    dragging = null;
-    last = null;
-    e.preventDefault();
-    e.stopPropagation();
-  }, true);
-
+  addEventListener('pointerup',e=>{ if(drag) stop(e); },true);
+  addEventListener('pointercancel',e=>{ if(drag) stop(e); },true);
 })();
 </script>
 
 
 <script>
-/* === HARD LOCAL LOCK: DataBlock NEVER syncs to Firebase === */
-(function(){
-  if(window.__DATABLOCK_LOCAL_LOCK__) return;
-  window.__DATABLOCK_LOCAL_LOCK__ = true;
-
-  // Mark fields as local-only
-  function stripLocal(p){
-    if(!p) return;
-    delete p.tagDx;
-    delete p.tagDy;
-    delete p.dataBlock;
-  }
-
-  // Patch common sync functions if present
-  const syncFns = ['scheduleSync','pushState','syncNow','sendState','saveState'];
-  syncFns.forEach(fn=>{
-    if(typeof window[fn]==='function'){
-      const orig = window[fn];
-      window[fn] = function(state){
-        try{
-          if(state && state.planes){
-            state.planes.forEach(stripLocal);
-          }
-        }catch(e){}
-        return orig.apply(this, arguments);
-      };
-    }
-  });
-
-  // Patch Firebase direct writes (defensive)
-  if(window.firebase && firebase.database){
-    const db = firebase.database();
-    const origSet = db.ref().set;
-    const origUpdate = db.ref().update;
-
-    db.ref().set = function(data){
-      try{
-        if(data && data.planes){
-          data.planes.forEach(stripLocal);
-        }
-      }catch(e){}
-      return origSet.apply(this, arguments);
-    };
-
-    db.ref().update = function(data){
-      try{
-        if(data && data.planes){
-          data.planes.forEach(stripLocal);
-        }
-      }catch(e){}
-      return origUpdate.apply(this, arguments);
-    };
-  }
-
-})();
-</script>
-<script>
-/* === MÓDULO B — IA / Combate (4 MISILES + CONO 30° + 10s ENTRE LANZAMIENTOS) === */
+/* === MODULO B — IA / Combate (4 MISILES + CONO 30° + 10s ENTRE LANZAMIENTOS) === */
 (function(){
   if (!window.st) return;
 
@@ -20104,102 +19707,6 @@ document.querySelectorAll('#pCmdBody .btn').forEach(btn=>{
   }
   setTimeout(bind, 600);
   setTimeout(bind, 1800);
-})();
-</script>
-
-
-<script>
-/* === PATCH FINAL: Blindaje LOCAL de Data Block (Z+click drag no sincroniza) === */
-(function(){
-  if(window.__LOCAL_DATABLOCK_SYNC_SHIELD__) return;
-  window.__LOCAL_DATABLOCK_SYNC_SHIELD__ = true;
-
-  let localTagDragActive = false;
-  let localTagDragUntil = 0;
-  const now = ()=>Date.now();
-
-  function markLocalDrag(ms=450){
-    localTagDragActive = true;
-    localTagDragUntil = now() + ms;
-  }
-  function endLocalDrag(ms=900){
-    localTagDragActive = false;
-    localTagDragUntil = now() + ms;
-  }
-  function inLocalDragWindow(){
-    return localTagDragActive || now() < localTagDragUntil;
-  }
-
-  // Captura Z + click/drag a nivel global (sin romper otras interacciones)
-  let zDown = false;
-  addEventListener('keydown', e=>{ if(e.key==='z' || e.key==='Z') zDown = true; }, true);
-  addEventListener('keyup',   e=>{ if(e.key==='z' || e.key==='Z') zDown = false; }, true);
-  addEventListener('blur', ()=>{ zDown = false; endLocalDrag(300); }, true);
-
-  const cvs = document.getElementById('radar');
-  if(cvs){
-    window.addEventListener('mousedown', (e)=>{
-      if(e.button!==0 || !zDown) return;
-      const r = cvs.getBoundingClientRect();
-      if(e.clientX < r.left || e.clientX > r.right || e.clientY < r.top || e.clientY > r.bottom) return;
-      markLocalDrag(700);
-    }, true);
-
-    window.addEventListener('mousemove', ()=>{
-      if(inLocalDragWindow()) markLocalDrag(700);
-    }, true);
-
-    window.addEventListener('mouseup', ()=>{
-      if(inLocalDragWindow()){
-        // Guardar offsets locales actuales del Data Block si existen
-        try{
-          if(window.st && Array.isArray(window.st.planes) && typeof window.__setLocalTagOffset === 'function'){
-            for(const p of st.planes){
-              if(!p || !p.id) continue;
-              if(typeof p.tagDx === 'number' || typeof p.tagDy === 'number'){
-                window.__setLocalTagOffset(p.id, (p.tagDx ?? 12), (p.tagDy ?? -6));
-              }
-              // Estado efímero/local usado por algunos parches de drag
-              if(p.dataBlock) delete p.dataBlock;
-            }
-          }
-        }catch(_){}
-        endLocalDrag(1200);
-      }
-    }, true);
-  }
-
-  // Blindar scheduleSync durante el arrastre local del Data Block
-  if(typeof window.scheduleSync === 'function' && !window.__scheduleSyncLocalDragWrapped){
-    const _origScheduleSync = window.scheduleSync;
-    window.scheduleSync = function(){
-      if(inLocalDragWindow()) return;
-      return _origScheduleSync.apply(this, arguments);
-    };
-    window.__scheduleSyncLocalDragWrapped = true;
-  }
-
-  // Blindar push directo (defensivo)
-  if(window._SETCA_SYNC && typeof window._SETCA_SYNC.push === 'function' && !window.__setcaPushLocalDragWrapped){
-    const _origPush = window._SETCA_SYNC.push;
-    window._SETCA_SYNC.push = function(){
-      if(inLocalDragWindow()) return;
-      return _origPush.apply(this, arguments);
-    };
-    window.__setcaPushLocalDragWrapped = true;
-  }
-
-  // Reaplicar offsets locales cuando otros scripts reemplacen scheduleSync más tarde
-  setTimeout(()=>{
-    if(typeof window.scheduleSync === 'function' && !window.__scheduleSyncLocalDragWrapped){
-      const _origScheduleSync = window.scheduleSync;
-      window.scheduleSync = function(){
-        if(inLocalDragWindow()) return;
-        return _origScheduleSync.apply(this, arguments);
-      };
-      window.__scheduleSyncLocalDragWrapped = true;
-    }
-  }, 2000);
 })();
 </script>
 
@@ -23801,7 +23308,7 @@ import { getAuth } from "https://www.gstatic.com/firebasejs/10.12.3/firebase-aut
   function __SETCA_refreshLocalWorkstationPanels(access){
     try{
       const role = String((access && access.role) || '').toLowerCase();
-      const localPanelSelector = role === 'odi'
+      const localPanelSelector = (role === 'odi' || role === 'odico')
         ? '#vuelosList input,#vuelosList select,#vuelosList button,#pairA,#pairB,#doPair,#unPair'
         : (role === 'odt'
             ? '#pGTC input,#pGTC select,#pGTC button'
@@ -25566,7 +25073,7 @@ import { getDatabase, ref, get, set } from "https://www.gstatic.com/firebasejs/1
       const a = window.__setcaAccess || {};
       if(a.planning || a.freeplay) return true;
       const role = String(a.role || 'default').toLowerCase();
-      return role === 'default' || role === 'odi';
+      return role === 'default' || role === 'odi' || role === 'odico';
     }catch(_){ return false; }
   }
   function enablePairUi(){
@@ -25603,7 +25110,10 @@ import { getDatabase, ref, get, set } from "https://www.gstatic.com/firebasejs/1
     window.st = window.st || {};
     st.pairs = Array.isArray(st.pairs) ? st.pairs : [];
     const exists = st.pairs.some(pr=>(pr && pr.a===a && pr.b===b) || (pr && pr.a===b && pr.b===a));
-    if(!exists) st.pairs.push({a,b});
+    if(!exists){
+      st.pairs.push({a,b});
+      try{ if(window.__SETCA_persistLocalPairs) window.__SETCA_persistLocalPairs(); }catch(_){ }
+    }
     else alert('Ya emparejados.');
     repaintPairSurfaces();
     return true;
@@ -25612,6 +25122,7 @@ import { getDatabase, ref, get, set } from "https://www.gstatic.com/firebasejs/1
     if(!canUsePairs()) return false;
     window.st = window.st || {};
     st.pairs = [];
+    try{ if(window.__SETCA_persistLocalPairs) window.__SETCA_persistLocalPairs(); }catch(_){ }
     repaintPairSurfaces();
     return true;
   }
