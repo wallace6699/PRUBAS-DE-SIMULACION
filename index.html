@@ -1,6 +1,5 @@
 <!DOCTYPE html>
-<!-- SETCA v43.1: fix acceso instructor sala normal -->
-<!-- ESTE SIMULADOR SE ENCUENTRA EN FASE DE PRUEBA - PUEDEN OCURRIR ERRORES DURANTE EL FUNCIONAMIENTO 2.5.2 040326 -->
+<!-- ESTE SIMULADOR SE ENCUENTRA EN FASE DE PRUEBA - PUEDEN OCURRIR ERRORES DURANTE EL FUNCIONAMIENTO 2.7 -->
 <html lang="es">
 <head>
 <meta charset="utf-8"/>
@@ -583,7 +582,7 @@
     }
   }
 
-  // SETCA_GTC_GLOBAL_SYNC: ODT e Instructor comparten GLOBALMENTE solo GTC/Ground Asset List y dibujos.
+  // SETCA_GTC_GLOBAL_SYNC: ODT e Instructor comparten GLOBALMENTE GTC/Ground Asset List; los dibujos locales no viajan.
   function __SETCA_isGtcGlobalWriterRole(role){
     const rv = String(role || '').toLowerCase();
     return rv === 'default' || rv === 'odt' || rv === 'samallocator';
@@ -592,7 +591,7 @@
   function __SETCA_cleanDrawingForGtcGlobalSync(d, role){
     if(!d || typeof d !== 'object') return null;
     const q = (typeof __clonePlain === 'function') ? __clonePlain(d) : {...d};
-    // Para Instructor y ODT los graficos operativos de GTC viajan como globales.
+    if(q.visibility === 'local') return null;
     if(__SETCA_isGtcGlobalWriterRole(role)) q.visibility = 'global';
     if(!String(q.createdBy || '').trim()){
       q.createdBy = (role === 'odt') ? 'ODT' : (role === 'samallocator' ? 'SAM ALOCATOR' : (role === 'default' ? 'INSTRUCTOR' : 'global'));
@@ -614,11 +613,17 @@
     q.statusGlyph = String(q.statusGlyph || (q.canLaunch ? '▲' : '⌁')).slice(0, 8);
     q.groupName = String(q.groupName || '').slice(0, 80);
     q.trackPlaneId = String(q.trackPlaneId || '').slice(0, 80);
-    ['x','y','covR','covH','covOpacity','misR','misH'].forEach(key=>{
+    ['x','y','covR','covH','covOpacity','misR','misH','missileMaxShots','missileSalvoSize','missileShotIntervalMs','missileReloadMs','missileShotsFired','missileSalvoShots','missileLastLaunchAt','missileNextLaunchAt','missileReloadUntil'].forEach(key=>{
       const n = Number(q[key]);
       q[key] = Number.isFinite(n) ? n : 0;
     });
     q.covOpacity = Math.max(0, Math.min(1, +q.covOpacity || 0));
+    if(q.canLaunch){
+      if(!(q.missileMaxShots > 0)) q.missileMaxShots = 6;
+      if(!(q.missileSalvoSize > 0)) q.missileSalvoSize = 2;
+      if(!(q.missileShotIntervalMs > 0)) q.missileShotIntervalMs = 3000;
+      if(!(q.missileReloadMs > 0)) q.missileReloadMs = 90000;
+    }
     return q;
   }
 
@@ -678,7 +683,7 @@
       if(!__SETCA_isGtcGlobalWriterRole(role)) return false;
       const snap = (local && typeof local === 'object') ? local : (window.st || {});
       const drawings = Array.isArray(snap.drawings)
-        ? snap.drawings.map(d=>__SETCA_cleanDrawingForGtcGlobalSync(d, role)).filter(Boolean)
+        ? snap.drawings.filter(d=>!(d && d.visibility === 'local')).map(d=>__SETCA_cleanDrawingForGtcGlobalSync(d, role)).filter(Boolean)
         : [];
       const gtc = Array.isArray(snap.gtc)
         ? snap.gtc.map(u=>__SETCA_cleanGtcForGlobalSync(u)).filter(Boolean)
@@ -779,7 +784,11 @@
         }
       : {...payload};
     out.planes = __setcaMergePlanesByAuthority(current.planes, payload.planes, payload.lastWriteRole);
-    out.missiles = __setcaMergeMissilesById(current.missiles, payload.missiles, payload.impactMarks);
+    out.missiles = __setcaMergeMissilesById(
+      current.missiles,
+      payload.missiles,
+      [].concat(Array.isArray(current.impactMarks) ? current.impactMarks : [], Array.isArray(payload.impactMarks) ? payload.impactMarks : [])
+    );
     return out;
   }
   try{ window.__SETCA_markAircraftDirty = __SETCA_markAircraftDirty; }catch(_){ }
@@ -2305,6 +2314,48 @@ canvas#radar {
   padding:6px 8px !important;
   min-height:22px !important;
   font-size:11px !important;
+}
+#setcaLocalDrawLauncher{
+  display:none;
+  min-height:24px !important;
+  padding:3px 9px !important;
+  border-radius:8px !important;
+  font:900 10px/1 ui-monospace,SFMono-Regular,Consolas,monospace !important;
+  letter-spacing:.08em !important;
+  color:#f8ffe8 !important;
+  border:1px solid rgba(250,204,21,.45) !important;
+  background:linear-gradient(180deg,rgba(31,41,16,.95),rgba(13,25,12,.95)) !important;
+  margin-left:auto !important;
+}
+body[data-setca-role="odi"] #setcaLocalDrawLauncher,
+body[data-setca-role="odico"] #setcaLocalDrawLauncher,
+body[data-setca-role="odt"] #setcaLocalDrawLauncher,
+body.mode-odi-overlay #setcaLocalDrawLauncher,
+body.mode-odt-overlay #setcaLocalDrawLauncher{
+  display:inline-flex !important;
+  align-items:center;
+  justify-content:center;
+}
+body:is([data-setca-role="odi"],[data-setca-role="odico"],[data-setca-role="odt"],.mode-odi-overlay,.mode-odt-overlay):not(.setca-local-draw-open) #pDraw{
+  display:none !important;
+}
+body:is([data-setca-role="odi"],[data-setca-role="odico"],[data-setca-role="odt"],.mode-odi-overlay,.mode-odt-overlay).setca-local-draw-open #pDraw{
+  display:flex !important;
+  max-height:42vh;
+  overflow:auto;
+}
+body:is(.mode-odi-overlay,.mode-odt-overlay).setca-local-draw-open #pDraw{
+  right:calc(100vw - var(--setca-center-right, 100vw) + 16px) !important;
+  bottom:calc(100vh - var(--setca-center-bottom, 100vh) + 16px + 190px) !important;
+  width:clamp(260px, calc(var(--setca-center-w, 100vw) * 0.28), 360px) !important;
+  max-height:calc(var(--setca-center-h, 100vh) * 0.42) !important;
+}
+body:is([data-setca-role="odi"],[data-setca-role="odico"],[data-setca-role="odt"],.mode-odi-overlay,.mode-odt-overlay) #pDraw .panel-header h3::after{
+  content:" LOCAL";
+  margin-left:6px;
+  color:#d8b4fe;
+  font-size:9px;
+  letter-spacing:.12em;
 }
 
 /* Compact Gestor de Unidades buttons */
@@ -7816,8 +7867,8 @@ body.setca-exit-mode #setcaRoleConsole{
           <button class="btn mini tool focusable" data-tool="label">Etiqueta</button>
         </div>
 <div class="coord-grid">
-          <input id="coordLat" class="ghost focusable" type="text" placeholder="Lat (DMS o decimal)">
-          <input id="coordLon" class="ghost focusable" type="text" placeholder="Lon (DMS o decimal)">
+          <input id="coordLat" class="ghost focusable" type="text" placeholder="Lat DMS: 12°01'20&quot;S">
+          <input id="coordLon" class="ghost focusable" type="text" placeholder="Lon DMS: 77°06'50&quot;W">
           <button id="placeLL" class="btn mini focusable">Crear (Coord)</button>
         </div>
         <button id="drawingScopeOpenBtn" class="btn mini focusable drawingScopeLauncher" type="button" title="Abrir relación de gráficos">Relación de gráficos</button>
@@ -7861,7 +7912,7 @@ body.setca-exit-mode #setcaRoleConsole{
     </section>
 
     <section class="panel" id="pAlerts">
-      <div class="panel-header"><h3>Misiles Entrantes</h3><span class="toggle" data-target="#pAlertsBody">▾</span></div>
+      <div class="panel-header"><h3>Misiles Entrantes</h3><button id="setcaLocalDrawLauncher" class="btn mini focusable" type="button" title="Herramientas de dibujo locales">GFX</button><span class="toggle" data-target="#pAlertsBody">▾</span></div>
       <div id="pAlertsBody" class="panel-body"><div id="missileAlerts" class="col"></div></div>
     </section>
 
@@ -7892,7 +7943,7 @@ const MAX_RANGE_NM=1000,GRID_STEP_NM=10,PX_PER_NM=20;
 // GTC: edición solo desde el panel (sin clicks sobre el radar)
 window.GTC_PANEL_ONLY = true;
 /* ===== Aeropuertos (Perú) / Centro radar =====
-   Coordenadas en grados decimales (lat/lon). Posición local en NM relativa al centro (SPJC).
+   Coordenadas en grados, minutos y segundos (lat/lon). Posición local en NM relativa al centro (SPJC).
 */
 const CENTER_AIRPORT = { icao:'SPJC', iata:'LIM', name:'Jorge Chávez', city:'Lima', lat:-12.0219, lon:-77.1143 };
 const AIRPORTS_PE = [
@@ -8109,6 +8160,100 @@ const AIRPORTS_PE = [
 function llToLocalNM(lat, lon, refLat, refLon){
   const k = Math.cos(refLat * Math.PI/180);
   return { x: (lon - refLon) * k * 60, y: -(lat - refLat) * 60 };
+}
+function localNMToLL(x, y, refLat, refLon){
+  const k0 = Math.cos(refLat * Math.PI/180);
+  const k = Math.abs(k0) > 1e-9 ? k0 : 1;
+  return { lat: refLat - (y / 60), lon: refLon + (x / (k * 60)) };
+}
+function formatSetcaCoordDMS(value, isLat){
+  const n0 = Number(value);
+  if(!Number.isFinite(n0)) return '';
+  const hemi = isLat ? (n0 < 0 ? 'S' : 'N') : (n0 < 0 ? 'W' : 'E');
+  let n = Math.abs(n0);
+  let deg = Math.floor(n);
+  let minFloat = (n - deg) * 60;
+  let min = Math.floor(minFloat);
+  let sec = (minFloat - min) * 60;
+  sec = Math.round(sec * 10) / 10;
+  if(sec >= 60){ sec = 0; min += 1; }
+  if(min >= 60){ min = 0; deg += 1; }
+  const secTxt = sec.toFixed(sec % 1 ? 1 : 0).padStart(sec % 1 ? 4 : 2, '0');
+  return `${deg}°${String(min).padStart(2,'0')}'${secTxt}"${hemi}`;
+}
+function parseSetcaCoordDMS(val, isLat){
+  if(val===null || val===undefined) return null;
+  let s0 = String(val).trim();
+  if(!s0) return null;
+
+  let s = s0.toUpperCase().replace(/,/g,'.');
+  s = s.replace(/OESTE/g,'W').replace(/ESTE/g,'E');
+
+  const dec = s.match(/^\s*([-+]?\d+(?:\.\d+)?)\s*([NSEWO])?\s*$/);
+  if(dec){
+    let n = parseFloat(dec[1]);
+    if(!isFinite(n)) return null;
+    let sign = (n < 0) ? -1 : 1;
+    n = Math.abs(n);
+    let hemi = dec[2] ? dec[2].toUpperCase() : null;
+    if(hemi === 'O') hemi = 'W';
+    if(hemi){
+      if(hemi === 'S' || hemi === 'W') sign = -1;
+      if(hemi === 'N' || hemi === 'E') sign = 1;
+    }
+    const out = sign * n;
+    if(isLat && (out < -90 || out > 90)) return null;
+    if(!isLat && (out < -180 || out > 180)) return null;
+    return out;
+  }
+
+  const hm = s.match(/([NSEWO])\s*$/) || s.match(/^\s*([NSEWO])/) || s.match(/\b([NSEWO])\b/);
+  let hemi = hm ? hm[1] : null;
+  if(hemi === 'O') hemi = 'W';
+
+  const nums = s
+    .replace(/[NSEWO]/g,'')
+    .replace(/[^0-9.+-]+/g,' ')
+    .trim()
+    .split(/\s+/)
+    .filter(Boolean);
+  if(!nums.length) return null;
+
+  let deg = parseFloat(nums[0]);
+  let min = nums.length > 1 ? parseFloat(nums[1]) : 0;
+  let sec = nums.length > 2 ? parseFloat(nums[2]) : 0;
+  if(!isFinite(deg) || !isFinite(min) || !isFinite(sec)) return null;
+
+  let sign = 1;
+  if(deg < 0){ sign = -1; deg = Math.abs(deg); }
+
+  if(hemi){
+    if(hemi === 'S' || hemi === 'W') sign = -1;
+    if(hemi === 'N' || hemi === 'E') sign = 1;
+  }
+
+  const out = sign * (deg + (min / 60) + (sec / 3600));
+  if(isLat && (out < -90 || out > 90)) return null;
+  if(!isLat && (out < -180 || out > 180)) return null;
+  return out;
+}
+function parseSetcaCoordDMSOnly(val, isLat){
+  if(val===null || val===undefined) return null;
+  const raw = String(val).trim();
+  if(!raw) return null;
+  const s = raw.toUpperCase().replace(/OESTE/g,'W').replace(/ESTE/g,'E').replace(/\bO\b/g,'W');
+  const hemi = (s.match(/([NSEW])/) || [])[1] || '';
+  if(!hemi) return null;
+  if(isLat && !/[NS]/.test(hemi)) return null;
+  if(!isLat && !/[EW]/.test(hemi)) return null;
+  const nums = s
+    .replace(/[NSEWO]/g,'')
+    .replace(/[^0-9.+-]+/g,' ')
+    .trim()
+    .split(/\s+/)
+    .filter(Boolean);
+  if(nums.length < 3) return null;
+  return parseSetcaCoordDMS(raw, isLat);
 }
 function randomPeruSpawnNM(jitterNM=18){
   const pool = (Array.isArray(AIRPORTS_PE) && AIRPORTS_PE.length) ? AIRPORTS_PE : [CENTER_AIRPORT];
@@ -8418,6 +8563,18 @@ function __normalizeDrawingScope(d){
   if(d.visibility !== 'local' && d.visibility !== 'global') d.visibility = 'global';
   return d;
 }
+function __SETCA_isLocalDrawingWorkstation(){
+  try{
+    const access = window.__setcaAccess || {};
+    const role = String(access.role || document.body.getAttribute('data-setca-role') || '').toLowerCase();
+    return !access.planning && !access.freeplay && (role === 'odi' || role === 'odico' || role === 'odt');
+  }catch(_){ return false; }
+}
+function __SETCA_getDefaultDrawingVisibility(){
+  return __SETCA_isLocalDrawingWorkstation() ? 'local' : 'global';
+}
+try{ window.__SETCA_isLocalDrawingWorkstation = __SETCA_isLocalDrawingWorkstation; }catch(_){ }
+try{ window.__SETCA_getDefaultDrawingVisibility = __SETCA_getDefaultDrawingVisibility; }catch(_){ }
 function __getLocalOnlyDrawings(arr){
   return (Array.isArray(arr) ? arr : []).filter(d=>d && d.visibility === 'local').map(d=>__normalizeDrawingScope(__clonePlain(d)));
 }
@@ -11428,6 +11585,10 @@ function drawPlane(p){
     const spdText = st.metric ? `${p.spd.toFixed(0)} km/h` : `${(p.spd*KMH2KTS).toFixed(0)} kts`;
     const hdgText = `${String(p.hdg|0).padStart(3,'0')}°`;
     const labelFields = (typeof window.__SETCA_getLocalLabelFields === 'function') ? window.__SETCA_getLocalLabelFields() : {...__SETCA_LABEL_FIELDS_DEFAULT};
+    const dbLabelFields = {...labelFields};
+    try{
+      if(__beText) dbLabelFields.pulsae = true;
+    }catch(_){ }
     if(typeof window.__SETCA_pushDbOverlayItem === 'function'){
       window.__SETCA_pushDbOverlayItem({
         id: p.id,
@@ -11441,7 +11602,7 @@ function drawPlane(p){
         altText,
         spdText,
         hdgText,
-        visibleFields: labelFields,
+        visibleFields: dbLabelFields,
         anchorX: __dbAnchorX,
         anchorY: __dbAnchorY,
         bx,
@@ -11716,6 +11877,7 @@ function launch(launcherId,targetId,type){
     launcherName:String(L.name || L.id || launcherId),
     rangeKM:type==='R77'?110:90,
     travKM:0,
+    launchedAt:Date.now(),
     status:'fly',
     drift:0,
     courseDeg:(Math.atan2((+T.y||0)-(+L.y||0), (+T.x||0)-(+L.x||0))*180/Math.PI)
@@ -11796,6 +11958,29 @@ function __registerMissileMiss(missile, reason='range'){
   st.impactMarks.push(mark);
   return mark;
 }
+function __setcaIsActiveMissile(m, completedIds=null){
+  if(!m) return false;
+  const id = String(m.id || '');
+  const status = String(m.status || 'fly').toLowerCase();
+  if(status !== 'fly') return false;
+  if(completedIds && id && completedIds.has(id)) return false;
+  const targetRef = (typeof __resolveMissileTarget === 'function') ? __resolveMissileTarget(m.tgt) : null;
+  const launcherRef = (typeof __resolveMissileLauncher === 'function') ? __resolveMissileLauncher(m.launcher) : null;
+  const hasTiming = Number.isFinite(+m.launchedAt) || Number.isFinite(+m.syncAt) || Number.isFinite(+m.createdAt);
+  if(!targetRef && (m.targetDestroyed || (!launcherRef && !hasTiming))) return false;
+  return true;
+}
+function __setcaPruneConsumedMissiles(){
+  try{
+    if(!window.st || !Array.isArray(st.missiles)) return [];
+    const completed = (typeof __setcaCompletedMissileIds === 'function')
+      ? __setcaCompletedMissileIds(st.impactMarks || [])
+      : new Set();
+    st.missiles = st.missiles.filter(m=>__setcaIsActiveMissile(m, completed));
+    return st.missiles;
+  }catch(_){ return (window.st && Array.isArray(st.missiles)) ? st.missiles : []; }
+}
+try{ window.__setcaPruneConsumedMissiles = __setcaPruneConsumedMissiles; }catch(_){ }
 function updateMissiles(dt){
   let __impactChanged = false;
   st.missiles.forEach(m=>{
@@ -11846,6 +12031,7 @@ function updateMissiles(dt){
       m.ty = targetY;
       m.travKM = Math.min(rangeKM > 0 ? rangeKM : Infinity, travelledKM + (distBeforeHitNM * NM2KM));
       m.status='hit';
+      m.consumedAt = Date.now();
       st.splashes.push({x:targetX,y:targetY,t:0});
       if(TRef && TRef.kind === 'plane') T._hit=true;
       __registerMissileImpact(T, m, (TRef && TRef.kind) || 'plane');
@@ -11869,6 +12055,7 @@ function updateMissiles(dt){
         __impactChanged = true;
       }
       m.status='oor';
+      m.consumedAt = Date.now();
       return;
     }
     m.travKM = travelledKM + stepKM;
@@ -11879,6 +12066,7 @@ function updateMissiles(dt){
       const targetX = +T.x||0;
       const targetY = +T.y||0;
       m.status='hit';
+      m.consumedAt = Date.now();
       st.splashes.push({x:targetX,y:targetY,t:0});
       if(TRef && TRef.kind === 'plane') T._hit=true;
       __registerMissileImpact(T, m, (TRef && TRef.kind) || 'plane');
@@ -11901,7 +12089,8 @@ function updateMissiles(dt){
     }
   });
   try{ (Array.isArray(st.missiles) ? st.missiles : []).forEach(m=>{ if(m && m.id && typeof __navRecordMissile === 'function') __navRecordMissile(m, true); }); }catch(_){ }
-  st.missiles=st.missiles.filter(m=>m && (!m.status || m.status==='fly'));
+  if(typeof __setcaPruneConsumedMissiles === 'function') __setcaPruneConsumedMissiles();
+  else st.missiles=st.missiles.filter(m=>m && (!m.status || m.status==='fly'));
   if(__impactChanged){
     try{ paintAlerts(true); }catch(_){ }
     try{ repaintPlanesList && repaintPlanesList(); }catch(_){ }
@@ -13156,6 +13345,230 @@ addEventListener('blur', ()=>{ __dDown = false; __eDown = false; __etaDrag = nul
     return '#ffea00';
   }
 
+  function __drawingRefCenter(){
+    if(window.st && st.radarCenter && Number.isFinite(+st.radarCenter.lat) && Number.isFinite(+st.radarCenter.lon)) return st.radarCenter;
+    if(typeof CENTER_AIRPORT !== 'undefined' && CENTER_AIRPORT) return CENTER_AIRPORT;
+    return {lat:0, lon:0};
+  }
+
+  function __drawingWorldToLL(pt){
+    const ref = __drawingRefCenter();
+    if(typeof localNMToLL === 'function') return localNMToLL(+pt.x || 0, +pt.y || 0, +ref.lat || 0, +ref.lon || 0);
+    const k0 = Math.cos((+ref.lat || 0) * Math.PI / 180);
+    const k = Math.abs(k0) > 1e-9 ? k0 : 1;
+    return { lat:(+ref.lat || 0) - ((+pt.y || 0) / 60), lon:(+ref.lon || 0) + ((+pt.x || 0) / (k * 60)) };
+  }
+
+  function __formatDrawingNM(pt){
+    return `${(+pt.x || 0).toFixed(3)}, ${(+pt.y || 0).toFixed(3)}`;
+  }
+
+  function __formatDrawingLL(pt){
+    const ll = __drawingWorldToLL(pt);
+    return `${ll.lat.toFixed(6)}, ${ll.lon.toFixed(6)}`;
+  }
+
+  function __formatDrawingDMSPair(pt){
+    const ll = __drawingWorldToLL(pt);
+    const fmt = (typeof formatSetcaCoordDMS === 'function') ? formatSetcaCoordDMS : null;
+    if(!fmt) return __formatDrawingLL(pt);
+    return `${fmt(ll.lat, true)} | ${fmt(ll.lon, false)}`;
+  }
+
+  function __parseDrawingDmsPair(latRaw, lonRaw){
+    const parseDms = (typeof parseSetcaCoordDMSOnly === 'function') ? parseSetcaCoordDMSOnly : null;
+    if(!parseDms) return null;
+    const lat = parseDms(latRaw, true);
+    const lon = parseDms(lonRaw, false);
+    if(lat===null || lon===null) return null;
+    const ref = __drawingRefCenter();
+    if(typeof llToLocalNM === 'function') return llToLocalNM(lat, lon, +ref.lat || 0, +ref.lon || 0);
+    const k = Math.cos((+ref.lat || 0) * Math.PI / 180);
+    return { x:(lon - (+ref.lon || 0)) * k * 60, y:-(lat - (+ref.lat || 0)) * 60 };
+  }
+
+  function __lineVisualEndpoints(d){
+    return {
+      a: __getDrawingWorldPoint(d, {x:+d.x || 0, y:+d.y || 0}),
+      b: __getDrawingWorldPoint(d, {x:+d.ex || 0, y:+d.ey || 0})
+    };
+  }
+
+  function __setLineVisualEndpoints(d, aWorld, bWorld){
+    const ang = __getDrawingAngleRad(d);
+    if(!ang){
+      d.x = aWorld.x; d.y = aWorld.y; d.ex = bWorld.x; d.ey = bWorld.y;
+      return true;
+    }
+    const anchor = { x:(aWorld.x + bWorld.x) / 2, y:(aWorld.y + bWorld.y) / 2 };
+    const aStored = __rotateWorldAround(anchor, aWorld, -ang);
+    const bStored = __rotateWorldAround(anchor, bWorld, -ang);
+    d.x = aStored.x; d.y = aStored.y; d.ex = bStored.x; d.ey = bStored.y;
+    return true;
+  }
+
+  function __setPolyRouteVisualPoint(d, index, target){
+    if(!d || !Array.isArray(d.pts) || !d.pts[index]) return false;
+    const ang = __getDrawingAngleRad(d);
+    if(!ang){
+      d.pts[index] = {x:target.x, y:target.y};
+      try{ const c = polyCentroid(d.pts); d.x = c.x; d.y = c.y; }catch(_){}
+      return true;
+    }
+    const visualPts = d.pts.map(pt=>__getDrawingWorldPoint(d, pt));
+    visualPts[index] = {x:target.x, y:target.y};
+    const anchor = polyCentroid(visualPts);
+    d.x = anchor.x; d.y = anchor.y;
+    d.pts = visualPts.map(pt=>__rotateWorldAround(anchor, pt, -ang));
+    return true;
+  }
+
+  function __squareVisualCorners(d){
+    const side = Math.max(0, +d.a || 0);
+    const half = side / 2;
+    const center = {x:+d.x || 0, y:+d.y || 0};
+    const ang = __getDrawingAngleRad(d);
+    return [
+      {key:'1', label:'Esquina 1', local:{x:-half, y:-half}, baseDeg:-135},
+      {key:'2', label:'Esquina 2', local:{x: half, y:-half}, baseDeg:-45},
+      {key:'3', label:'Esquina 3', local:{x: half, y: half}, baseDeg:45},
+      {key:'4', label:'Esquina 4', local:{x:-half, y: half}, baseDeg:135}
+    ].map(c=>{
+      const p = {x:center.x + c.local.x, y:center.y + c.local.y};
+      return Object.assign({}, c, {world: ang ? __rotateWorldAround(center, p, ang) : p});
+    });
+  }
+
+  function __setSquareCornerWorld(d, index, target){
+    const corners = __squareVisualCorners(d);
+    const cur = corners[index];
+    if(!cur) return false;
+    const opposite = corners[(index + 2) % 4];
+    const dx = target.x - opposite.world.x;
+    const dy = target.y - opposite.world.y;
+    const diag = Math.hypot(dx, dy);
+    if(diag < 0.01) return false;
+    d.x = (target.x + opposite.world.x) / 2;
+    d.y = (target.y + opposite.world.y) / 2;
+    d.a = diag / Math.SQRT2;
+    const worldDeg = Math.atan2(dy, dx) * 180 / Math.PI;
+    d.angleDeg = ((worldDeg - cur.baseDeg) % 360 + 360) % 360;
+    return true;
+  }
+
+  function __singleCoordinateLabel(d){
+    if(!d) return 'Posicion';
+    if(d.type === 'circle' || d.type === 'bullseye' || __isCapDrawing(d)) return 'Centro';
+    if(d.type === 'label') return 'Etiqueta';
+    if(d.type === 'point') return 'Punto';
+    return 'Posicion';
+  }
+
+  function __getDrawingCoordinateTargets(d){
+    if(!d) return [];
+    if((d.type === 'line' || d.type === 'arwy') && d.ex !== undefined){
+      return [
+        {key:'1', label:'Punta 1', get:()=>__lineVisualEndpoints(d).a, set:(p)=>{ const e=__lineVisualEndpoints(d); return __setLineVisualEndpoints(d, p, e.b); }},
+        {key:'2', label:'Punta 2', get:()=>__lineVisualEndpoints(d).b, set:(p)=>{ const e=__lineVisualEndpoints(d); return __setLineVisualEndpoints(d, e.a, p); }}
+      ];
+    }
+    if((d.type === 'route' || d.type === 'polygon') && Array.isArray(d.pts) && d.pts.length){
+      const base = d.type === 'route' ? 'Punto ruta' : 'Esquina';
+      return d.pts.map((pt, i)=>({
+        key:String(i + 1),
+        label:`${base} ${i + 1}`,
+        get:()=>__getDrawingWorldPoint(d, d.pts[i]),
+        set:(p)=>__setPolyRouteVisualPoint(d, i, p)
+      }));
+    }
+    if(d.type === 'square' && d.a !== undefined){
+      return __squareVisualCorners(d).map((c, i)=>({
+        key:c.key,
+        label:c.label,
+        get:()=>__squareVisualCorners(d)[i].world,
+        set:(p)=>__setSquareCornerWorld(d, i, p)
+      }));
+    }
+    return [{
+      key:'1',
+      label:__singleCoordinateLabel(d),
+      get:()=>({x:+d.x || 0, y:+d.y || 0}),
+      set:(p)=>{ d.x = p.x; d.y = p.y; return true; }
+    }];
+  }
+
+  function __nearestDrawingCoordinateTarget(targets){
+    if(!targets || !targets.length) return null;
+    try{
+      if(!cvs || typeof toScreen !== 'function') return targets[0];
+      const rect = cvs.getBoundingClientRect();
+      const px = __ctxOpenAt.x - rect.left;
+      const py = __ctxOpenAt.y - rect.top;
+      let best = targets[0], bestDist = Infinity;
+      targets.forEach(t=>{
+        const p = t.get();
+        const s = toScreen(p.x, p.y);
+        const dist = Math.hypot(px - s.x, py - s.y);
+        if(dist < bestDist){ best = t; bestDist = dist; }
+      });
+      return best;
+    }catch(_){
+      return targets[0];
+    }
+  }
+
+  function __chooseDrawingCoordinateTarget(d, targets){
+    if(!targets.length) return null;
+    if(targets.length === 1) return targets[0];
+    const nearest = __nearestDrawingCoordinateTarget(targets) || targets[0];
+    const shown = targets.slice(0, 28).map(t=>{
+      const p = t.get();
+      return `${t.key} = ${t.label} | ${__formatDrawingDMSPair(p)}`;
+    });
+    if(targets.length > shown.length) shown.push(`... escribe un numero del 1 al ${targets.length}`);
+    const raw = prompt(`Selecciona el punto del grafico que quieres mover:\n${shown.join('\n')}`, nearest.key);
+    if(raw === null) return null;
+    const key = String(raw || nearest.key).trim();
+    return targets.find(t=>t.key === key) || targets[(parseInt(key, 10) || 1) - 1] || nearest;
+  }
+
+  function __commitDrawingCoordinateEdit(d){
+    if(d && d.id) st.selectedDrawing = d.id;
+    if(typeof repaintNav === 'function') repaintNav();
+    if(typeof repaintAlt === 'function') repaintAlt();
+    if(typeof repaintPairs === 'function') repaintPairs();
+    try{ if(window.renderDrawingScopePanel) window.renderDrawingScopePanel(); }catch(_){}
+    try{ if(window.__saveLocalDrawingsSoon) window.__saveLocalDrawingsSoon(); }catch(_){}
+    if(window._SETCA_SYNC && typeof window._SETCA_SYNC.push === 'function') window._SETCA_SYNC.push();
+  }
+
+  function __editDrawingCoordinates(d){
+    const targets = __getDrawingCoordinateTargets(d);
+    const target = __chooseDrawingCoordinateTarget(d, targets);
+    if(!target) return false;
+    const current = target.get();
+    const ll = __drawingWorldToLL(current);
+    const fmt = (typeof formatSetcaCoordDMS === 'function') ? formatSetcaCoordDMS : null;
+    const curLat = fmt ? fmt(ll.lat, true) : '';
+    const curLon = fmt ? fmt(ll.lon, false) : '';
+    const latRaw = prompt(`Latitud DMS para ${target.label}\nEjemplo: 12°01'20"S`, curLat);
+    if(latRaw === null) return false;
+    const lonRaw = prompt(`Longitud DMS para ${target.label}\nEjemplo: 77°06'50"W`, curLon);
+    if(lonRaw === null) return false;
+    const p = __parseDrawingDmsPair(latRaw, lonRaw);
+    if(!p){
+      alert('Coordenada invalida. Usa grados, minutos y segundos con hemisferio. Ejemplos:\nLat: 12°01\'20"S\nLon: 77°06\'50"W');
+      return false;
+    }
+    const ok = target.set(p);
+    if(ok === false){
+      alert('No se pudo mover ese punto con la coordenada indicada.');
+      return false;
+    }
+    __commitDrawingCoordinateEdit(d);
+    return true;
+  }
+
   function ensureCtxMenu(){
     if(__ctx) return __ctx;
     __ctx = document.getElementById('drawingCtxMenu');
@@ -13164,6 +13577,7 @@ addEventListener('blur', ()=>{ __dDown = false; __eDown = false; __etaDrag = nul
       __ctx.id = 'drawingCtxMenu';
       __ctx.innerHTML = `
         <button class="ctxItem" data-act="rename">Cambiar nombre</button>
+        <button class="ctxItem" data-act="coords">Coordenadas</button>
         <button class="ctxItem" data-act="color">Cambiar color</button>
         <button class="ctxItem" data-act="capAngle">Ángulo gráfico</button>
         <button class="ctxItem" data-act="width">Grosor de línea</button>
@@ -13179,6 +13593,12 @@ addEventListener('blur', ()=>{ __dDown = false; __eDown = false; __etaDrag = nul
       const act = b.getAttribute('data-act');
       const id = __ctxTargetId;
       const d = id ? __findDrawingById(id) : null;
+
+      if(act==='coords' && d){
+        __editDrawingCoordinates(d);
+        hideCtx();
+        return;
+      }
 
       if(act==='color' && d){
   // Mostrar paleta de colores (rápida) en vez del selector simple
@@ -13748,7 +14168,9 @@ addEventListener('mouseup',(e)=>{
     const c = polyCentroid(pts);
     const id='D-'+Math.random().toString(36).slice(2,6).toUpperCase();
     st.drawings.push({ownerSide:(window.__SETCA_getCurrentSide ? window.__SETCA_getCurrentSide() : 'neutral'),visibility:'global',createdBy:(window.__SETCA_getCurrentDrawingCreator ? window.__SETCA_getCurrentDrawingCreator() : 'sinNombre'),id,type:tool.tool,x:c.x,y:c.y,pts,lw:0.6});
-    ensureDrawingName(st.drawings[st.drawings.length-1]);
+    const __newDrawing = st.drawings[st.drawings.length-1];
+    try{ if(window.__SETCA_isLocalDrawingWorkstation && window.__SETCA_isLocalDrawingWorkstation()) __newDrawing.visibility = 'local'; }catch(_){}
+    ensureDrawingName(__newDrawing);
     st.selectedDrawing = id;
     try{ if(window.renderDrawingScopePanel) window.renderDrawingScopePanel(); }catch(_){}
     try{ if(window.__saveLocalDrawingsSoon) window.__saveLocalDrawingsSoon(); }catch(_){}
@@ -13801,6 +14223,10 @@ addEventListener('mouseup',(e)=>{
       }
     }
 
+    if(created){
+      const __newDrawing = st.drawings[st.drawings.length-1];
+      try{ if(window.__SETCA_isLocalDrawingWorkstation && window.__SETCA_isLocalDrawingWorkstation()) __newDrawing.visibility = 'local'; }catch(_){}
+    }
     if(created) st.selectedDrawing = id;
     if(created){
       try{ if(window.renderDrawingScopePanel) window.renderDrawingScopePanel(); }catch(_){}
@@ -13813,66 +14239,9 @@ addEventListener('mouseup',(e)=>{
   });
 
   // Place button uses numeric inputs (y luego vuelve a la regla)
-  // Crear punto por coordenadas geográficas (Lat/Lon en DMS o decimal)
+  // Crear punto por coordenadas geográficas (Lat/Lon en DMS)
   function __parseCoordDMS(val, isLat){
-    if(val===null || val===undefined) return null;
-    let s0 = String(val).trim();
-    if(!s0) return null;
-
-    // Normaliza: mayúsculas, decimal con punto, y soporta OESTE/ESTE
-    let s = s0.toUpperCase().replace(/,/g,'.');
-    s = s.replace(/OESTE/g,'W').replace(/ESTE/g,'E');
-
-    // Decimal puro (opcional hemisferio al final)
-    const dec = s.match(/^\s*([-+]?\d+(?:\.\d+)?)\s*([NSEWO])?\s*$/);
-    if(dec){
-      let n = parseFloat(dec[1]);
-      if(!isFinite(n)) return null;
-      let sign = (n<0) ? -1 : 1;
-      n = Math.abs(n);
-      let hemi = dec[2] ? dec[2].toUpperCase() : null;
-      if(hemi==='O') hemi='W';
-      if(hemi){
-        if(hemi==='S' || hemi==='W') sign = -1;
-        if(hemi==='N' || hemi==='E') sign = 1;
-      }
-      const out = sign * n;
-      if(isLat && (out < -90 || out > 90)) return null;
-      if(!isLat && (out < -180 || out > 180)) return null;
-      return out;
-    }
-
-    // DMS: detecta hemisferio al final (N,S,E,W,O)
-    const hm = s.match(/([NSEWO])\s*$/);
-    let hemi = hm ? hm[1] : null;
-    if(hemi==='O') hemi='W';
-
-    // Extrae números: deg min sec (sec puede tener decimales)
-    const nums = s
-      .replace(/[NSEWO]/g,'')
-      .replace(/[^0-9.+-]+/g,' ')
-      .trim()
-      .split(/\s+/)
-      .filter(Boolean);
-    if(!nums.length) return null;
-
-    let deg = parseFloat(nums[0]);
-    let min = nums.length>1 ? parseFloat(nums[1]) : 0;
-    let sec = nums.length>2 ? parseFloat(nums[2]) : 0;
-    if(!isFinite(deg) || !isFinite(min) || !isFinite(sec)) return null;
-
-    let sign = 1;
-    if(deg < 0){ sign = -1; deg = Math.abs(deg); }
-
-    if(hemi){
-      if(hemi === 'S' || hemi === 'W') sign = -1;
-      if(hemi === 'N' || hemi === 'E') sign = 1;
-    }
-
-    const out = sign * (deg + (min/60) + (sec/3600));
-    if(isLat && (out < -90 || out > 90)) return null;
-    if(!isLat && (out < -180 || out > 180)) return null;
-    return out;
+    return (typeof parseSetcaCoordDMSOnly === 'function') ? parseSetcaCoordDMSOnly(val, isLat) : null;
   }
 
   const placeLLBtn = $('#placeLL');
@@ -13881,15 +14250,16 @@ addEventListener('mouseup',(e)=>{
       const lat = __parseCoordDMS($('#coordLat') && $('#coordLat').value, true);
       const lon = __parseCoordDMS($('#coordLon') && $('#coordLon').value, false);
       if(lat===null || lon===null){
-        alert('Coordenadas inválidas. Ejemplos:\n- 12°01\'20\"S\n- -12.0222\n- 77°06\'50\"W\n- -77.1139');
+        alert('Coordenadas inválidas. Usa grados, minutos y segundos con hemisferio.\nEjemplos:\n- 12°01\'20\"S\n- 77°06\'50\"W');
         return;
       }
-      const ref = (window.st && st.radarCenter) ? st.radarCenter : (window.CENTER_AIRPORT || {lat:0,lon:0});
+      const ref = (window.st && st.radarCenter) ? st.radarCenter : (typeof CENTER_AIRPORT !== 'undefined' ? CENTER_AIRPORT : {lat:0,lon:0});
       const p = llToLocalNM(lat, lon, ref.lat, ref.lon);
       const x = p.x, y = p.y;
       const id='D-'+Math.random().toString(36).slice(2,10).toUpperCase();
       // Punto por coordenadas: usar "+" para diferenciarlo visualmente, renombrable
       st.drawings.push({ownerSide:(window.__SETCA_getCurrentSide ? window.__SETCA_getCurrentSide() : 'neutral'),visibility:'global',createdBy:(window.__SETCA_getCurrentDrawingCreator ? window.__SETCA_getCurrentDrawingCreator() : 'sinNombre'),id,type:'point',x,y,dotColor:'rgba(255,255,255,0.85)',showName:true,marker:'plus',plusSize:4.5,plusWidth:1.2});
+      try{ if(window.__SETCA_isLocalDrawingWorkstation && window.__SETCA_isLocalDrawingWorkstation()) st.drawings[st.drawings.length-1].visibility = 'local'; }catch(_){}
       try{ if(typeof ensureDrawingName==='function') ensureDrawingName(st.drawings[st.drawings.length-1]); }catch(_){}
       st.selectedDrawing=id;
       try{ if(window.renderDrawingScopePanel) window.renderDrawingScopePanel(); }catch(_){}
@@ -13912,7 +14282,9 @@ function paintAlerts(force=false){
   if(!wrap) return;
   wrap.innerHTML='';
 
-  const missiles=(st.missiles||[]).filter(m=>!m.status || m.status==='fly');
+  const missiles=(typeof __setcaPruneConsumedMissiles === 'function'
+    ? __setcaPruneConsumedMissiles()
+    : (st.missiles||[])).filter(m=>typeof __setcaIsActiveMissile === 'function' ? __setcaIsActiveMissile(m) : (!m.status || m.status==='fly'));
 
   if(!missiles.length){
     const d=document.createElement('div');
@@ -17353,7 +17725,7 @@ requestAnimationFrame(()=>{ repaintPlanesList(); repaintNav(); repaintStudent();
     const panel = document.getElementById('missileAlerts');
     if(!panel) return;
     panel.innerHTML = '';
-    const missiles = st.missiles || [];
+    const missiles = (typeof __setcaPruneConsumedMissiles === 'function') ? __setcaPruneConsumedMissiles() : (st.missiles || []);
     if(!missiles.length){
       const d=document.createElement('div');
       d.className='card';
@@ -17362,7 +17734,7 @@ requestAnimationFrame(()=>{ repaintPlanesList(); repaintNav(); repaintStudent();
       return;
     }
     missiles.forEach(m=>{
-      if(m.status && m.status!=='fly') return;
+      if(typeof __setcaIsActiveMissile === 'function' ? !__setcaIsActiveMissile(m) : (m.status && m.status!=='fly')) return;
       const L = (st.planes||[]).find(p=>p.id===m.launcher)
             || (st.gtc||[]).find(g=>g && String(g.id||'')===String(m.launcher||''))
             || {name: m.launcherName || m.launcher, x:m.x, y:m.y};
@@ -17438,6 +17810,7 @@ requestAnimationFrame(()=>{ repaintPlanesList(); repaintNav(); repaintStudent();
   setInterval(()=>{
     try{
       const s = window.st || {};
+      try{ if(typeof window.__setcaPruneConsumedMissiles === 'function') window.__setcaPruneConsumedMissiles(); }catch(_){ }
       const missiles = Array.isArray(s.missiles) ? s.missiles : [];
       const impactMarks = Array.isArray(s.impactMarks) ? s.impactMarks : [];
       const jammers = s.planes ? s.planes.filter(p=>p.jamming).map(p=>p.id).sort() : [];
@@ -17478,8 +17851,15 @@ requestAnimationFrame(()=>{ repaintPlanesList(); repaintNav(); repaintStudent();
 
         // Missiles sync
         if(Array.isArray(next.missiles)){
+          const completedMissileIds = (typeof __setcaCompletedMissileIds === 'function')
+            ? __setcaCompletedMissileIds([].concat(
+                Array.isArray(window.st.impactMarks) ? window.st.impactMarks : [],
+                Array.isArray(next.impactMarks) ? next.impactMarks : []
+              ))
+            : new Set();
           const existing = new Set((window.st.missiles||[]).map(m=>m.id));
           next.missiles.forEach(m=>{
+            if((typeof __setcaIsActiveMissile === 'function') && !__setcaIsActiveMissile(m, completedMissileIds)) return;
             if(!existing.has(m.id)){
               (window.st.missiles||[]).push(Object.assign({}, m));
               if(window.showLaunchNotice) window.showLaunchNotice(m);
@@ -17497,6 +17877,7 @@ requestAnimationFrame(()=>{ repaintPlanesList(); repaintNav(); repaintStudent();
             }
           });
         }
+        try{ if(typeof window.__setcaPruneConsumedMissiles === 'function') window.__setcaPruneConsumedMissiles(); }catch(_){ }
       }catch(e){ console.warn('Apply remote missile/radar sync fail', e); }
     }, 90);
   });
@@ -17509,6 +17890,10 @@ requestAnimationFrame(()=>{ repaintPlanesList(); repaintNav(); repaintStudent();
       if(!evt || evt.by===currentUID) return;
       if(evt.event==='launch' && evt.missile){
         const m = evt.missile;
+        const completedMissileIds = (typeof __setcaCompletedMissileIds === 'function')
+          ? __setcaCompletedMissileIds(Array.isArray(window.st.impactMarks) ? window.st.impactMarks : [])
+          : new Set();
+        if((typeof __setcaIsActiveMissile === 'function') && !__setcaIsActiveMissile(m, completedMissileIds)) return;
         const exists = (window.st.missiles||[]).some(x=>x.id===m.id);
         if(!exists){
           (window.st.missiles||[]).push(Object.assign({}, m));
@@ -17955,7 +18340,8 @@ function setDrawingVisibility(id, visibility){
   if(!window.st || !Array.isArray(st.drawings) || !id) return;
   const d = st.drawings.find(x=>x && x.id===id);
   if(!d) return;
-  d.visibility = (visibility === 'local') ? 'local' : 'global';
+  const forceLocal = !!(window.__SETCA_isLocalDrawingWorkstation && window.__SETCA_isLocalDrawingWorkstation());
+  d.visibility = forceLocal ? 'local' : ((visibility === 'local') ? 'local' : 'global');
   persistDrawingMetaChanges();
   renderDrawingScopePanel();
 }
@@ -18111,6 +18497,7 @@ function renderDrawingScopePanel(){
     const hidden = isDrawingHiddenLocal(d.id);
     const groupHidden = isDrawingGroupHiddenLocal(drawingGroupName);
     const canDelete = canCurrentUserDeleteDrawing(d);
+    const forceLocalDrawingRole = !!(window.__SETCA_isLocalDrawingWorkstation && window.__SETCA_isLocalDrawingWorkstation());
     const creator = getDrawingCreatorName(d);
 
     const row = document.createElement('div');
@@ -18182,15 +18569,17 @@ function renderDrawingScopePanel(){
     globalBtn.type = 'button';
     globalBtn.className = 'drawingScopeActionBtn drawingScopeGLBtn focusable isGlobal ' + ((((d && d.visibility) === 'local') ? '' : 'isActive'));
     globalBtn.textContent = 'G';
-    globalBtn.title = canDelete
-      ? 'G = Global. Sincroniza este gráfico con todos.'
-      : 'Solo el creador puede marcar este gráfico como Global';
+    globalBtn.title = forceLocalDrawingRole
+      ? 'ODI-CO/ODT: los gráficos de esta estación son locales'
+      : (canDelete
+        ? 'G = Global. Sincroniza este gráfico con todos.'
+        : 'Solo el creador puede marcar este gráfico como Global');
     globalBtn.setAttribute('aria-label', globalBtn.title);
-    globalBtn.disabled = !canDelete;
+    globalBtn.disabled = !canDelete || forceLocalDrawingRole;
     globalBtn.addEventListener('click', (ev)=>{
       ev.preventDefault();
       ev.stopPropagation();
-      if(!canDelete) return;
+      if(!canDelete || forceLocalDrawingRole) return;
       setDrawingVisibility(d.id, 'global');
     });
 
@@ -21042,9 +21431,63 @@ document.querySelectorAll('#pCmdBody .btn').forEach(btn=>{
   function findBullseyeById(id){
     return getBullseyeDrawings().find(d => d.id === id) || null;
   }
+  function roleRaw(){
+    try{
+      const access = window.__setcaAccess || {};
+      return String(access.role || document.body.getAttribute('data-setca-role') || '').toLowerCase();
+    }catch(_){ return ''; }
+  }
+  function isOdiBullseyeRole(){
+    const r = roleRaw();
+    return r === 'odi' || r === 'odico' || r === 'odt';
+  }
+  function localBeRoleLabel(){
+    const r = roleRaw();
+    return r === 'odt' ? 'ODT' : 'ODI-CO';
+  }
+  function odiBeLocalKey(){
+    try{
+      const access = window.__setcaAccess || {};
+      const room = String(access.room || location.hash || 'local').replace(/^#/,'') || 'local';
+      const callsign = String(access.callsign || window.__setcaUsername || 'odi').trim() || 'odi';
+      return `setca_odi_be_local_${room}_${callsign}`;
+    }catch(_){ return 'setca_odi_be_local'; }
+  }
+  function readOdiBeMap(){
+    try{
+      const raw = localStorage.getItem(odiBeLocalKey());
+      const obj = raw ? JSON.parse(raw) : {};
+      return (obj && typeof obj === 'object') ? obj : {};
+    }catch(_){ return {}; }
+  }
+  function writeOdiBeMap(map){
+    try{ localStorage.setItem(odiBeLocalKey(), JSON.stringify(map || {})); }catch(_){ }
+  }
+  function getOdiLocalBeForPlane(planeId){
+    const key = String(planeId || '');
+    if(!key) return null;
+    const map = readOdiBeMap();
+    return Object.prototype.hasOwnProperty.call(map, key) ? String(map[key] || '') : null;
+  }
+  function setOdiLocalBeForPlane(planeId, beId){
+    const key = String(planeId || '');
+    if(!key) return;
+    const map = readOdiBeMap();
+    map[key] = String(beId || '');
+    writeOdiBeMap(map);
+  }
+  function effectiveBullseyeIdForPlane(plane){
+    if(!plane) return '';
+    if(isOdiBullseyeRole()){
+      const local = getOdiLocalBeForPlane(plane.id);
+      if(local !== null) return local;
+    }
+    return String(plane.beAssignedId || '');
+  }
   function formatBullseyeBraForPlane(plane){
-    if(!plane || !plane.beAssignedId) return '';
-    const be = findBullseyeById(plane.beAssignedId);
+    const beId = effectiveBullseyeIdForPlane(plane);
+    if(!plane || !beId) return '';
+    const be = findBullseyeById(beId);
     if(!be) return '';
     const dx = (plane.x||0) - (be.x||0);
     const dy = (plane.y||0) - (be.y||0);
@@ -21112,6 +21555,8 @@ document.querySelectorAll('#pCmdBody .btn').forEach(btn=>{
 
   let menu = null;
   let targetPlaneId = null;
+  let odiBeMenu = null;
+  let odiBeTargetPlaneId = null;
 
   function isAircraftDeferredContext(){
     try{ if(window.__SETCA_isInstructorAuthority && window.__SETCA_isInstructorAuthority()) return true; }catch(_){ }
@@ -21131,6 +21576,90 @@ document.querySelectorAll('#pCmdBody .btn').forEach(btn=>{
       if(String(access.role || '').toLowerCase() === 'pseudopilot') return 'Pseudo Piloto: Enter aplica y cierra';
     }catch(_){ }
     return 'Instructor: Enter aplica y cierra';
+  }
+
+  function ensureOdiBeMenu(){
+    if(odiBeMenu && odiBeMenu.isConnected) return odiBeMenu;
+    if(!document.getElementById('setcaOdiBeCtxStyle')){
+      const stl = document.createElement('style');
+      stl.id = 'setcaOdiBeCtxStyle';
+      stl.textContent = `
+        #setcaOdiBeCtx{
+          position:fixed; z-index:10045; display:none; width:260px; max-width:calc(100vw - 16px);
+          padding:9px; box-sizing:border-box; border:1px solid rgba(250,204,21,.34); border-radius:8px;
+          background:rgba(8,13,20,.97); color:#eef8ff; box-shadow:0 12px 30px rgba(0,0,0,.55);
+          font:12px/1.25 system-ui,Segoe UI,Roboto,Arial,sans-serif;
+        }
+        #setcaOdiBeCtx .odiBeHdr{color:#ffe066;font-weight:850;font-size:12px;margin-bottom:7px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+        #setcaOdiBeCtx label{display:flex;flex-direction:column;gap:4px;color:#b9c5cf;font-size:10px;font-weight:800;text-transform:uppercase;}
+        #setcaOdiBeCtx select{height:32px;border:1px solid #41515f;border-radius:6px;background:#111a22;color:#f8fbff;padding:5px 7px;font-weight:700;}
+        #setcaOdiBeCtx .odiBeFoot{display:flex;justify-content:flex-end;gap:7px;margin-top:8px;}
+        #setcaOdiBeCtx button{min-height:28px;border-radius:6px;border:1px solid rgba(148,163,184,.34);background:#17212b;color:#fff;padding:5px 9px;font-weight:800;cursor:pointer;}
+      `;
+      document.head.appendChild(stl);
+    }
+    odiBeMenu = document.getElementById('setcaOdiBeCtx');
+    if(!odiBeMenu){
+      odiBeMenu = document.createElement('div');
+      odiBeMenu.id = 'setcaOdiBeCtx';
+      odiBeMenu.innerHTML = `
+        <div class="odiBeHdr" id="setcaOdiBeHdr">Bullseye local</div>
+        <label>Seleccione Bullseye
+          <select id="setcaOdiBeSelect"></select>
+        </label>
+        <div class="odiBeFoot"><button type="button" data-act="close">CERRAR</button></div>
+      `;
+      document.body.appendChild(odiBeMenu);
+      odiBeMenu.addEventListener('mousedown', (e)=>{
+        try{ e.stopImmediatePropagation ? e.stopImmediatePropagation() : e.stopPropagation && e.stopPropagation(); }catch(_){ }
+      }, true);
+      odiBeMenu.addEventListener('change', (e)=>{
+        const sel = e.target && e.target.closest ? e.target.closest('#setcaOdiBeSelect') : null;
+        if(!sel || !odiBeTargetPlaneId) return;
+        setOdiLocalBeForPlane(odiBeTargetPlaneId, sel.value || '');
+        try{ repaintAll(); }catch(_){ }
+      }, true);
+      odiBeMenu.addEventListener('click', (e)=>{
+        const btn = e.target && e.target.closest ? e.target.closest('button[data-act="close"]') : null;
+        if(!btn) return;
+        consume(e);
+        hideOdiBeMenu();
+      }, true);
+    }
+    return odiBeMenu;
+  }
+
+  function hideOdiBeMenu(){
+    const m = ensureOdiBeMenu();
+    m.style.display = 'none';
+    odiBeTargetPlaneId = null;
+  }
+
+  function showOdiBeMenu(clientX, clientY, p){
+    if(!p) return;
+    const m = ensureOdiBeMenu();
+    const hdr = m.querySelector('#setcaOdiBeHdr');
+    const sel = m.querySelector('#setcaOdiBeSelect');
+    odiBeTargetPlaneId = String(p.id || '');
+    if(hdr) hdr.textContent = `${localBeRoleLabel()} BE - ${p.name || p.id || 'Aeronave'}`;
+    if(sel){
+      const list = getBullseyeDrawings();
+      sel.innerHTML = '<option value="">Sin BE</option>' + list.map(d=>{
+        const label = String((d.name && String(d.name).trim()) ? d.name : d.id);
+        return `<option value="${d.id}">${label}</option>`;
+      }).join('');
+      const cur = getOdiLocalBeForPlane(p.id);
+      sel.value = cur !== null ? cur : String(p.beAssignedId || '');
+    }
+    const pad = 8;
+    m.style.display = 'block';
+    m.style.left = '0px';
+    m.style.top = '0px';
+    const rect = m.getBoundingClientRect();
+    const x = Math.min(window.innerWidth - rect.width - pad, Math.max(pad, clientX));
+    const y = Math.min(window.innerHeight - rect.height - pad, Math.max(pad, clientY));
+    m.style.left = x + 'px';
+    m.style.top = y + 'px';
   }
 
   function ensureMenu(){
@@ -21253,9 +21782,9 @@ document.querySelectorAll('#pCmdBody .btn').forEach(btn=>{
               <option value="R77">R-77</option>
             </select>
           </label>
-          <label class="ctxFld ctxHidden" aria-hidden="true">
+          <label class="ctxFld">
             <span class="ctxLbl" id="setcaPlaneCtxBeLbl">Bullseye</span>
-            <select id="setcaPlaneCtxBe" tabindex="-1"></select>
+            <select id="setcaPlaneCtxBe"></select>
           </label>
         </div>
         <div class="ctxFoot">
@@ -21485,6 +22014,8 @@ document.querySelectorAll('#pCmdBody .btn').forEach(btn=>{
   }
 
   document.addEventListener('mousedown', (e)=>{
+    const odiM = ensureOdiBeMenu();
+    if(odiM.style.display !== 'none' && !odiM.contains(e.target)) hideOdiBeMenu();
     const m = ensureMenu();
     if(m.style.display === 'none') return;
     if(m.contains(e.target)) return;
@@ -21497,10 +22028,16 @@ document.querySelectorAll('#pCmdBody .btn').forEach(btn=>{
 
   cvs.addEventListener('contextmenu', (e)=>{
     if(window.st && st.modoObservador) return;
-    if(!canOpenAircraftContextMenu()) return;
     try{ if(window.tool && tool.tool && tool.tool !== 'none') return; }catch(_){ }
     const p = findPlaneAtClient(e.clientX, e.clientY);
     if(!p) return;
+    if(isOdiBullseyeRole()){
+      consume(e);
+      try{ if(Array.isArray(st.sel)) st.sel = [p.id]; }catch(_){ }
+      showOdiBeMenu(e.clientX, e.clientY, p);
+      return;
+    }
+    if(!canOpenAircraftContextMenu()) return;
     consume(e);
     try{ if(Array.isArray(st.sel)) st.sel = [p.id]; }catch(_){ }
     showMenu(e.clientX, e.clientY, p);
@@ -21692,6 +22229,84 @@ function gtcNextDartName(prefix='DART'){
   return `${String(prefix||'DART').toUpperCase()}-${++gtcMissileSeq}`;
 }
 
+const SETCA_GTC_LAUNCH_POLICY = Object.freeze({
+  maxShots: 6,
+  salvoSize: 2,
+  shotIntervalMs: 3000,
+  reloadMs: 90000
+});
+function __setcaLauncherPolicyNumber(v, fallback){
+  const n = Number(v);
+  return Number.isFinite(n) && n >= 0 ? n : fallback;
+}
+function __setcaLauncherPolicyPositive(v, fallback){
+  const n = Number(v);
+  return Number.isFinite(n) && n > 0 ? n : fallback;
+}
+function __setcaNormalizeLauncherPolicy(u, now=Date.now()){
+  if(!u || !__gtcCanLaunch(u)) return null;
+  const maxShots = Math.max(1, Math.round(__setcaLauncherPolicyPositive(u.missileMaxShots, SETCA_GTC_LAUNCH_POLICY.maxShots)));
+  const salvoSize = Math.max(1, Math.round(__setcaLauncherPolicyPositive(u.missileSalvoSize, SETCA_GTC_LAUNCH_POLICY.salvoSize)));
+  const shotIntervalMs = Math.max(0, __setcaLauncherPolicyPositive(u.missileShotIntervalMs, SETCA_GTC_LAUNCH_POLICY.shotIntervalMs));
+  const reloadMs = Math.max(0, __setcaLauncherPolicyPositive(u.missileReloadMs, SETCA_GTC_LAUNCH_POLICY.reloadMs));
+  u.missileMaxShots = maxShots;
+  u.missileSalvoSize = salvoSize;
+  u.missileShotIntervalMs = shotIntervalMs;
+  u.missileReloadMs = reloadMs;
+  u.missileShotsFired = Math.max(0, Math.round(__setcaLauncherPolicyNumber(u.missileShotsFired, 0)));
+  u.missileSalvoShots = Math.max(0, Math.round(__setcaLauncherPolicyNumber(u.missileSalvoShots, 0)));
+  u.missileLastLaunchAt = __setcaLauncherPolicyNumber(u.missileLastLaunchAt, 0);
+  u.missileNextLaunchAt = __setcaLauncherPolicyNumber(u.missileNextLaunchAt, 0);
+  u.missileReloadUntil = __setcaLauncherPolicyNumber(u.missileReloadUntil, 0);
+  if(u.missileReloadUntil > 0 && now >= u.missileReloadUntil){
+    u.missileReloadUntil = 0;
+    u.missileSalvoShots = 0;
+    u.missileNextLaunchAt = 0;
+  }
+  return {
+    maxShots,
+    salvoSize,
+    shotIntervalMs,
+    reloadMs,
+    remaining: Math.max(0, maxShots - u.missileShotsFired),
+    waitMs: Math.max(0, Math.max(u.missileNextLaunchAt || 0, u.missileReloadUntil || 0) - now)
+  };
+}
+function __setcaFormatWaitMs(ms){
+  const sec = Math.max(0, Math.ceil((Number(ms)||0) / 1000));
+  const mm = Math.floor(sec / 60);
+  const ss = sec % 60;
+  return mm ? `${mm}:${String(ss).padStart(2,'0')}` : `${ss}s`;
+}
+function __setcaCanReserveLauncherShot(u, now=Date.now()){
+  const policy = __setcaNormalizeLauncherPolicy(u, now);
+  if(!policy) return { ok:false, reason:'invalid', waitMs:0, remaining:0 };
+  if(policy.remaining <= 0) return { ok:false, reason:'empty', waitMs:0, remaining:0 };
+  if(u.missileReloadUntil > now) return { ok:false, reason:'reload', waitMs:u.missileReloadUntil - now, remaining:policy.remaining };
+  if(u.missileNextLaunchAt > now) return { ok:false, reason:'interval', waitMs:u.missileNextLaunchAt - now, remaining:policy.remaining };
+  return { ok:true, policy, remaining:policy.remaining };
+}
+function __setcaReserveLauncherShot(u, now=Date.now()){
+  const gate = __setcaCanReserveLauncherShot(u, now);
+  if(!gate.ok) return gate;
+  const policy = gate.policy;
+  u.missileShotsFired = Math.min(policy.maxShots, (Number(u.missileShotsFired)||0) + 1);
+  u.missileSalvoShots = (Number(u.missileSalvoShots)||0) + 1;
+  u.missileLastLaunchAt = now;
+  u.missileNextLaunchAt = now + policy.shotIntervalMs;
+  if(u.missileShotsFired < policy.maxShots && u.missileSalvoShots >= policy.salvoSize){
+    u.missileReloadUntil = now + policy.reloadMs;
+    u.missileNextLaunchAt = u.missileReloadUntil;
+    u.missileSalvoShots = 0;
+  }
+  if(u.missileShotsFired >= policy.maxShots){
+    u.missileNextLaunchAt = 0;
+    u.missileReloadUntil = 0;
+  }
+  return { ok:true, remaining:Math.max(0, policy.maxShots - u.missileShotsFired) };
+}
+try{ window.__SETCA_getGtcLaunchPolicyStatus = function(u){ return __setcaCanReserveLauncherShot(u, Date.now()); }; }catch(_){ }
+
 function gtcLaunchMissile(u, opts={}){
   try{
     if(!u || !u.id) return false;
@@ -21731,6 +22346,16 @@ function gtcLaunchMissile(u, opts={}){
     st.missiles = Array.isArray(st.missiles) ? st.missiles : [];
     const id = String(launchOpts.missileId || ('gtcm_' + Date.now().toString(36) + '_' + Math.random().toString(36).slice(2,6)));
     if(id && st.missiles.some(m=>m && String(m.id || '') === id)) return false;
+    const launchGate = __setcaCanReserveLauncherShot(u, Date.now());
+    if(!launchGate.ok){
+      const label = String(u.name || u.label || 'LANZADOR');
+      if(launchGate.reason === 'empty') try{ logEvent(`LANZAMIENTO: ${label} sin misiles disponibles (6/6).`); }catch(_){ }
+      else if(launchGate.reason === 'reload') try{ logEvent(`LANZAMIENTO: ${label} recargando (${__setcaFormatWaitMs(launchGate.waitMs)}).`); }catch(_){ }
+      else if(launchGate.reason === 'interval') try{ logEvent(`LANZAMIENTO: ${label} espere intervalo (${__setcaFormatWaitMs(launchGate.waitMs)}).`); }catch(_){ }
+      return false;
+    }
+    __setcaReserveLauncherShot(u, Date.now());
+    try{ if(typeof gtcPersist === 'function') gtcPersist('soft'); }catch(_){ }
     st.missileStats = __normalizeMissileStats(st.missileStats);
     st.missileStats.dart += 1;
     const name = String(launchOpts.missileName || ((typeof gtcNextDartName === 'function') ? gtcNextDartName(u.missileCode || u.shortLabel || 'DART') : 'DART'));
@@ -21752,6 +22377,9 @@ function gtcLaunchMissile(u, opts={}){
       travKM: 0,
       rangeKM: maxRNm * NM2KM,
       maxAltFt: maxHFt,
+      launchedAt: Date.now(),
+      launcherShotNumber: Number(u.missileShotsFired || 0),
+      launcherRemainingShots: Math.max(0, Number(u.missileMaxShots || SETCA_GTC_LAUNCH_POLICY.maxShots) - Number(u.missileShotsFired || 0)),
       status: 'fly'
     };
     st.missiles.push(__setcaLocalMissile);
@@ -21916,6 +22544,7 @@ function gtcNormalizeUnit(u, idx){
   if(!Number.isFinite(+item.misH)) item.misH = item.canLaunch ? 30000 : 0;
   if(item.trackPlaneId === undefined || item.trackPlaneId === null) item.trackPlaneId = '';
   if(!String(item.statusGlyph || '').trim()) item.statusGlyph = item.canLaunch ? '▲' : '⌁';
+  if(item.canLaunch && typeof __setcaNormalizeLauncherPolicy === 'function') __setcaNormalizeLauncherPolicy(item, Date.now());
   return item;
 }
 
@@ -22068,6 +22697,16 @@ function repaintGTC(){
     gbtn.className = `gtc-green-btn focusable ${canLaunch ? '' : 'radar'}`.trim();
     gbtn.textContent = u.statusGlyph || (canLaunch ? '▲' : '⌁');
     gbtn.title = canLaunch ? (canUseAssets ? 'Lanzar misil al objetivo seleccionado' : 'Solo ODT e INSTRUCTOR pueden disparar') : 'Indicador de detección';
+    if(canLaunch && canUseAssets){
+      const launchPolicy = (typeof __setcaCanReserveLauncherShot === 'function') ? __setcaCanReserveLauncherShot(u, Date.now()) : null;
+      if(launchPolicy && !launchPolicy.ok){
+        gbtn.title = launchPolicy.reason === 'empty'
+          ? 'Sin misiles disponibles (6/6)'
+          : `Lanzador en espera: ${__setcaFormatWaitMs(launchPolicy.waitMs)}`;
+      }else{
+        gbtn.title = `Lanzar misil al objetivo seleccionado - quedan ${launchPolicy ? launchPolicy.remaining : 6}`;
+      }
+    }
     gbtn.setAttribute('aria-label', canLaunch ? 'Lanzar misil' : 'Indicador radar');
     if(canLaunch && !canUseAssets) gbtn.disabled = true;
     if(canLaunch && canUseAssets){
@@ -23339,9 +23978,9 @@ import { getAuth } from "https://www.gstatic.com/firebasejs/10.12.3/firebase-aut
     try{
       const role = String((access && access.role) || '').toLowerCase();
       const localPanelSelector = (role === 'odi' || role === 'odico')
-        ? '#vuelosList input,#vuelosList select,#vuelosList button,#pairA,#pairB,#doPair,#unPair'
+        ? '#vuelosList input,#vuelosList select,#vuelosList button,#pairA,#pairB,#doPair,#unPair,#pDraw input,#pDraw select,#pDraw button'
         : (role === 'odt'
-            ? '#pGTC input,#pGTC select,#pGTC button'
+            ? '#pGTC input,#pGTC select,#pGTC button,#pDraw input,#pDraw select,#pDraw button'
             : (role === 'pseudopilot'
                 ? '#navCards input,#navCards select,#navCards button,#pAlt input,#pAlt select,#pAlt button'
                 : ''));
@@ -23385,6 +24024,51 @@ import { getAuth } from "https://www.gstatic.com/firebasejs/10.12.3/firebase-aut
         }
       }
     }catch(_){ }
+  }
+
+  if(!window.__SETCA_LOCAL_DRAW_LAUNCHER_WIRED__){
+    window.__SETCA_LOCAL_DRAW_LAUNCHER_WIRED__ = true;
+    function __setcaLocalDrawRole(){
+      try{
+        const a = window.__setcaAccess || {};
+        return String(a.role || document.body.getAttribute('data-setca-role') || '').toLowerCase();
+      }catch(_){ return ''; }
+    }
+    function __setcaIsLocalDrawRole(){
+      const r = __setcaLocalDrawRole();
+      return r === 'odi' || r === 'odico' || r === 'odt';
+    }
+    window.__SETCA_refreshLocalDrawingLauncher = function(){
+      const btn = document.getElementById('setcaLocalDrawLauncher');
+      const pDraw = document.getElementById('pDraw');
+      const pAlerts = document.getElementById('pAlerts');
+      const right = document.getElementById('right');
+      const alertsHeader = pAlerts ? pAlerts.querySelector('.panel-header') : null;
+      const alertsToggle = alertsHeader ? alertsHeader.querySelector('.toggle') : null;
+      const bodyEl = document.body;
+      const enabled = __setcaIsLocalDrawRole();
+      if(!btn || !pDraw || !pAlerts || !right || !bodyEl || !alertsHeader) return;
+      if(enabled){
+        if(btn.parentElement !== alertsHeader) alertsHeader.insertBefore(btn, alertsToggle || null);
+        if(pDraw.parentElement !== right || pDraw.nextElementSibling !== pAlerts) right.insertBefore(pDraw, pAlerts);
+        btn.style.display = '';
+        pDraw.style.display = bodyEl.classList.contains('setca-local-draw-open') ? 'flex' : 'none';
+      }else{
+        bodyEl.classList.remove('setca-local-draw-open');
+        btn.style.display = 'none';
+      }
+    };
+    document.addEventListener('click', (ev)=>{
+      const btn = ev.target && ev.target.closest ? ev.target.closest('#setcaLocalDrawLauncher') : null;
+      if(!btn) return;
+      ev.preventDefault();
+      ev.stopPropagation();
+      document.body.classList.toggle('setca-local-draw-open');
+      try{ window.__SETCA_refreshLocalDrawingLauncher(); }catch(_){ }
+      try{ if(typeof renderDrawingScopePanel === 'function') renderDrawingScopePanel(); }catch(_){ }
+    }, true);
+    setTimeout(()=>{ try{ window.__SETCA_refreshLocalDrawingLauncher(); }catch(_){ } }, 250);
+    setTimeout(()=>{ try{ window.__SETCA_refreshLocalDrawingLauncher(); }catch(_){ } }, 1200);
   }
 
   function applyRoleAccess(access){
@@ -23446,6 +24130,7 @@ import { getAuth } from "https://www.gstatic.com/firebasejs/10.12.3/firebase-aut
     if(navPanel) navPanel.style.display = (!planning && !freeplay && accessRole === 'default') ? 'none' : '';
     try{ __SETCA_applyPseudoPilotUnitMgrRestrictions(access); }catch(_){ }
     try{ __SETCA_refreshLocalWorkstationPanels(access); }catch(_){ }
+    try{ if(window.__SETCA_refreshLocalDrawingLauncher) window.__SETCA_refreshLocalDrawingLauncher(); }catch(_){ }
     if(planning || freeplay){
       try{
         const chip = document.getElementById('stateChip');
@@ -28413,3 +29098,4 @@ import { getDatabase, ref, get, set } from "https://www.gstatic.com/firebasejs/1
 </script>
 </body>
 </html>
+by Wallace
