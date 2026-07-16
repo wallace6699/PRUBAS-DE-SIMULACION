@@ -1,5 +1,6 @@
 <!DOCTYPE html>
-<!-- ESTE SIMULADOR SE ENCUENTRA EN FASE DE PRUEBA - PUEDEN OCURRIR ERRORES DURANTE EL FUNCIONAMIENTO 2.7 -->
+<!-- SETCA v43.1: fix acceso instructor sala normal -->
+<!-- ESTE SIMULADOR SE ENCUENTRA EN FASE DE PRUEBA - PUEDEN OCURRIR ERRORES DURANTE EL FUNCIONAMIENTO 2.8-->
 <html lang="es">
 <head>
 <meta charset="utf-8"/>
@@ -1319,6 +1320,26 @@ let __setcaLastAppliedRemoteTs = 0;
         console.warn("Manual cloud refresh error:", e);
         return false;
       }
+    }
+  };
+
+  window.__SETCA_publishContingenciesGlobal = async (contingencies) => {
+    if(__localOnlyMode || !__SETCA_isInstructorAuthority()) return false;
+    const clean = __SETCA_cleanContingenciesForSync(contingencies || {});
+    try{
+      await runTransaction(stateRef, current=>{
+        const base = (current && typeof current === 'object') ? {...current} : {};
+        base.contingencies = clean;
+        base.lastWriteBy = currentUID || 'instructor-pending';
+        base.lastWriteRole = 'default';
+        base.instructorAuthority = true;
+        base.lastUpdate = serverTimestamp();
+        return base;
+      });
+      return true;
+    }catch(e){
+      console.warn('SETCA contingencies global sync error:', e);
+      return false;
     }
   };
 
@@ -8446,6 +8467,29 @@ function __SETCA_canUseContingencies(){
     return String(a.role || 'default').toLowerCase() === 'default' && !a.planning && !a.freeplay;
   }catch(_){ return false; }
 }
+function __SETCA_syncContingenciesGlobal(){
+  if(!__SETCA_canUseContingencies()) return false;
+  const current = __SETCA_cleanContingenciesForSync(__SETCA_ensureContingencies());
+  const publisher = window.__SETCA_publishContingenciesGlobal;
+  if(typeof publisher === 'function'){
+    Promise.resolve(publisher(current)).then(ok=>{
+      if(ok) return;
+      const sync = window._SETCA_SYNC || window.SETCA_SYNC;
+      if(sync && typeof sync.pushNow === 'function') sync.pushNow();
+      else if(sync && typeof sync.push === 'function') sync.push();
+    }).catch(e=>{
+      console.warn('SETCA contingencies global publish fallback:', e);
+      const sync = window._SETCA_SYNC || window.SETCA_SYNC;
+      if(sync && typeof sync.pushNow === 'function') sync.pushNow();
+      else if(sync && typeof sync.push === 'function') sync.push();
+    });
+    return true;
+  }
+  const sync = window._SETCA_SYNC || window.SETCA_SYNC;
+  if(sync && typeof sync.pushNow === 'function') return sync.pushNow();
+  if(sync && typeof sync.push === 'function') return sync.push();
+  return false;
+}
 function __SETCA_applyDelayLag(planeId, seconds){
   if(!__SETCA_canUseContingencies()){ alert('Solo el Instructor puede aplicar contingencias.'); return false; }
   const id = String(planeId || '');
@@ -8463,13 +8507,7 @@ function __SETCA_applyDelayLag(planeId, seconds){
     by:String((window.__setcaAccess && window.__setcaAccess.callsign) || window.__setcaUsername || 'SETCA')
   };
   try{ draw && draw(); }catch(_){ }
-  // SETCA_FIX_DELAYLAG_SYNC: el canal real de nube es _SETCA_SYNC.
-  // Antes se intentaba usar window.SETCA_SYNC, por eso la contingencia podía no propagarse.
-  try{
-    const sync = window._SETCA_SYNC || window.SETCA_SYNC;
-    if(sync && typeof sync.pushNow === 'function') sync.pushNow();
-    else if(sync && typeof sync.push === 'function') sync.push();
-  }catch(_){ }
+  __SETCA_syncContingenciesGlobal();
   return true;
 }
 function __SETCA_applyFadeLost(planeId, seconds){
@@ -8488,11 +8526,7 @@ function __SETCA_applyFadeLost(planeId, seconds){
     by:String((window.__setcaAccess && window.__setcaAccess.callsign) || window.__setcaUsername || 'SETCA')
   };
   try{ draw && draw(); }catch(_){ }
-  try{
-    const sync = window._SETCA_SYNC || window.SETCA_SYNC;
-    if(sync && typeof sync.pushNow === 'function') sync.pushNow();
-    else if(sync && typeof sync.push === 'function') sync.push();
-  }catch(_){ }
+  __SETCA_syncContingenciesGlobal();
   return true;
 }
 
@@ -8530,11 +8564,7 @@ function __SETCA_applyDisplayFailure(callsign, seconds){
     by:String((window.__setcaAccess && window.__setcaAccess.callsign) || window.__setcaUsername || 'SETCA')
   };
   try{ draw && draw(); }catch(_){ }
-  try{
-    const sync = window._SETCA_SYNC || window.SETCA_SYNC;
-    if(sync && typeof sync.pushNow === 'function') sync.pushNow();
-    else if(sync && typeof sync.push === 'function') sync.push();
-  }catch(_){ }
+  __SETCA_syncContingenciesGlobal();
   return true;
 }
 function __SETCA_drawRadarFailureOverlay(){
@@ -8623,6 +8653,35 @@ window.__hydrateLocalDrawingsIntoState = __hydrateLocalDrawingsIntoState;
 let __localPrefs = __lsLoad(__PREF_KEY, {});
 // Predicción siempre inicia en 0 al abrir esta vista.
 if(__localPrefs && typeof __localPrefs === 'object') __localPrefs.predMin = 0;
+const __SETCA_LOCAL_ALTITUDE_FORMATS = (()=>{
+  const src = (__localPrefs && __localPrefs.planeAltitudeFormats && typeof __localPrefs.planeAltitudeFormats === 'object')
+    ? __localPrefs.planeAltitudeFormats
+    : {};
+  const out = Object.create(null);
+  Object.keys(src).forEach(id=>{ out[String(id)] = String(src[id]).toLowerCase() === 'fl' ? 'fl' : 'ft'; });
+  return out;
+})();
+window.__SETCA_getLocalPlaneAltitudeFormat = (planeOrId)=>{
+  const id = String((planeOrId && typeof planeOrId === 'object') ? planeOrId.id : (planeOrId || ''));
+  return (id && __SETCA_LOCAL_ALTITUDE_FORMATS[id] === 'fl') ? 'fl' : 'ft';
+};
+window.__SETCA_setLocalPlaneAltitudeFormat = (planeOrId, format)=>{
+  const id = String((planeOrId && typeof planeOrId === 'object') ? planeOrId.id : (planeOrId || ''));
+  if(!id) return 'ft';
+  const next = String(format || '').toLowerCase() === 'fl' ? 'fl' : 'ft';
+  __SETCA_LOCAL_ALTITUDE_FORMATS[id] = next;
+  __localPrefs.planeAltitudeFormats = {...__SETCA_LOCAL_ALTITUDE_FORMATS};
+  if(typeof window.__saveLocalPrefs === 'function') window.__saveLocalPrefs();
+  else __lsSave(__PREF_KEY, __localPrefs);
+  return next;
+};
+window.__SETCA_formatLocalPlaneAltitude = (planeOrId, altitudeFt)=>{
+  const ft = Math.max(0, Number.isFinite(+altitudeFt) ? +altitudeFt : 0);
+  if(window.__SETCA_getLocalPlaneAltitudeFormat(planeOrId) === 'fl'){
+    return String(Math.round(ft / 100)).padStart(3, '0');
+  }
+  return `${Math.round(ft)}ft`;
+};
 const __SETCA_LABEL_FIELDS_DEFAULT = Object.freeze({
   callsign:true,
   tipo:false,
@@ -11581,7 +11640,9 @@ function drawPlane(p){
     const bx = Math.round(__dbAnchorX + p.tagDx);
     const by = Math.round(__dbAnchorY + p.tagDy);
     const __beText = (typeof window.__SETCA_BE_getTextForPlane === 'function') ? (window.__SETCA_BE_getTextForPlane(p) || '') : '';
-    const altText = st.metric ? `${(p.alt*FT2M|0)} m` : `${p.alt|0} ft`;
+    const altText = (typeof window.__SETCA_formatLocalPlaneAltitude === 'function')
+      ? window.__SETCA_formatLocalPlaneAltitude(p, p.alt)
+      : (st.metric ? `${(p.alt*FT2M|0)} m` : `${p.alt|0} ft`);
     const spdText = st.metric ? `${p.spd.toFixed(0)} km/h` : `${(p.spd*KMH2KTS).toFixed(0)} kts`;
     const hdgText = `${String(p.hdg|0).padStart(3,'0')}°`;
     const labelFields = (typeof window.__SETCA_getLocalLabelFields === 'function') ? window.__SETCA_getLocalLabelFields() : {...__SETCA_LABEL_FIELDS_DEFAULT};
@@ -12638,6 +12699,38 @@ function __drawingLocalScreenPoint(d, px, py){
   return __rotatePoint(px - s.x, py - s.y, ang);
 }
 
+function __getDrawingLineStyle(d){
+  const value = String(d && d.lineStyle || '').toLowerCase();
+  if(value === 'solid' || value === 'dashed') return value;
+  return d && d.type === 'arwy' ? 'dashed' : 'solid';
+}
+
+function __applyDrawingLineStyle(targetCtx, d){
+  if(!targetCtx || typeof targetCtx.setLineDash !== 'function') return;
+  if(__getDrawingLineStyle(d) === 'dashed'){
+    targetCtx.setLineDash(d && d.type === 'arwy' ? [2,6] : [7,5]);
+  }else{
+    targetCtx.setLineDash([]);
+  }
+}
+
+function __translateDrawingGeometry(d, dx, dy){
+  if(!d || !Number.isFinite(dx) || !Number.isFinite(dy)) return false;
+  let moved = false;
+  if(Number.isFinite(+d.x)){ d.x = +d.x + dx; moved = true; }
+  if(Number.isFinite(+d.y)){ d.y = +d.y + dy; moved = true; }
+  if(Number.isFinite(+d.ex)){ d.ex = +d.ex + dx; moved = true; }
+  if(Number.isFinite(+d.ey)){ d.ey = +d.ey + dy; moved = true; }
+  if(Array.isArray(d.pts)){
+    d.pts.forEach(pt=>{
+      if(!pt || typeof pt !== 'object') return;
+      if(Number.isFinite(+pt.x)){ pt.x = +pt.x + dx; moved = true; }
+      if(Number.isFinite(+pt.y)){ pt.y = +pt.y + dy; moved = true; }
+    });
+  }
+  return moved;
+}
+
 function drawShapes(){
   st.drawings.forEach(d=>{
     if(!d) return;
@@ -12654,6 +12747,7 @@ function drawShapes(){
     const __baseLW = (typeof d.lw === 'number' && isFinite(d.lw)) ? d.lw : (d.type === 'arwy' ? 0.4 : 0.6);
     const __lw = (d.id === st.selectedDrawing) ? Math.min(8, Math.max(0.2, (__baseLW*1.6))) : Math.min(8, Math.max(0.2, __baseLW));
     ctx.lineWidth = __lw;
+    __applyDrawingLineStyle(ctx, d);
 
     const s = toScreen(d.x, d.y);
 
@@ -12735,13 +12829,11 @@ function drawShapes(){
     if(d.type === 'arwy' && d.ex!==undefined){
       const a0 = __getDrawingScreenPoint(d, {x:d.x, y:d.y});
       const e = __getDrawingScreenPoint(d, {x:d.ex, y:d.ey});
-      ctx.setLineDash([2,6]);
       ctx.lineWidth = __lw;
       ctx.beginPath();
       ctx.moveTo(a0.x, a0.y);
       ctx.lineTo(e.x, e.y);
       ctx.stroke();
-      ctx.setLineDash([]);
     }
 
 // --- CÍRCULO ---
@@ -13581,6 +13673,7 @@ addEventListener('blur', ()=>{ __dDown = false; __eDown = false; __etaDrag = nul
         <button class="ctxItem" data-act="color">Cambiar color</button>
         <button class="ctxItem" data-act="capAngle">Ángulo gráfico</button>
         <button class="ctxItem" data-act="width">Grosor de línea</button>
+        <button class="ctxItem" data-act="lineStyle">Línea: continua</button>
         <button class="ctxItem" data-act="delete">Eliminar gráfico</button>
         <input id="drawingColorPicker" type="color"
                style="position:absolute;left:-9999px;top:-9999px;opacity:0;width:1px;height:1px;pointer-events:none"/>`;
@@ -13635,6 +13728,13 @@ addEventListener('blur', ()=>{ __dDown = false; __eDown = false; __etaDrag = nul
         // Mostrar paleta de grosores
         hideCtx(true); // ocultar menú sin perder el target
         showWPal(__ctxOpenAt.x + 10, __ctxOpenAt.y + 10);
+        return;
+      }
+
+      if(act==='lineStyle' && d){
+        d.lineStyle = (__getDrawingLineStyle(d) === 'dashed') ? 'solid' : 'dashed';
+        __commitDrawingCoordinateEdit(d);
+        hideCtx();
         return;
       }
 
@@ -13899,6 +13999,12 @@ function showWPal(clientX, clientY){
     const cur = id ? __findDrawingById(id) : null;
     const angleBtn = m.querySelector('[data-act="capAngle"]');
     if(angleBtn) angleBtn.style.display = (__canRotateDrawing(cur) ? 'block' : 'none');
+    const lineStyleBtn = m.querySelector('[data-act="lineStyle"]');
+    if(lineStyleBtn){
+      const currentStyle = __getDrawingLineStyle(cur);
+      lineStyleBtn.textContent = currentStyle === 'dashed' ? 'Línea: punteada' : 'Línea: continua';
+      lineStyleBtn.title = currentStyle === 'dashed' ? 'Cambiar a línea continua' : 'Cambiar a línea punteada';
+    }
     const rect = m.getBoundingClientRect();
     const x = Math.min(window.innerWidth - rect.width - pad, Math.max(pad, clientX));
     const y = Math.min(window.innerHeight - rect.height - pad, Math.max(pad, clientY));
@@ -14046,11 +14152,7 @@ addEventListener('mousemove',e=>{
   if(window.st && window.st.modoObservador){ draggingPlane=null; draggingDrawing=null; dragStart=null; return; }
   if(draggingDrawing){
   const dx=(e.clientX-dragStart.x)/(zoom*PX_PER_NM), dy=(e.clientY-dragStart.y)/(zoom*PX_PER_NM);
-  draggingDrawing.x+=dx; draggingDrawing.y+=dy;
-  if(draggingDrawing.ex!==undefined){ draggingDrawing.ex+=dx; draggingDrawing.ey+=dy; }
-  if(draggingDrawing.type==='polygon' && Array.isArray(draggingDrawing.pts)){
-    draggingDrawing.pts.forEach(p=>{ p.x+=dx; p.y+=dy; });
-  }
+  __translateDrawingGeometry(draggingDrawing, dx, dy);
   dragStart={x:e.clientX,y:e.clientY};
 }
   if(draggingPlane){
@@ -14075,8 +14177,12 @@ addEventListener('mouseup',(e)=>{
       return;
     }
     if(movedPlane) try{ if(window.__SETCA_markAircraftDirty) window.__SETCA_markAircraftDirty(movedPlane); }catch(_){ }
-    if(movedPlane && typeof window.__SETCA_scheduleAircraftSync1s === 'function') window.__SETCA_scheduleAircraftSync1s();
-    else if(window._SETCA_SYNC && typeof window._SETCA_SYNC.push==='function') window._SETCA_SYNC.push();
+    if(movedDrawing) try{ if(window.__saveLocalDrawingsSoon) window.__saveLocalDrawingsSoon(); }catch(_){ }
+    if(movedPlane){
+      if(typeof window.__SETCA_scheduleAircraftSync1s === 'function') window.__SETCA_scheduleAircraftSync1s();
+      else if(window._SETCA_SYNC && typeof window._SETCA_SYNC.push==='function') window._SETCA_SYNC.push();
+    }
+    if(movedDrawing && movedDrawing.visibility === 'global' && window._SETCA_SYNC && typeof window._SETCA_SYNC.push==='function') window._SETCA_SYNC.push();
   }
 });
 
@@ -18633,6 +18739,132 @@ window.setDrawingHiddenLocal = setDrawingHiddenLocal;
 window.isDrawingGroupHiddenLocal = isDrawingGroupHiddenLocal;
 window.setDrawingGroupHiddenLocal = setDrawingGroupHiddenLocal;
 window.getDrawingCreatorName = getDrawingCreatorName;
+
+const __SETCA_DRAWING_CLIPBOARD = { drawing:null, pasteCount:0 };
+
+function __setcaCloneDrawingPlain(d){
+  if(!d || typeof d !== 'object') return null;
+  try{ return JSON.parse(JSON.stringify(d)); }catch(_){ return {...d}; }
+}
+function __setcaIsInstructorDrawingAuthority(){
+  try{
+    if(typeof window.__SETCA_isInstructorAuthority === 'function') return !!window.__SETCA_isInstructorAuthority();
+    const access = window.__setcaAccess || {};
+    return !access.planning && !access.freeplay && String(access.role || '').toLowerCase() === 'default';
+  }catch(_){ return false; }
+}
+function __setcaCanUseDrawingClipboard(){
+  try{
+    if(window.st && st.modoObservador) return false;
+    const access = window.__setcaAccess || {};
+    const role = String(access.role || document.body.getAttribute('data-setca-role') || '').toLowerCase();
+    return role !== 'observer';
+  }catch(_){ return false; }
+}
+function __setcaNewDrawingCopyId(){
+  const used = new Set((window.st && Array.isArray(st.drawings) ? st.drawings : []).map(d=>String(d && d.id || '')));
+  let id = '';
+  do{ id = 'D-COPY-' + Date.now().toString(36).toUpperCase() + '-' + Math.random().toString(36).slice(2,6).toUpperCase(); }
+  while(used.has(id));
+  return id;
+}
+function __setcaUniqueDrawingCopyName(source){
+  const base = String((source && source.name) || getDrawingDisplayName(source) || 'Gráfico').trim() || 'Gráfico';
+  const names = new Set((window.st && Array.isArray(st.drawings) ? st.drawings : []).map(d=>String(d && d.name || '').trim().toLowerCase()).filter(Boolean));
+  let name = `${base} copia`;
+  let index = 2;
+  while(names.has(name.toLowerCase())) name = `${base} copia ${index++}`;
+  return name;
+}
+function __setcaShiftDrawingCopy(d, dx, dy){
+  if(!d) return d;
+  if(typeof __translateDrawingGeometry === 'function'){
+    __translateDrawingGeometry(d, dx, dy);
+    return d;
+  }
+  if(Number.isFinite(+d.x)) d.x = +d.x + dx;
+  if(Number.isFinite(+d.y)) d.y = +d.y + dy;
+  if(Number.isFinite(+d.ex)) d.ex = +d.ex + dx;
+  if(Number.isFinite(+d.ey)) d.ey = +d.ey + dy;
+  if(Array.isArray(d.pts)){
+    d.pts = d.pts.map(pt=>{
+      if(!pt || typeof pt !== 'object') return pt;
+      const q = {...pt};
+      if(Number.isFinite(+q.x)) q.x = +q.x + dx;
+      if(Number.isFinite(+q.y)) q.y = +q.y + dy;
+      return q;
+    });
+  }
+  return d;
+}
+function __setcaDrawingPasteOffset(pasteCount){
+  const z = (typeof zoom === 'number' && Number.isFinite(zoom) && zoom > 0) ? zoom : 1;
+  const pxPerNm = (typeof PX_PER_NM === 'number' && Number.isFinite(PX_PER_NM) && PX_PER_NM > 0) ? PX_PER_NM : 4;
+  const stepNm = Math.max(0.15, Math.min(5, 18 / (z * pxPerNm)));
+  const n = Math.max(1, Number(pasteCount) || 1);
+  return { dx:stepNm * n, dy:stepNm * n };
+}
+function __setcaRefreshAfterDrawingPaste(copy){
+  if(copy && copy.id) st.selectedDrawing = copy.id;
+  try{ if(typeof repaintNav === 'function') repaintNav(); }catch(_){ }
+  try{ if(typeof repaintAlt === 'function') repaintAlt(); }catch(_){ }
+  try{ if(typeof repaintPairs === 'function') repaintPairs(); }catch(_){ }
+  try{ if(typeof renderDrawingScopePanel === 'function') renderDrawingScopePanel(); }catch(_){ }
+  try{ if(window.__saveLocalDrawingsSoon) window.__saveLocalDrawingsSoon(); }catch(_){ }
+  if(copy && copy.visibility === 'global'){
+    try{
+      if(window._SETCA_SYNC && typeof window._SETCA_SYNC.push === 'function') window._SETCA_SYNC.push();
+      else if(typeof scheduleSync === 'function') scheduleSync();
+    }catch(_){ }
+  }
+}
+function __SETCA_copySelectedDrawing(){
+  if(!__setcaCanUseDrawingClipboard() || !window.st || !Array.isArray(st.drawings)) return false;
+  const selectedId = String(st.selectedDrawing || '');
+  const source = st.drawings.find(d=>d && String(d.id || '') === selectedId);
+  if(!source) return false;
+  __SETCA_DRAWING_CLIPBOARD.drawing = __setcaCloneDrawingPlain(source);
+  __SETCA_DRAWING_CLIPBOARD.pasteCount = 0;
+  return !!__SETCA_DRAWING_CLIPBOARD.drawing;
+}
+function __SETCA_pasteDrawing(){
+  if(!__setcaCanUseDrawingClipboard() || !window.st || !Array.isArray(st.drawings)) return false;
+  const source = __SETCA_DRAWING_CLIPBOARD.drawing;
+  if(!source) return false;
+  const copy = __setcaCloneDrawingPlain(source);
+  if(!copy) return false;
+  __SETCA_DRAWING_CLIPBOARD.pasteCount += 1;
+  const offset = __setcaDrawingPasteOffset(__SETCA_DRAWING_CLIPBOARD.pasteCount);
+  __setcaShiftDrawingCopy(copy, offset.dx, offset.dy);
+  copy.id = __setcaNewDrawingCopyId();
+  copy.name = __setcaUniqueDrawingCopyName(source);
+  copy.createdBy = (typeof getCurrentDrawingCreator === 'function') ? getCurrentDrawingCreator() : 'sinNombre';
+  copy.ownerSide = (window.__SETCA_getCurrentSide ? window.__SETCA_getCurrentSide() : (copy.ownerSide || 'neutral'));
+  copy.visibility = __setcaIsInstructorDrawingAuthority() ? 'global' : 'local';
+  delete copy.__syncAfter;
+  st.drawings.push(copy);
+  __setcaRefreshAfterDrawingPaste(copy);
+  return copy;
+}
+window.__SETCA_copySelectedDrawing = __SETCA_copySelectedDrawing;
+window.__SETCA_pasteDrawing = __SETCA_pasteDrawing;
+
+document.addEventListener('keydown', (ev)=>{
+  if(!ev || !ev.ctrlKey || ev.altKey || ev.repeat) return;
+  if(typeof __isEditableHotkeyTarget === 'function' && __isEditableHotkeyTarget(ev.target)) return;
+  const key = String(ev.key || '').toLowerCase();
+  if(key === 'c'){
+    if(__SETCA_copySelectedDrawing()){
+      ev.preventDefault();
+      if(ev.stopImmediatePropagation) ev.stopImmediatePropagation(); else ev.stopPropagation();
+    }
+  }else if(key === 'v'){
+    if(__SETCA_pasteDrawing()){
+      ev.preventDefault();
+      if(ev.stopImmediatePropagation) ev.stopImmediatePropagation(); else ev.stopPropagation();
+    }
+  }
+}, true);
 </script>
 
 
@@ -21669,7 +21901,7 @@ document.querySelectorAll('#pCmdBody .btn').forEach(btn=>{
       stl.id = 'setcaPlaneBeCtxStyle';
       stl.textContent = `
         #setcaPlaneBeCtx{
-          position:fixed; z-index:10040; width:392px; max-width:calc(100vw - 16px); display:none;
+          position:fixed; z-index:10040; width:440px; max-width:calc(100vw - 16px); display:none;
           box-sizing:border-box; padding:10px;
           background:#11151a; color:#f4f7fa;
           border:1px solid #4b5661; border-radius:8px;
@@ -21683,8 +21915,13 @@ document.querySelectorAll('#pCmdBody .btn').forEach(btn=>{
           white-space:nowrap; overflow:hidden; text-overflow:ellipsis;
         }
         #setcaPlaneBeCtx .ctxGrid{
-          display:grid; grid-template-columns:minmax(0,1fr) minmax(0,1fr); gap:8px 10px;
+          display:flex; flex-direction:column; gap:8px;
         }
+        #setcaPlaneBeCtx .ctxRow{display:grid; gap:8px 10px; min-width:0;}
+        #setcaPlaneBeCtx .ctxCols2{grid-template-columns:minmax(0,1fr) minmax(0,1fr);}
+        #setcaPlaneBeCtx .ctxCols3{grid-template-columns:minmax(0,1fr) 74px minmax(0,1.35fr);}
+        #setcaPlaneBeCtx .ctxCols1{grid-template-columns:minmax(0,1fr) minmax(0,1fr);}
+        #setcaPlaneBeCtx .ctxCols1.ctxFull{grid-template-columns:minmax(0,1fr);}
         #setcaPlaneBeCtx .ctxFld{ display:flex; min-width:0; flex-direction:column; gap:4px; }
         #setcaPlaneBeCtx .ctxFld.full{ grid-column:1 / -1; }
         #setcaPlaneBeCtx .ctxHidden{ display:none !important; }
@@ -21727,7 +21964,10 @@ document.querySelectorAll('#pCmdBody .btn').forEach(btn=>{
         }
         @media (max-width:440px){
           #setcaPlaneBeCtx{ width:calc(100vw - 16px); padding:8px; }
-          #setcaPlaneBeCtx .ctxGrid{ gap:7px 8px; }
+          #setcaPlaneBeCtx .ctxGrid{ gap:7px; }
+          #setcaPlaneBeCtx .ctxRow{ gap:7px 8px; }
+          #setcaPlaneBeCtx .ctxCols3{grid-template-columns:minmax(0,1fr) 70px;}
+          #setcaPlaneBeCtx .ctxCols3 .ctxFld:last-child{grid-column:1 / -1;}
         }
       `;
       document.head.appendChild(stl);
@@ -21739,56 +21979,81 @@ document.querySelectorAll('#pCmdBody .btn').forEach(btn=>{
       menu.innerHTML = `
         <div class="beCtxHdr" id="setcaPlaneBeCtxHdr">Aeronave</div>
         <div class="ctxGrid">
-          <label class="ctxFld">
-            <span class="ctxLbl">CALLSIGN</span>
-            <input id="setcaPlaneCtxCallsign" type="text" maxlength="32" placeholder="Callsign">
-          </label>
-          <label class="ctxFld">
-            <span class="ctxLbl">IFF</span>
-            <input id="setcaPlaneCtxIFF" type="text" inputmode="numeric" maxlength="4" placeholder="----">
-          </label>
-          <label class="ctxFld">
-            <span class="ctxLbl" id="setcaPlaneCtxAltLbl">ALT (FT)</span>
-            <input id="setcaPlaneCtxAlt" type="number" min="0" step="100">
-          </label>
-          <label class="ctxFld">
-            <span class="ctxLbl" id="setcaPlaneCtxSpdLbl">VEL (KTS)</span>
-            <input id="setcaPlaneCtxSpd" type="number" min="0" step="10">
-          </label>
-          <label class="ctxFld">
-            <span class="ctxLbl">GIRO &deg;/S</span>
-            <input id="setcaPlaneCtxTurn" type="number" min="0" step="0.1">
-          </label>
-          <label class="ctxFld">
-            <span class="ctxLbl">R&Eacute;GIMEN DE A/D FT/M</span>
-            <input id="setcaPlaneCtxVerticalRate" type="number" min="1" step="100">
-          </label>
-          <label class="ctxFld">
-            <span class="ctxLbl">TIPO</span>
-            <input id="setcaPlaneCtxTipo" type="text" maxlength="40" placeholder="Tipo">
-          </label>
-          <label class="ctxFld">
-            <span class="ctxLbl">ROL</span>
-            <select id="setcaPlaneCtxRole">${getPlaneRoleOptionsHtml('Neutral')}</select>
-          </label>
-          <label class="ctxFld">
-            <span class="ctxLbl">OBJETIVO</span>
-            <select id="setcaPlaneCtxTarget"></select>
-          </label>
-          <label class="ctxFld">
-            <span class="ctxLbl">MISIL</span>
-            <select id="setcaPlaneCtxMissile">
-              <option value="AMRAAM">AMRAAM</option>
-              <option value="R77">R-77</option>
-            </select>
-          </label>
-          <label class="ctxFld">
-            <span class="ctxLbl" id="setcaPlaneCtxBeLbl">Bullseye</span>
-            <select id="setcaPlaneCtxBe"></select>
-          </label>
+          <div class="ctxRow ctxCols2">
+            <label class="ctxFld">
+              <span class="ctxLbl">CALLSIGN</span>
+              <input id="setcaPlaneCtxCallsign" type="text" maxlength="32" placeholder="Callsign">
+            </label>
+            <label class="ctxFld">
+              <span class="ctxLbl">IFF</span>
+              <input id="setcaPlaneCtxIFF" type="text" inputmode="numeric" maxlength="4" placeholder="----">
+            </label>
+          </div>
+          <div class="ctxRow ctxCols3">
+            <label class="ctxFld">
+              <span class="ctxLbl" id="setcaPlaneCtxAltLbl">ALT (FT)</span>
+              <input id="setcaPlaneCtxAlt" type="number" min="0" step="100">
+            </label>
+            <label class="ctxFld">
+              <span class="ctxLbl">FMT ALT</span>
+              <select id="setcaPlaneCtxAltFormat">
+                <option value="ft">FT</option>
+                <option value="fl">FL</option>
+              </select>
+            </label>
+            <label class="ctxFld">
+              <span class="ctxLbl">R&Eacute;GIMEN A/D FT/M</span>
+              <input id="setcaPlaneCtxVerticalRate" type="number" min="1" step="100">
+            </label>
+          </div>
+          <div class="ctxRow ctxCols2">
+            <label class="ctxFld">
+              <span class="ctxLbl" id="setcaPlaneCtxSpdLbl">VEL (KTS)</span>
+              <input id="setcaPlaneCtxSpd" type="number" min="0" step="10">
+            </label>
+            <label class="ctxFld">
+              <span class="ctxLbl">RUMBO</span>
+              <input id="setcaPlaneCtxHdg" type="text" inputmode="numeric" maxlength="3" placeholder="000">
+            </label>
+          </div>
+          <div class="ctxRow ctxCols1">
+            <label class="ctxFld">
+              <span class="ctxLbl">GIRO &deg;/S</span>
+              <input id="setcaPlaneCtxTurn" type="number" min="0" step="0.1">
+            </label>
+          </div>
+          <div class="ctxRow ctxCols2">
+            <label class="ctxFld">
+              <span class="ctxLbl">TIPO</span>
+              <input id="setcaPlaneCtxTipo" type="text" maxlength="40" placeholder="Tipo">
+            </label>
+            <label class="ctxFld">
+              <span class="ctxLbl">ROL</span>
+              <select id="setcaPlaneCtxRole">${getPlaneRoleOptionsHtml('Neutral')}</select>
+            </label>
+          </div>
+          <div class="ctxRow ctxCols2">
+            <label class="ctxFld">
+              <span class="ctxLbl">OBJETIVO</span>
+              <select id="setcaPlaneCtxTarget"></select>
+            </label>
+            <label class="ctxFld">
+              <span class="ctxLbl">MISIL</span>
+              <select id="setcaPlaneCtxMissile">
+                <option value="AMRAAM">AMRAAM</option>
+                <option value="R77">R-77</option>
+              </select>
+            </label>
+          </div>
+          <div class="ctxRow ctxCols1 ctxFull">
+            <label class="ctxFld">
+              <span class="ctxLbl" id="setcaPlaneCtxBeLbl">BULLSEYE</span>
+              <select id="setcaPlaneCtxBe"></select>
+            </label>
+          </div>
         </div>
         <div class="ctxFoot">
-          <button type="button" data-act="fire">LAUNCH</button>
+          <button type="button" data-act="fire">LAUNCH MISSILE</button>
           <button type="button" data-act="close">CLOSE</button>
         </div>
         <div class="ctxHint" id="setcaPlaneCtxHint">Cambios sincronizados</div>
@@ -21826,6 +22091,14 @@ document.querySelectorAll('#pCmdBody .btn').forEach(btn=>{
       menu.addEventListener('change', (e)=>{
         const t = e.target;
         if(!t || !t.id || !String(t.id).startsWith('setcaPlaneCtx')) return;
+        if(t.id === 'setcaPlaneCtxAltFormat'){
+          const p = getTargetPlane();
+          if(p && typeof window.__SETCA_setLocalPlaneAltitudeFormat === 'function'){
+            window.__SETCA_setLocalPlaneAltitudeFormat(p, t.value);
+            try{ draw && draw(); }catch(_){ }
+          }
+          return;
+        }
         if(t.id === 'setcaPlaneCtxIFF'){
           const v = sanitizeXpdr(t.value);
           if(t.value !== v) t.value = v;
@@ -21838,6 +22111,10 @@ document.querySelectorAll('#pCmdBody .btn').forEach(btn=>{
         if(!t || !t.id || !String(t.id).startsWith('setcaPlaneCtx')) return;
         if(t.id === 'setcaPlaneCtxIFF'){
           const v = sanitizeXpdr(t.value);
+          if(t.value !== v) t.value = v;
+        }
+        if(t.id === 'setcaPlaneCtxHdg'){
+          const v = String(t.value || '').replace(/\D/g, '').slice(0, 3);
           if(t.value !== v) t.value = v;
         }
       }, true);
@@ -21885,8 +22162,10 @@ document.querySelectorAll('#pCmdBody .btn').forEach(btn=>{
     const m = ensureMenu();
     const hdr = m.querySelector('#setcaPlaneBeCtxHdr');
     const beSel = m.querySelector('#setcaPlaneCtxBe');
+    const altFormatSel = m.querySelector('#setcaPlaneCtxAltFormat');
     const altIn = m.querySelector('#setcaPlaneCtxAlt');
     const spdIn = m.querySelector('#setcaPlaneCtxSpd');
+    const hdgIn = m.querySelector('#setcaPlaneCtxHdg');
     const turnIn = m.querySelector('#setcaPlaneCtxTurn');
     const verticalRateIn = m.querySelector('#setcaPlaneCtxVerticalRate');
     const callsignIn = m.querySelector('#setcaPlaneCtxCallsign');
@@ -21898,11 +22177,20 @@ document.querySelectorAll('#pCmdBody .btn').forEach(btn=>{
     const hint = m.querySelector('#setcaPlaneCtxHint');
     const be = p.beAssignedId ? findBullseyeById(p.beAssignedId) : null;
     const roleVal = normalizePlaneRole(String((st.roles && st.roles[p.id]) || 'Neutral'));
-    if(hdr) hdr.textContent = `${p.name||p.id}${be ? ` · BE:${be.name||be.id}` : ''}`;
+    if(hdr) hdr.textContent = `CONTROL DE AERONAVE · ${p.name||p.id}${be ? ` · BE:${be.name||be.id}` : ''}`;
     fillBeOptions(beSel, p);
     fillTargetOptions(targetSel, p);
+    if(altFormatSel){
+      altFormatSel.value = (typeof window.__SETCA_getLocalPlaneAltitudeFormat === 'function')
+        ? window.__SETCA_getLocalPlaneAltitudeFormat(p)
+        : 'ft';
+    }
     if(altIn) altIn.value = String(altToUi(p));
     if(spdIn) spdIn.value = String(spdToUi(p));
+    if(hdgIn){
+      const hdg = ((Number(Number.isFinite(+p.tgtHdg) ? +p.tgtHdg : (+p.hdg || 0)) % 360) + 360) % 360;
+      hdgIn.value = String(Math.round(hdg) % 360).padStart(3, '0');
+    }
     if(turnIn) turnIn.value = String(Number(p.turn||0).toFixed(1));
     if(verticalRateIn) verticalRateIn.value = String(Math.round(getPlaneVerticalRateForMenu(p)));
     if(callsignIn) callsignIn.value = String((p.name ?? p.callsign ?? p.id ?? '') || '');
@@ -21929,6 +22217,7 @@ document.querySelectorAll('#pCmdBody .btn').forEach(btn=>{
     const beSel = m.querySelector('#setcaPlaneCtxBe');
     const altIn = m.querySelector('#setcaPlaneCtxAlt');
     const spdIn = m.querySelector('#setcaPlaneCtxSpd');
+    const hdgIn = m.querySelector('#setcaPlaneCtxHdg');
     const turnIn = m.querySelector('#setcaPlaneCtxTurn');
     const verticalRateIn = m.querySelector('#setcaPlaneCtxVerticalRate');
     const callsignIn = m.querySelector('#setcaPlaneCtxCallsign');
@@ -21940,6 +22229,8 @@ document.querySelectorAll('#pCmdBody .btn').forEach(btn=>{
 
     const altVal = Number(altIn && altIn.value);
     const spdVal = Number(spdIn && spdIn.value);
+    const hdgRaw = String(hdgIn && hdgIn.value || '').trim();
+    const hdgVal = hdgRaw ? Number(hdgRaw) : NaN;
     const turnVal = Number(turnIn && turnIn.value);
     const verticalRateVal = Number(verticalRateIn && verticalRateIn.value);
     const callsignVal = String(callsignIn && callsignIn.value || '').trim();
@@ -21954,6 +22245,7 @@ document.querySelectorAll('#pCmdBody .btn').forEach(btn=>{
       const patch = {};
       if(Number.isFinite(altVal)) patch.tgtAlt = altFromUi(altVal);
       if(Number.isFinite(spdVal)) patch.tgtSpd = spdFromUi(spdVal);
+      if(Number.isFinite(hdgVal)) patch.tgtHdg = ((hdgVal % 360) + 360) % 360;
       if(Number.isFinite(turnVal)) patch.turn = Math.max(0, turnVal);
       if(Number.isFinite(verticalRateVal) && verticalRateVal > 0) patch.verticalRateFpm = verticalRateVal;
       patch.name = callsignVal || String(p.id || '');
@@ -21970,6 +22262,7 @@ document.querySelectorAll('#pCmdBody .btn').forEach(btn=>{
     if(Number.isFinite(verticalRateVal) && verticalRateVal > 0) p.verticalRateFpm = verticalRateVal;
     if(Number.isFinite(altVal)) __SETCA_setCommandAlt(p, altFromUi(altVal));
     if(Number.isFinite(spdVal)) __SETCA_setCommandSpd(p, spdFromUi(spdVal));
+    if(Number.isFinite(hdgVal)) __SETCA_setCommandHdg(p, hdgVal);
     if(Number.isFinite(turnVal)) p.turn = Math.max(0, turnVal);
     if(callsignVal) p.name = callsignVal; else p.name = String(p.id || '');
     p.tipo = tipoVal;
@@ -27787,8 +28080,6 @@ import { getDatabase, ref, get, set } from "https://www.gstatic.com/firebasejs/1
     try{
       const m = $('#setcaPlaneBeCtx');
       if(!m) return;
-      const fire = m.querySelector('button[data-act="fire"]');
-      if(fire) fire.textContent = 'LAUNCH MISSILE';
       const apply = m.querySelector('button[data-act="apply"]');
       if(apply){ apply.tabIndex = -1; apply.setAttribute('aria-hidden','true'); }
       const foot = m.querySelector('.ctxFoot');
@@ -28309,11 +28600,10 @@ import { getDatabase, ref, get, set } from "https://www.gstatic.com/firebasejs/1
       if(!d || d.hiddenLocal) return;
       const color = d.color || (d.type==='arwy' ? 'rgba(56,189,248,.58)' : 'rgba(250,204,21,.52)');
       c.strokeStyle=color; c.fillStyle=color; c.lineWidth=Math.max(.8, Number(d.lw||1));
+      if(typeof __applyDrawingLineStyle === 'function') __applyDrawingLineStyle(c, d);
       if((d.type==='line'||d.type==='arwy'||d.type==='route') && Number.isFinite(+d.ex) && Number.isFinite(+d.ey)){
         const a=ptScreen({x:+d.x||0,y:+d.y||0,alt:0,hdg:0}), b=ptScreen({x:+d.ex||0,y:+d.ey||0,alt:0,hdg:0});
-        if(d.type==='arwy') c.setLineDash([10,8]); else c.setLineDash([]);
         c.beginPath(); c.moveTo(a.x,a.y); c.lineTo(b.x,b.y); c.stroke();
-        c.setLineDash([]);
       }else if(d.type==='circle'){
         const a=ptScreen({x:+d.x||0,y:+d.y||0,alt:0,hdg:0}), b=ptScreen({x:(+d.x||0)+(+d.r||+d.rad||10),y:+d.y||0,alt:0,hdg:0});
         c.beginPath(); c.arc(a.x,a.y,Math.abs(b.x-a.x),0,Math.PI*2); c.stroke();
@@ -29098,4 +29388,3 @@ import { getDatabase, ref, get, set } from "https://www.gstatic.com/firebasejs/1
 </script>
 </body>
 </html>
-by Wallace
