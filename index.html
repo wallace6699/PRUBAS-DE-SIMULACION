@@ -1,6 +1,6 @@
 <!DOCTYPE html>
 <!-- SETCA v43.1: fix acceso instructor sala normal -->
-<!-- ESTE SIMULADOR SE ENCUENTRA EN FASE DE PRUEBA - PUEDEN OCURRIR ERRORES DURANTE EL FUNCIONAMIENTO 2.8-->
+<!-- ESTE SIMULADOR SE ENCUENTRA EN FASE DE PRUEBA - PUEDEN OCURRIR ERRORES DURANTE EL FUNCIONAMIENTO 2.5.2 040326 -->
 <html lang="es">
 <head>
 <meta charset="utf-8"/>
@@ -338,16 +338,16 @@
     'x','y','hdg','tgtHdg','spd','tgtSpd','alt','tgtAlt','turn','turnBias',
     'routeManualUntil','targetId','beAssignedId','ctxMissileType','vsFpm','verticalRateFpm',
     'speedRateKmhps','awacsSweepAng','xpdr','name','tipo','fail','fuel',
-    'jamming','awacsCoverage','__cmdAt'
+    'jamming','awacsCoverage','capAssignedId','capTrackDirection','capAssignedAt','__cmdAt'
   ]);
 
   const __SETCA_AIRCRAFT_ORDER_NUMBER_FIELDS = new Set([
     'x','y','hdg','tgtHdg','spd','tgtSpd','alt','tgtAlt','turn',
     'routeIdx','routeLastChange','routeLastReached','routeFinishedAt',
-    'routeManualUntil','vsFpm','verticalRateFpm','speedRateKmhps','awacsSweepAng','fuel','__cmdAt'
+    'routeManualUntil','vsFpm','verticalRateFpm','speedRateKmhps','awacsSweepAng','fuel','capAssignedAt','__cmdAt'
   ]);
   const __SETCA_AIRCRAFT_ORDER_STRING_FIELDS = new Set([
-    'turnBias','targetId','beAssignedId','ctxMissileType','xpdr','name','tipo'
+    'turnBias','targetId','beAssignedId','ctxMissileType','xpdr','name','tipo','capAssignedId','capTrackDirection'
   ]);
   const __SETCA_AIRCRAFT_ORDER_BOOL_FIELDS = new Set(['jamming','awacsCoverage','routeEnabled','routeLoop','routeCompleted']);
 
@@ -415,9 +415,18 @@
       const p = window.st.planes.find(x=>x && String(x.id || '') === planeId);
       if(!p) return false;
       const patch = __SETCA_sanitizeAircraftPatch(order.patch || {});
+      const commandedHeading = Number(patch.tgtHdg);
+      const currentHeading = Number(p.tgtHdg);
+      const headingDifference = Number.isFinite(commandedHeading) && Number.isFinite(currentHeading)
+        ? Math.abs((((commandedHeading-currentHeading)+540)%360)-180)
+        : Infinity;
+      const hasManualHeading = Object.prototype.hasOwnProperty.call(patch, 'tgtHdg') && !String(patch.capAssignedId || '').trim() && headingDifference > 0.5;
+      if(hasManualHeading && typeof window.__SETCA_clearPlaneCapAssignment === 'function'){
+        window.__SETCA_clearPlaneCapAssignment(p, 'manual-heading');
+      }
       Object.keys(patch).forEach(key=>{
         const val = patch[key];
-        if((key === 'targetId' || key === 'beAssignedId') && !String(val || '').trim()){
+        if((key === 'targetId' || key === 'beAssignedId' || key === 'capAssignedId' || key === 'capTrackDirection') && !String(val || '').trim()){
           delete p[key];
           return;
         }
@@ -2408,7 +2417,8 @@ body[data-setca-role="default"] #pNav{
 
 .btn:active, .btn.btn-hold {
   background: yellow !important;
-  color:black !important;
+  color:#ffffff !important;
+  text-shadow:0 1px 1px rgba(0,0,0,.58) !important;
 }
 
 
@@ -2439,6 +2449,42 @@ body[data-setca-role="default"] #pNav{
   }
   #drawingCtxMenu .ctxItem:hover{
     background:rgba(255,224,102,0.12);
+  }
+  #drawingCtxMenu .ctxRenameRow{
+    display:grid;
+    grid-template-columns:minmax(0,1fr) 30px 30px;
+    align-items:center;
+    gap:4px;
+  }
+  #drawingCtxMenu .ctxRenameRow .ctxItem{
+    min-width:0;
+  }
+  #drawingCtxMenu .ctxCapDirection{
+    display:contents;
+  }
+  #drawingCtxMenu .ctxDirBtn{
+    width:30px;
+    height:30px;
+    display:inline-flex;
+    align-items:center;
+    justify-content:center;
+    padding:0;
+    border:1px solid rgba(255,255,255,0.18);
+    border-radius:6px;
+    background:rgba(255,255,255,0.04);
+    color:#fff;
+    font:700 17px/1 monospace;
+    cursor:pointer;
+  }
+  #drawingCtxMenu .ctxDirBtn:hover{
+    border-color:rgba(255,224,102,0.72);
+    background:rgba(255,224,102,0.16);
+  }
+  #drawingCtxMenu .ctxDirBtn.active{
+    border-color:#ffe066;
+    background:#b99718;
+    color:#fff;
+    box-shadow:0 0 0 1px rgba(255,224,102,0.25) inset;
   }
 
 
@@ -5217,13 +5263,6 @@ body.setca-gal-final-collapsed:is([data-setca-role="odt"],[data-setca-role="sama
     cursor: pointer !important;
   }
 
-  /* Cuando un botón esté seleccionado */
-  #planeList button.active {
-    background: #ffe066 !important; /* Amarillo */
-    border-color: #ffd700 !important;
-    color: #000 !important;
-  }
-
   /* Controles del botón "Etiqueta" (mantengo igual) */
   #tagControlWrap {
     display: flex;
@@ -7658,6 +7697,127 @@ body.setca-exit-mode #setcaRoleConsole{
 }
 </style>
 
+<style id="setca-local-button-state-style">
+/* Estado visual local: apagado verde, encendido amarillo. No modifica ni sincroniza datos. */
+body.setca-modern-ui :is(
+  #systemsBtn,
+  #alumnoBtn,
+  #odtBtn,
+  #observerBtn,
+  #uMetric,
+  #uImperial,
+  #altFt,
+  #altM,
+  #toggleAirports,
+  #modeDigital,
+  #toggleAwacsCov,
+  #contingenciesBtn,
+  #spiderWebToggle,
+  #observerAptoToggleBtn,
+  #setcaAirwaysToggle,
+  #aptoModeMajor,
+  #aptoModeAll,
+  #aptoModeCustom,
+  #gtcAssetListBtn,
+  #pGTCBody .gtcPresetBtn,
+  #navMeasureToggle,
+  #nav3DToggle,
+  #navReplayToggle,
+  #pDraw button.tool,
+  #planeList button,
+  #drawingCtxMenu .ctxDirBtn,
+  #gateJoinTab,
+  #gateCreateTab,
+  .setca-room-item,
+  .config-pop button[data-label-field],
+  .config-pop button[data-map-detail],
+  button[data-bias],
+  button[data-contingency]
+){
+  --setca-local-button-state:off;
+  --setca-local-button-bg:linear-gradient(180deg,#176b37 0%,#0a3d20 100%);
+  --setca-local-button-border:#39d879;
+  --setca-local-button-color:#ffffff;
+  --setca-local-button-shadow:inset 0 1px 0 rgba(255,255,255,.11),0 4px 12px rgba(0,0,0,.22);
+  --setca-local-button-text-shadow:0 1px 1px rgba(0,0,0,.52);
+  background:var(--setca-local-button-bg) !important;
+  border-color:var(--setca-local-button-border) !important;
+  color:var(--setca-local-button-color) !important;
+  box-shadow:var(--setca-local-button-shadow) !important;
+  text-shadow:var(--setca-local-button-text-shadow) !important;
+}
+body.setca-modern-ui :is(
+  #setca-local-state-specificity,
+  button.active,
+  button.hi,
+  button.is-on,
+  button.systemsOpen,
+  button.label-on,
+  button.biasOn,
+  button.setca-spawn-btn-armed,
+  button[aria-pressed="true"]
+):not(.samValBtn):not(.setca-validation-confirm),
+body.setca-modern-ui button[data-contingency].is-open{
+  --setca-local-button-state:on;
+  --setca-local-button-bg:linear-gradient(180deg,#d3ad16 0%,#927000 100%);
+  --setca-local-button-border:#ffe066;
+  --setca-local-button-color:#ffffff;
+  --setca-local-button-shadow:inset 0 1px 0 rgba(255,255,255,.30),0 0 0 1px rgba(255,224,102,.18),0 0 16px rgba(255,214,64,.28);
+  --setca-local-button-text-shadow:0 1px 2px rgba(0,0,0,.72);
+  background:var(--setca-local-button-bg) !important;
+  border-color:var(--setca-local-button-border) !important;
+  color:var(--setca-local-button-color) !important;
+  box-shadow:var(--setca-local-button-shadow) !important;
+  text-shadow:var(--setca-local-button-text-shadow) !important;
+}
+/* Los presets GTC tienen reglas heredadas muy específicas; reutilizan el mismo estado, no otro modelo. */
+body.setca-modern-ui #pGTCBody .gtcPresetBtn.btn.mini,
+body.setca-modern-ui #gtcAssetListBtn{
+  background:var(--setca-local-button-bg) !important;
+  border-color:var(--setca-local-button-border) !important;
+  color:var(--setca-local-button-color) !important;
+  box-shadow:var(--setca-local-button-shadow) !important;
+  text-shadow:var(--setca-local-button-text-shadow) !important;
+}
+body.setca-modern-ui :is(
+  #systemsBtn,
+  #alumnoBtn,
+  #odtBtn,
+  #observerBtn,
+  #uMetric,
+  #uImperial,
+  #altFt,
+  #altM,
+  #toggleAirports,
+  #modeDigital,
+  #toggleAwacsCov,
+  #contingenciesBtn,
+  #spiderWebToggle,
+  #observerAptoToggleBtn,
+  #setcaAirwaysToggle,
+  #aptoModeMajor,
+  #aptoModeAll,
+  #aptoModeCustom,
+  #gtcAssetListBtn,
+  #pGTCBody .gtcPresetBtn,
+  #navMeasureToggle,
+  #nav3DToggle,
+  #navReplayToggle,
+  #pDraw button.tool,
+  #planeList button,
+  #drawingCtxMenu .ctxDirBtn,
+  #gateJoinTab,
+  #gateCreateTab,
+  .setca-room-item,
+  .config-pop button[data-label-field],
+  .config-pop button[data-map-detail],
+  button[data-bias],
+  button[data-contingency]
+):hover{
+  filter:brightness(1.10) !important;
+}
+</style>
+
 </head>
 <body class="setca-access-locked setca-modern-ui">
 
@@ -8681,6 +8841,47 @@ window.__SETCA_formatLocalPlaneAltitude = (planeOrId, altitudeFt)=>{
     return String(Math.round(ft / 100)).padStart(3, '0');
   }
   return `${Math.round(ft)}ft`;
+};
+const __SETCA_LOCAL_SPEED_FORMATS = (()=>{
+  const src = (__localPrefs && __localPrefs.planeSpeedFormats && typeof __localPrefs.planeSpeedFormats === 'object')
+    ? __localPrefs.planeSpeedFormats
+    : {};
+  const out = Object.create(null);
+  Object.keys(src).forEach(id=>{ out[String(id)] = String(src[id]).toLowerCase() === 'mach' ? 'mach' : 'kts'; });
+  return out;
+})();
+window.__SETCA_getLocalPlaneSpeedFormat = (planeOrId)=>{
+  const id = String((planeOrId && typeof planeOrId === 'object') ? planeOrId.id : (planeOrId || ''));
+  return (id && __SETCA_LOCAL_SPEED_FORMATS[id] === 'mach') ? 'mach' : 'kts';
+};
+window.__SETCA_setLocalPlaneSpeedFormat = (planeOrId, format)=>{
+  const id = String((planeOrId && typeof planeOrId === 'object') ? planeOrId.id : (planeOrId || ''));
+  if(!id) return 'kts';
+  const next = String(format || '').toLowerCase() === 'mach' ? 'mach' : 'kts';
+  __SETCA_LOCAL_SPEED_FORMATS[id] = next;
+  __localPrefs.planeSpeedFormats = {...__SETCA_LOCAL_SPEED_FORMATS};
+  if(typeof window.__saveLocalPrefs === 'function') window.__saveLocalPrefs();
+  else __lsSave(__PREF_KEY, __localPrefs);
+  return next;
+};
+window.__SETCA_speedOfSoundKmh = (altitudeFt)=>{
+  const altitudeM = Math.max(0, Math.min(20000, (Number.isFinite(+altitudeFt) ? +altitudeFt : 0) * 0.3048));
+  const temperatureK = altitudeM <= 11000 ? (288.15 - 0.0065 * altitudeM) : 216.65;
+  return Math.sqrt(1.4 * 287.05287 * temperatureK) * 3.6;
+};
+window.__SETCA_speedKmhToMach = (speedKmh, altitudeFt)=>{
+  const soundKmh = window.__SETCA_speedOfSoundKmh(altitudeFt);
+  return soundKmh > 0 ? Math.max(0, Number(speedKmh) || 0) / soundKmh : 0;
+};
+window.__SETCA_speedMachToKmh = (mach, altitudeFt)=>{
+  return Math.max(0, Number(mach) || 0) * window.__SETCA_speedOfSoundKmh(altitudeFt);
+};
+window.__SETCA_formatLocalPlaneSpeed = (planeOrId, speedKmh, altitudeFt)=>{
+  const kmh = Math.max(0, Number.isFinite(+speedKmh) ? +speedKmh : 0);
+  if(window.__SETCA_getLocalPlaneSpeedFormat(planeOrId) === 'mach'){
+    return `M ${window.__SETCA_speedKmhToMach(kmh, altitudeFt).toFixed(2)}`;
+  }
+  return `${Math.round(kmh * KMH2KTS)} kts`;
 };
 const __SETCA_LABEL_FIELDS_DEFAULT = Object.freeze({
   callsign:true,
@@ -11441,6 +11642,7 @@ function updatePlane(p,dt){
     return;
   }
   updatePlaneSpeed(p,dt);
+  try{ if(typeof window.__SETCA_applyCapGuidance === 'function') window.__SETCA_applyCapGuidance(p,dt); }catch(_){ }
 // Giro hacia rumbo objetivo (con sesgo opcional I/D)
 const diffCW  = (p.tgtHdg - p.hdg + 360) % 360;   // giro a la derecha (clockwise)
 const diffCCW = (p.hdg - p.tgtHdg + 360) % 360;   // giro a la izquierda (counterclockwise)
@@ -11643,7 +11845,9 @@ function drawPlane(p){
     const altText = (typeof window.__SETCA_formatLocalPlaneAltitude === 'function')
       ? window.__SETCA_formatLocalPlaneAltitude(p, p.alt)
       : (st.metric ? `${(p.alt*FT2M|0)} m` : `${p.alt|0} ft`);
-    const spdText = st.metric ? `${p.spd.toFixed(0)} km/h` : `${(p.spd*KMH2KTS).toFixed(0)} kts`;
+    const spdText = (typeof window.__SETCA_formatLocalPlaneSpeed === 'function')
+      ? window.__SETCA_formatLocalPlaneSpeed(p, p.spd, p.alt)
+      : `${(p.spd*KMH2KTS).toFixed(0)} kts`;
     const hdgText = `${String(p.hdg|0).padStart(3,'0')}°`;
     const labelFields = (typeof window.__SETCA_getLocalLabelFields === 'function') ? window.__SETCA_getLocalLabelFields() : {...__SETCA_LABEL_FIELDS_DEFAULT};
     const dbLabelFields = {...labelFields};
@@ -12649,6 +12853,215 @@ function __capGeometryPx(d){
   return { straightHalfPx, halfWidthPx, angleRad: (capPreset.angleDeg || 0) * Math.PI / 180 };
 }
 
+function __getCapDirection(d){
+  return String(d && d.capDirection || '').toUpperCase() === 'L' ? 'L' : 'R';
+}
+
+function __capGeometryWorld(d){
+  const preset = __getCapPreset(d);
+  const straightHalf = Math.max(0.1, preset.longNM / 2);
+  const halfWidth = Math.max(0.1, preset.widthNM / 2);
+  const angleRad = (preset.angleDeg || 0) * Math.PI / 180;
+  return {
+    straightHalf,
+    halfWidth,
+    angleRad,
+    perimeter:4 * straightHalf + 2 * Math.PI * halfWidth
+  };
+}
+
+function __capLocalWorldPoint(d, wx, wy){
+  const g = __capGeometryWorld(d);
+  return __rotatePoint((+wx || 0) - (+d.x || 0), (+wy || 0) - (+d.y || 0), -g.angleRad);
+}
+
+function __capWorldPoint(d, lx, ly){
+  const g = __capGeometryWorld(d);
+  const q = __rotatePoint(lx, ly, g.angleRad);
+  return {x:(+d.x || 0) + q.x, y:(+d.y || 0) + q.y};
+}
+
+function __capNormalizeDistance(s, perimeter){
+  const p = Math.max(0.001, +perimeter || 0.001);
+  return ((+s || 0) % p + p) % p;
+}
+
+function __capTrackPointAt(d, distance){
+  const g = __capGeometryWorld(d);
+  const a = g.straightHalf;
+  const r = g.halfWidth;
+  let s = __capNormalizeDistance(distance, g.perimeter);
+  let lx = -a, ly = -r;
+  if(s <= 2*a){
+    lx = -a + s;
+    ly = -r;
+  }else if((s -= 2*a) <= Math.PI*r){
+    const theta = -Math.PI/2 + s/r;
+    lx = a + Math.cos(theta)*r;
+    ly = Math.sin(theta)*r;
+  }else if((s -= Math.PI*r) <= 2*a){
+    lx = a - s;
+    ly = r;
+  }else{
+    s -= 2*a;
+    const theta = Math.PI/2 + s/r;
+    lx = -a + Math.cos(theta)*r;
+    ly = Math.sin(theta)*r;
+  }
+  const point = __capWorldPoint(d, lx, ly);
+  point.s = __capNormalizeDistance(distance, g.perimeter);
+  point.perimeter = g.perimeter;
+  return point;
+}
+
+function __capNearestTrackPoint(d, wx, wy){
+  if(!__isCapDrawing(d)) return null;
+  const g = __capGeometryWorld(d);
+  const a = g.straightHalf;
+  const r = g.halfWidth;
+  const local = __capLocalWorldPoint(d, wx, wy);
+  const clamp = (v,min,max)=>Math.max(min,Math.min(max,v));
+  const candidates = [];
+  const add = (lx,ly,s)=>{
+    const dx = local.x-lx, dy = local.y-ly;
+    candidates.push({lx,ly,s:__capNormalizeDistance(s,g.perimeter),dist2:dx*dx+dy*dy});
+  };
+  const topX = clamp(local.x,-a,a);
+  add(topX,-r,topX+a);
+  let thetaR = Math.atan2(local.y,local.x-a);
+  thetaR = clamp(thetaR,-Math.PI/2,Math.PI/2);
+  add(a+Math.cos(thetaR)*r,Math.sin(thetaR)*r,2*a+(thetaR+Math.PI/2)*r);
+  const bottomX = clamp(local.x,-a,a);
+  add(bottomX,r,2*a+Math.PI*r+(a-bottomX));
+  let thetaL = Math.atan2(local.y,local.x+a);
+  if(thetaL < Math.PI/2) thetaL += 2*Math.PI;
+  thetaL = clamp(thetaL,Math.PI/2,3*Math.PI/2);
+  add(-a+Math.cos(thetaL)*r,Math.sin(thetaL)*r,4*a+Math.PI*r+(thetaL-Math.PI/2)*r);
+  candidates.sort((m,n)=>m.dist2-n.dist2);
+  const best = candidates[0];
+  const point = __capWorldPoint(d,best.lx,best.ly);
+  return {x:point.x,y:point.y,s:best.s,perimeter:g.perimeter,distance:Math.sqrt(best.dist2)};
+}
+
+function __capContainsWorldPoint(d, wx, wy, paddingNM){
+  if(!__isCapDrawing(d)) return false;
+  const g = __capGeometryWorld(d);
+  const q = __capLocalWorldPoint(d,wx,wy);
+  const pad = Math.max(0,+paddingNM || 0);
+  const a = g.straightHalf;
+  const r = g.halfWidth + pad;
+  if(q.x >= -a && q.x <= a && Math.abs(q.y) <= r) return true;
+  const cx = q.x < -a ? -a : a;
+  return Math.hypot(q.x-cx,q.y) <= r;
+}
+
+function __SETCA_findCapAtClient(clientX, clientY){
+  try{
+    const radar = document.getElementById('radar');
+    if(!radar || typeof toWorld !== 'function' || !window.st || !Array.isArray(st.drawings)) return null;
+    const rect = radar.getBoundingClientRect();
+    if(clientX < rect.left || clientX > rect.right || clientY < rect.top || clientY > rect.bottom) return null;
+    const world = toWorld(clientX-rect.left,clientY-rect.top);
+    for(let i=st.drawings.length-1;i>=0;i--){
+      const d = st.drawings[i];
+      if(!__isCapDrawing(d)) continue;
+      try{ if(typeof isDrawingHiddenLocal === 'function' && isDrawingHiddenLocal(d.id)) continue; }catch(_){ }
+      if(__capContainsWorldPoint(d,world.x,world.y,0.35)) return d;
+    }
+  }catch(_){ }
+  return null;
+}
+
+const __SETCA_CAP_GUIDANCE_RUNTIME = new WeakMap();
+
+function __SETCA_clearPlaneCapAssignment(p){
+  if(!p) return false;
+  const hadAssignment = !!String(p.capAssignedId || '').trim();
+  delete p.capAssignedId;
+  delete p.capTrackDirection;
+  delete p.capAssignedAt;
+  __SETCA_CAP_GUIDANCE_RUNTIME.delete(p);
+  return hadAssignment;
+}
+
+function __SETCA_capBearing(from, to){
+  return ((Math.atan2((+to.x || 0)-(+from.x || 0),-((+to.y || 0)-(+from.y || 0)))*180/Math.PI)%360+360)%360;
+}
+
+function __SETCA_capHeadingDifference(a,b){
+  return Math.abs((((+a || 0)-(+b || 0)+540)%360)-180);
+}
+
+function __SETCA_capGuidanceTarget(p, cap){
+  const nearest = __capNearestTrackPoint(cap,+p.x || 0,+p.y || 0);
+  if(!nearest) return null;
+  const preset = __getCapPreset(cap);
+  const speedNmPerSec = Math.max(0,+p.spd || +p.tgtSpd || 0) / 1.852 / 3600;
+  const maxLookahead = Math.max(2,Math.min(10,preset.widthNM*0.6+preset.longNM*0.12));
+  const lookahead = Math.max(0.8,Math.min(maxLookahead,speedNmPerSec*22));
+  const direction = __getCapDirection(cap);
+  const target = __capTrackPointAt(cap,nearest.s+(direction === 'R' ? lookahead : -lookahead));
+  return {target,heading:__SETCA_capBearing(p,target),direction};
+}
+
+function __SETCA_assignPlaneToCap(p, cap){
+  if(!p || !cap || !__isCapDrawing(cap) || !cap.id) return false;
+  const guidance = __SETCA_capGuidanceTarget(p,cap);
+  if(!guidance) return false;
+  const patch = {
+    capAssignedId:String(cap.id),
+    capTrackDirection:guidance.direction,
+    capAssignedAt:Date.now(),
+    routeEnabled:false,
+    routeManualUntil:0,
+    turnBias:'',
+    tgtHdg:guidance.heading
+  };
+  if(typeof __SETCA_routeAircraftPatchToInstructor === 'function' && __SETCA_routeAircraftPatchToInstructor(p,patch,'cap-assignment')){
+    return true;
+  }
+  Object.assign(p,patch);
+  p.turnBias = null;
+  __SETCA_CAP_GUIDANCE_RUNTIME.set(p,{capId:String(cap.id),lastTarget:guidance.heading});
+  try{ if(window.__SETCA_markAircraftDirty) window.__SETCA_markAircraftDirty(p); }catch(_){ }
+  return true;
+}
+
+function __SETCA_applyCapGuidance(p){
+  const capId = String(p && p.capAssignedId || '').trim();
+  if(!capId || !window.st || !Array.isArray(st.drawings)) return false;
+  const cap = st.drawings.find(d=>d && String(d.id || '') === capId && __isCapDrawing(d));
+  if(!cap){
+    __SETCA_clearPlaneCapAssignment(p);
+    return false;
+  }
+  const runtime = __SETCA_CAP_GUIDANCE_RUNTIME.get(p);
+  if(runtime && runtime.capId === capId && Number.isFinite(runtime.lastTarget) && Number.isFinite(+p.tgtHdg) && __SETCA_capHeadingDifference(p.tgtHdg,runtime.lastTarget) > 3){
+    __SETCA_clearPlaneCapAssignment(p);
+    return false;
+  }
+  const guidance = __SETCA_capGuidanceTarget(p,cap);
+  if(!guidance) return false;
+  p.routeEnabled = false;
+  p.routeManualUntil = 0;
+  p.turnBias = null;
+  p.capTrackDirection = guidance.direction;
+  p.tgtHdg = guidance.heading;
+  __SETCA_CAP_GUIDANCE_RUNTIME.set(p,{capId,lastTarget:guidance.heading});
+  return true;
+}
+
+try{
+  window.__SETCA_getCapDirection = __getCapDirection;
+  window.__SETCA_capTrackPointAt = __capTrackPointAt;
+  window.__SETCA_capNearestTrackPoint = __capNearestTrackPoint;
+  window.__SETCA_capContainsWorldPoint = __capContainsWorldPoint;
+  window.__SETCA_findCapAtClient = __SETCA_findCapAtClient;
+  window.__SETCA_assignPlaneToCap = __SETCA_assignPlaneToCap;
+  window.__SETCA_clearPlaneCapAssignment = __SETCA_clearPlaneCapAssignment;
+  window.__SETCA_applyCapGuidance = __SETCA_applyCapGuidance;
+}catch(_){ }
+
 function __canRotateDrawing(d){
   return !!(d && d.type !== 'bullseye');
 }
@@ -12785,6 +13198,25 @@ function drawShapes(){
       ctx.arc(-straightHalfPx, 0, halfWidthPx, Math.PI/2, -Math.PI/2, false);
       ctx.closePath();
       ctx.stroke();
+
+      const capDirection = __getCapDirection(d);
+      const arrowHalf = Math.max(8,Math.min(18,straightHalfPx*0.18));
+      const arrowEnd = capDirection === 'R' ? arrowHalf : -arrowHalf;
+      const arrowStart = -arrowEnd;
+      const arrowSign = capDirection === 'R' ? 1 : -1;
+      ctx.save();
+      ctx.strokeStyle = '#ffe066';
+      ctx.fillStyle = '#ffe066';
+      ctx.lineWidth = Math.max(1.5,__lw*1.7);
+      ctx.setLineDash([]);
+      ctx.beginPath();
+      ctx.moveTo(arrowStart,-halfWidthPx);
+      ctx.lineTo(arrowEnd,-halfWidthPx);
+      ctx.lineTo(arrowEnd-arrowSign*6,-halfWidthPx-4);
+      ctx.moveTo(arrowEnd,-halfWidthPx);
+      ctx.lineTo(arrowEnd-arrowSign*6,-halfWidthPx+4);
+      ctx.stroke();
+      ctx.restore();
 
       ctx.restore();
     }
@@ -13668,7 +14100,13 @@ addEventListener('blur', ()=>{ __dDown = false; __eDown = false; __etaDrag = nul
       __ctx = document.createElement('div');
       __ctx.id = 'drawingCtxMenu';
       __ctx.innerHTML = `
-        <button class="ctxItem" data-act="rename">Cambiar nombre</button>
+        <div class="ctxRenameRow">
+          <button class="ctxItem" data-act="rename">Cambiar nombre</button>
+          <span class="ctxCapDirection" role="group" aria-label="Sentido de vuelo CAP">
+            <button class="ctxDirBtn" data-act="capDirection" data-dir="L" title="Sentido hacia la izquierda" aria-label="Sentido CAP hacia la izquierda">&larr;</button>
+            <button class="ctxDirBtn" data-act="capDirection" data-dir="R" title="Sentido hacia la derecha" aria-label="Sentido CAP hacia la derecha">&rarr;</button>
+          </span>
+        </div>
         <button class="ctxItem" data-act="coords">Coordenadas</button>
         <button class="ctxItem" data-act="color">Cambiar color</button>
         <button class="ctxItem" data-act="capAngle">Ángulo gráfico</button>
@@ -13686,6 +14124,13 @@ addEventListener('blur', ()=>{ __dDown = false; __eDown = false; __etaDrag = nul
       const act = b.getAttribute('data-act');
       const id = __ctxTargetId;
       const d = id ? __findDrawingById(id) : null;
+
+      if(act==='capDirection' && d && __isCapDrawing(d)){
+        d.capDirection = String(b.getAttribute('data-dir') || '').toUpperCase() === 'L' ? 'L' : 'R';
+        __commitDrawingCoordinateEdit(d);
+        showCtx(__ctxOpenAt.x,__ctxOpenAt.y,d.id);
+        return;
+      }
 
       if(act==='coords' && d){
         __editDrawingCoordinates(d);
@@ -13997,6 +14442,13 @@ function showWPal(clientX, clientY){
     m.style.left = '0px';
     m.style.top  = '0px';
     const cur = id ? __findDrawingById(id) : null;
+    const directionGroup = m.querySelector('.ctxCapDirection');
+    if(directionGroup) directionGroup.style.display = __isCapDrawing(cur) ? 'contents' : 'none';
+    m.querySelectorAll('.ctxDirBtn').forEach(btn=>{
+      const active = __isCapDrawing(cur) && String(btn.getAttribute('data-dir') || '') === __getCapDirection(cur);
+      btn.classList.toggle('active',active);
+      btn.setAttribute('aria-pressed',active ? 'true' : 'false');
+    });
     const angleBtn = m.querySelector('[data-act="capAngle"]');
     if(angleBtn) angleBtn.style.display = (__canRotateDrawing(cur) ? 'block' : 'none');
     const lineStyleBtn = m.querySelector('[data-act="lineStyle"]');
@@ -14042,7 +14494,26 @@ function showWPal(clientX, clientY){
     try{ if(window.renderDrawingScopePanel) window.renderDrawingScopePanel(); }catch(_){}
     hidePal();
     hideWPal();
-    hideCtx();
+    const drawing = hit ? __findDrawingById(hit) : null;
+    if(__isCapDrawing(drawing)) showCtx(e.clientX,e.clientY,hit);
+    else hideCtx();
+  }, true);
+
+  // CAP S/L: el click izquierdo abre el control compacto de sentido.
+  cvs.addEventListener('click', (e)=>{
+    if(window.st && window.st.modoObservador) return;
+    if(e.button !== 0 || e.ctrlKey || e.altKey || e.shiftKey || e.metaKey || __dDown || __eDown) return;
+    if(tool && tool.tool && tool.tool !== 'none') return;
+    const r = cvs.getBoundingClientRect();
+    const px = e.clientX-r.left, py = e.clientY-r.top;
+    const hit = (typeof pickShapePerimeterPrecisePx === 'function')
+      ? pickShapePerimeterPrecisePx(px,py,SEL_TOL_PX)
+      : pickShapePrecisePx(px,py,SEL_TOL_PX);
+    const drawing = hit ? __findDrawingById(hit) : null;
+    if(!__isCapDrawing(drawing)) return;
+    st.selectedDrawing = hit;
+    try{ if(window.renderDrawingScopePanel) window.renderDrawingScopePanel(); }catch(_){}
+    showCtx(e.clientX,e.clientY,hit);
   }, true);
 
   // Menú contextual (click derecho) sobre el gráfico
@@ -14317,10 +14788,10 @@ addEventListener('mouseup',(e)=>{
       st.drawings.push({ownerSide:(window.__SETCA_getCurrentSide ? window.__SETCA_getCurrentSide() : 'neutral'),visibility:'global',createdBy:(window.__SETCA_getCurrentDrawingCreator ? window.__SETCA_getCurrentDrawingCreator() : 'sinNombre'),id,type:'bullseye',x:a.x,y:a.y,lw:0.6}); created = true;
       ensureDrawingName(st.drawings[st.drawings.length-1]);
     } else if(tool.tool==='cap_l'){
-      st.drawings.push({ownerSide:(window.__SETCA_getCurrentSide ? window.__SETCA_getCurrentSide() : 'neutral'),visibility:'global',createdBy:(window.__SETCA_getCurrentDrawingCreator ? window.__SETCA_getCurrentDrawingCreator() : 'sinNombre'),id,type:'cap_l',x:a.x,y:a.y,legLenNM:50,widthNM:10,angleDeg:0,color:'#4da3ff',lineColor:'#4da3ff',lw:0.9,name:''}); created = true;
+      st.drawings.push({ownerSide:(window.__SETCA_getCurrentSide ? window.__SETCA_getCurrentSide() : 'neutral'),visibility:'global',createdBy:(window.__SETCA_getCurrentDrawingCreator ? window.__SETCA_getCurrentDrawingCreator() : 'sinNombre'),id,type:'cap_l',x:a.x,y:a.y,legLenNM:50,widthNM:10,angleDeg:0,capDirection:'R',color:'#4da3ff',lineColor:'#4da3ff',lw:0.9,name:''}); created = true;
       ensureDrawingName(st.drawings[st.drawings.length-1]);
     } else if(tool.tool==='cap_s'){
-      st.drawings.push({ownerSide:(window.__SETCA_getCurrentSide ? window.__SETCA_getCurrentSide() : 'neutral'),visibility:'global',createdBy:(window.__SETCA_getCurrentDrawingCreator ? window.__SETCA_getCurrentDrawingCreator() : 'sinNombre'),id,type:'cap_s',x:a.x,y:a.y,legLenNM:16,widthNM:8,angleDeg:0,color:'#4da3ff',lineColor:'#4da3ff',lw:0.9,name:''}); created = true;
+      st.drawings.push({ownerSide:(window.__SETCA_getCurrentSide ? window.__SETCA_getCurrentSide() : 'neutral'),visibility:'global',createdBy:(window.__SETCA_getCurrentDrawingCreator ? window.__SETCA_getCurrentDrawingCreator() : 'sinNombre'),id,type:'cap_s',x:a.x,y:a.y,legLenNM:16,widthNM:8,angleDeg:0,capDirection:'R',color:'#4da3ff',lineColor:'#4da3ff',lw:0.9,name:''}); created = true;
       ensureDrawingName(st.drawings[st.drawings.length-1]);
     } else if(tool.tool==='label'){
       const text=prompt('Texto de etiqueta:');
@@ -15474,6 +15945,9 @@ function __SETCA_routeAircraftPatchToInstructor(p, patch, kind, role){
 function __SETCA_setCommandHdg(p, value){
   if(!p) return 0;
   const hdg = ((Number(value) || 0) % 360 + 360) % 360;
+  const currentCommand = Number(p.tgtHdg);
+  const changesHeading = !Number.isFinite(currentCommand) || Math.abs((((hdg-currentCommand)+540)%360)-180) > 0.5;
+  try{ if(changesHeading && typeof window.__SETCA_clearPlaneCapAssignment === 'function') window.__SETCA_clearPlaneCapAssignment(p,'manual-heading'); }catch(_){ }
   if(__SETCA_routeAircraftPatchToInstructor(p, {tgtHdg:hdg}, 'heading')) return hdg;
   p.tgtHdg = hdg;
   try{ if(window.__SETCA_markAircraftDirty) window.__SETCA_markAircraftDirty(p); }catch(_){ }
@@ -19527,26 +20001,6 @@ document.addEventListener('keydown', (ev)=>{
   });
 })();
 </script>
-<!-- === PARCHE: Botones de aviones más pequeños + selección amarilla === -->
-
-<script>
-/* === Parche funcional de selección/deselección amarilla en botones === */
-(function(){
-  document.addEventListener('DOMContentLoaded', ()=>{
-    const lista = document.getElementById('planeList');
-    if(!lista) return;
-
-    lista.addEventListener('click', (ev)=>{
-      const btn = ev.target.closest('button');
-      if(!btn) return;
-      btn.classList.toggle('active'); // cambia entre normal y amarillo
-    });
-  });
-})();
-</script>
-<!-- === /PARCHE === -->  
-
-
 <!-- ROOMS MODAL -->
 
 <div id="setcaAccessGate" class="setca-gate" aria-hidden="false">
@@ -21746,15 +22200,45 @@ document.querySelectorAll('#pCmdBody .btn').forEach(btn=>{
     try{ if(typeof repaintAlt==='function') repaintAlt(); }catch(_){ }
     try{ if(typeof repaintPairs==='function') repaintPairs(); }catch(_){ }
   }
-  function spdToUi(p){
-    const v = Number(p && p.tgtSpd || 0);
-    return Math.round(v * KMH2KTS);
+  function getPlaneSpeedFormatForMenu(p){
+    return (typeof window.__SETCA_getLocalPlaneSpeedFormat === 'function')
+      ? window.__SETCA_getLocalPlaneSpeedFormat(p)
+      : 'kts';
+  }
+  function getPlaneSpeedAltitudeForMenu(p, altitudeFt){
+    if(Number.isFinite(+altitudeFt)) return Math.max(0, +altitudeFt);
+    if(Number.isFinite(+(p && p.tgtAlt))) return Math.max(0, +p.tgtAlt);
+    return Math.max(0, Number(p && p.alt) || 0);
+  }
+  function spdToUi(p, format=getPlaneSpeedFormatForMenu(p)){
+    const v = Math.max(0, Number(p && p.tgtSpd) || 0);
+    if(format === 'mach' && typeof window.__SETCA_speedKmhToMach === 'function'){
+      return window.__SETCA_speedKmhToMach(v, getPlaneSpeedAltitudeForMenu(p)).toFixed(2);
+    }
+    return String(Math.round(v * KMH2KTS));
   }
   function altToUi(p){
     return Math.round(Number(p && p.tgtAlt || 0));
   }
-  function spdFromUi(v){
-    return Math.max(0, Number(v) || 0) * KTS2KMH;
+  function spdFromUi(v, p, format=getPlaneSpeedFormatForMenu(p), altitudeFt){
+    const numeric = Math.max(0, Number(v) || 0);
+    if(format === 'mach' && typeof window.__SETCA_speedMachToKmh === 'function'){
+      return window.__SETCA_speedMachToKmh(numeric, getPlaneSpeedAltitudeForMenu(p, altitudeFt));
+    }
+    return numeric * KTS2KMH;
+  }
+  function updateSpeedMenuPresentation(m, p){
+    if(!m || !p) return;
+    const format = getPlaneSpeedFormatForMenu(p);
+    const formatSel = m.querySelector('#setcaPlaneCtxSpeedFormat');
+    const input = m.querySelector('#setcaPlaneCtxSpd');
+    const label = m.querySelector('#setcaPlaneCtxSpdLbl');
+    if(formatSel) formatSel.value = format;
+    if(label) label.textContent = format === 'mach' ? 'VEL (MACH)' : 'VEL (KTS)';
+    if(input){
+      input.step = format === 'mach' ? '0.01' : '10';
+      input.value = spdToUi(p, format);
+    }
   }
   function altFromUi(v){
     return Math.max(0, Number(v) || 0);
@@ -22006,10 +22490,17 @@ document.querySelectorAll('#pCmdBody .btn').forEach(btn=>{
               <input id="setcaPlaneCtxVerticalRate" type="number" min="1" step="100">
             </label>
           </div>
-          <div class="ctxRow ctxCols2">
+          <div class="ctxRow ctxCols3">
             <label class="ctxFld">
               <span class="ctxLbl" id="setcaPlaneCtxSpdLbl">VEL (KTS)</span>
               <input id="setcaPlaneCtxSpd" type="number" min="0" step="10">
+            </label>
+            <label class="ctxFld">
+              <span class="ctxLbl">FMT VEL</span>
+              <select id="setcaPlaneCtxSpeedFormat">
+                <option value="kts">VEL</option>
+                <option value="mach">MACH</option>
+              </select>
             </label>
             <label class="ctxFld">
               <span class="ctxLbl">RUMBO</span>
@@ -22099,6 +22590,15 @@ document.querySelectorAll('#pCmdBody .btn').forEach(btn=>{
           }
           return;
         }
+        if(t.id === 'setcaPlaneCtxSpeedFormat'){
+          const p = getTargetPlane();
+          if(p && typeof window.__SETCA_setLocalPlaneSpeedFormat === 'function'){
+            window.__SETCA_setLocalPlaneSpeedFormat(p, t.value);
+            updateSpeedMenuPresentation(menu, p);
+            try{ draw && draw(); }catch(_){ }
+          }
+          return;
+        }
         if(t.id === 'setcaPlaneCtxIFF'){
           const v = sanitizeXpdr(t.value);
           if(t.value !== v) t.value = v;
@@ -22164,7 +22664,6 @@ document.querySelectorAll('#pCmdBody .btn').forEach(btn=>{
     const beSel = m.querySelector('#setcaPlaneCtxBe');
     const altFormatSel = m.querySelector('#setcaPlaneCtxAltFormat');
     const altIn = m.querySelector('#setcaPlaneCtxAlt');
-    const spdIn = m.querySelector('#setcaPlaneCtxSpd');
     const hdgIn = m.querySelector('#setcaPlaneCtxHdg');
     const turnIn = m.querySelector('#setcaPlaneCtxTurn');
     const verticalRateIn = m.querySelector('#setcaPlaneCtxVerticalRate');
@@ -22186,10 +22685,11 @@ document.querySelectorAll('#pCmdBody .btn').forEach(btn=>{
         : 'ft';
     }
     if(altIn) altIn.value = String(altToUi(p));
-    if(spdIn) spdIn.value = String(spdToUi(p));
+    updateSpeedMenuPresentation(m, p);
     if(hdgIn){
       const hdg = ((Number(Number.isFinite(+p.tgtHdg) ? +p.tgtHdg : (+p.hdg || 0)) % 360) + 360) % 360;
       hdgIn.value = String(Math.round(hdg) % 360).padStart(3, '0');
+      hdgIn.dataset.setcaInitialHdg = String(Math.round(hdg) % 360);
     }
     if(turnIn) turnIn.value = String(Number(p.turn||0).toFixed(1));
     if(verticalRateIn) verticalRateIn.value = String(Math.round(getPlaneVerticalRateForMenu(p)));
@@ -22217,6 +22717,7 @@ document.querySelectorAll('#pCmdBody .btn').forEach(btn=>{
     const beSel = m.querySelector('#setcaPlaneCtxBe');
     const altIn = m.querySelector('#setcaPlaneCtxAlt');
     const spdIn = m.querySelector('#setcaPlaneCtxSpd');
+    const speedFormatSel = m.querySelector('#setcaPlaneCtxSpeedFormat');
     const hdgIn = m.querySelector('#setcaPlaneCtxHdg');
     const turnIn = m.querySelector('#setcaPlaneCtxTurn');
     const verticalRateIn = m.querySelector('#setcaPlaneCtxVerticalRate');
@@ -22229,8 +22730,13 @@ document.querySelectorAll('#pCmdBody .btn').forEach(btn=>{
 
     const altVal = Number(altIn && altIn.value);
     const spdVal = Number(spdIn && spdIn.value);
+    const speedFormat = String(speedFormatSel && speedFormatSel.value || getPlaneSpeedFormatForMenu(p));
+    const speedAltitudeFt = Number.isFinite(altVal) ? altFromUi(altVal) : getPlaneSpeedAltitudeForMenu(p);
+    const speedCommandKmh = Number.isFinite(spdVal) ? spdFromUi(spdVal, p, speedFormat, speedAltitudeFt) : NaN;
     const hdgRaw = String(hdgIn && hdgIn.value || '').trim();
     const hdgVal = hdgRaw ? Number(hdgRaw) : NaN;
+    const initialHdgVal = Number(hdgIn && hdgIn.dataset.setcaInitialHdg);
+    const headingEdited = Number.isFinite(hdgVal) && (!Number.isFinite(initialHdgVal) || Math.abs((((hdgVal-initialHdgVal)+540)%360)-180) > 0.5);
     const turnVal = Number(turnIn && turnIn.value);
     const verticalRateVal = Number(verticalRateIn && verticalRateIn.value);
     const callsignVal = String(callsignIn && callsignIn.value || '').trim();
@@ -22240,12 +22746,13 @@ document.querySelectorAll('#pCmdBody .btn').forEach(btn=>{
     const tgtVal = String(targetSel && targetSel.value || '');
     const beVal = String(beSel && beSel.value || '');
     const missileVal = String(missileSel && missileSel.value || 'AMRAAM');
+    if(typeof window.__SETCA_setLocalPlaneSpeedFormat === 'function') window.__SETCA_setLocalPlaneSpeedFormat(p, speedFormat);
 
     if(window.__SETCA_shouldRouteAircraftCommand && window.__SETCA_shouldRouteAircraftCommand()){
       const patch = {};
       if(Number.isFinite(altVal)) patch.tgtAlt = altFromUi(altVal);
-      if(Number.isFinite(spdVal)) patch.tgtSpd = spdFromUi(spdVal);
-      if(Number.isFinite(hdgVal)) patch.tgtHdg = ((hdgVal % 360) + 360) % 360;
+      if(Number.isFinite(speedCommandKmh)) patch.tgtSpd = speedCommandKmh;
+      if(headingEdited) patch.tgtHdg = ((hdgVal % 360) + 360) % 360;
       if(Number.isFinite(turnVal)) patch.turn = Math.max(0, turnVal);
       if(Number.isFinite(verticalRateVal) && verticalRateVal > 0) patch.verticalRateFpm = verticalRateVal;
       patch.name = callsignVal || String(p.id || '');
@@ -22261,8 +22768,8 @@ document.querySelectorAll('#pCmdBody .btn').forEach(btn=>{
 
     if(Number.isFinite(verticalRateVal) && verticalRateVal > 0) p.verticalRateFpm = verticalRateVal;
     if(Number.isFinite(altVal)) __SETCA_setCommandAlt(p, altFromUi(altVal));
-    if(Number.isFinite(spdVal)) __SETCA_setCommandSpd(p, spdFromUi(spdVal));
-    if(Number.isFinite(hdgVal)) __SETCA_setCommandHdg(p, hdgVal);
+    if(Number.isFinite(speedCommandKmh)) __SETCA_setCommandSpd(p, speedCommandKmh);
+    if(headingEdited) __SETCA_setCommandHdg(p, hdgVal);
     if(Number.isFinite(turnVal)) p.turn = Math.max(0, turnVal);
     if(callsignVal) p.name = callsignVal; else p.name = String(p.id || '');
     p.tipo = tipoVal;
@@ -25603,7 +26110,7 @@ import { getDatabase, ref, get, set } from "https://www.gstatic.com/firebasejs/1
 
 
 <script>
-/* === PATCH: CTRL + drag sobre aeronave para fijar rumbo y sentido de giro === */
+/* === CTRL + drag sobre aeronave: rumbo manual o asignacion CAP === */
 (function(){
   if(window.__SETCA_CTRL_HEADING_DRAG__) return;
   window.__SETCA_CTRL_HEADING_DRAG__ = true;
@@ -25617,8 +26124,15 @@ import { getDatabase, ref, get, set } from "https://www.gstatic.com/firebasejs/1
     clientX: 0,
     clientY: 0,
     targetHdg: null,
-    turnBias: null
+    turnBias: null,
+    capHoverId: null,
+    capHoverSince: 0,
+    capHoverProgress: 0,
+    capReadyId: null,
+    capHoverName: ''
   };
+
+  const CAP_HOVER_MS = 2000;
 
   function nowMs(){ return Date.now(); }
   function normDeg(v){
@@ -25658,6 +26172,36 @@ import { getDatabase, ref, get, set } from "https://www.gstatic.com/firebasejs/1
     if(!state.planeId || !window.st || !Array.isArray(st.planes)) return null;
     return st.planes.find(p => p && String(p.id||'') === String(state.planeId)) || null;
   }
+  function resetCapHover(){
+    state.capHoverId = null;
+    state.capHoverSince = 0;
+    state.capHoverProgress = 0;
+    state.capReadyId = null;
+    state.capHoverName = '';
+  }
+  function updateCapHover(clientX, clientY){
+    if(!state.active || typeof window.__SETCA_findCapAtClient !== 'function'){
+      resetCapHover();
+      return null;
+    }
+    const cap = window.__SETCA_findCapAtClient(clientX,clientY);
+    const capId = String(cap && cap.id || '').trim();
+    if(!capId){
+      resetCapHover();
+      return null;
+    }
+    if(state.capHoverId !== capId){
+      state.capHoverId = capId;
+      state.capHoverSince = nowMs();
+      state.capHoverProgress = 0;
+      state.capReadyId = null;
+      state.capHoverName = String(cap.name || (cap.type === 'cap_l' ? 'CAP L' : 'CAP S'));
+    }
+    const elapsed = Math.max(0,nowMs()-state.capHoverSince);
+    state.capHoverProgress = Math.min(1,elapsed/CAP_HOVER_MS);
+    if(elapsed >= CAP_HOVER_MS) state.capReadyId = capId;
+    return cap;
+  }
   function resolveTurnBias(currentHdg, targetHdg){
     const cur = normDeg(currentHdg);
     const tgt = normDeg(targetHdg);
@@ -25694,6 +26238,7 @@ import { getDatabase, ref, get, set } from "https://www.gstatic.com/firebasejs/1
     const curHdg = normDeg(Number.isFinite(p.hdg) ? p.hdg : (p.tgtHdg || 0));
     state.targetHdg = curHdg;
     state.turnBias = null;
+    resetCapHover();
     try{
       if(Array.isArray(st.sel)) st.sel = [p.id];
     }catch(_){}
@@ -25711,6 +26256,7 @@ import { getDatabase, ref, get, set } from "https://www.gstatic.com/firebasejs/1
     if(!Number.isFinite(hdg)) return false;
     state.targetHdg = normDeg(hdg);
     state.turnBias = resolveTurnBias(Number.isFinite(p.hdg) ? p.hdg : (p.tgtHdg || 0), state.targetHdg);
+    updateCapHover(clientX,clientY);
     // Mantener el arrastre fluido: durante CTRL+drag solo se actualiza la guía local.
     // El rumbo real se aplica y sincroniza una sola vez al soltar el click.
     requestGuideOverlay();
@@ -25724,13 +26270,22 @@ import { getDatabase, ref, get, set } from "https://www.gstatic.com/firebasejs/1
     if(commit){
       const p = getPlane();
       if(p){
-        if(Number.isFinite(state.targetHdg)){
-          if(typeof window.__SETCA_setCommandHdg === 'function') window.__SETCA_setCommandHdg(p, state.targetHdg);
-          else p.tgtHdg = normDeg(state.targetHdg);
+        let assignedToCap = false;
+        const cap = state.capReadyId && window.st && Array.isArray(st.drawings)
+          ? st.drawings.find(d=>d && String(d.id || '') === String(state.capReadyId))
+          : null;
+        if(cap && typeof window.__SETCA_assignPlaneToCap === 'function'){
+          assignedToCap = !!window.__SETCA_assignPlaneToCap(p,cap);
         }
-        p.turnBias = state.turnBias || null;
-        p.routeManualUntil = nowMs() + 14000;
-        try{ if(window.__SETCA_markAircraftDirty) window.__SETCA_markAircraftDirty(p); }catch(_){ }
+        if(!assignedToCap){
+          if(Number.isFinite(state.targetHdg)){
+            if(typeof window.__SETCA_setCommandHdg === 'function') window.__SETCA_setCommandHdg(p, state.targetHdg);
+            else p.tgtHdg = normDeg(state.targetHdg);
+          }
+          p.turnBias = state.turnBias || null;
+          p.routeManualUntil = nowMs() + 14000;
+          try{ if(window.__SETCA_markAircraftDirty) window.__SETCA_markAircraftDirty(p); }catch(_){ }
+        }
       }
       refreshPanels();
       pushSync();
@@ -25739,6 +26294,7 @@ import { getDatabase, ref, get, set } from "https://www.gstatic.com/firebasejs/1
     state.planeId = null;
     state.targetHdg = null;
     state.turnBias = null;
+    resetCapHover();
     clearGuideOverlay();
     if(guideRaf){ cancelAnimationFrame(guideRaf); guideRaf = 0; }
   }
@@ -25774,7 +26330,7 @@ import { getDatabase, ref, get, set } from "https://www.gstatic.com/firebasejs/1
 
   addEventListener('blur', function(){
     stopDrag(false);
-  }, true);
+  });
 
   let guideCanvas = null;
   let guideCtx = null;
@@ -25851,6 +26407,7 @@ import { getDatabase, ref, get, set } from "https://www.gstatic.com/firebasejs/1
         guideRaf = 0;
         return;
       }
+      updateCapHover(state.clientX,state.clientY);
       const radarRect = cvs.getBoundingClientRect();
       const s = toScreen(p.x||0, p.y||0);
       let endX = Number.isFinite(state.clientX) ? (state.clientX - radarRect.left) : NaN;
@@ -25874,9 +26431,12 @@ import { getDatabase, ref, get, set } from "https://www.gstatic.com/firebasejs/1
       const py = ux;
       const label = String(Math.round(normDeg(Number.isFinite(state.targetHdg) ? state.targetHdg : (p.tgtHdg || p.hdg || 0)))).padStart(3,'0') + '°';
       const ctx2 = guideCtx;
+      const capLineColor = state.capReadyId
+        ? 'rgba(46,231,79,0.98)'
+        : (state.capHoverId ? 'rgba(255,224,102,0.98)' : 'rgba(255,255,255,0.92)');
 
       ctx2.save();
-      ctx2.strokeStyle = 'rgba(255,255,255,0.92)';
+      ctx2.strokeStyle = capLineColor;
       ctx2.fillStyle = 'rgba(255,255,255,1)';
       ctx2.lineCap = 'round';
       ctx2.lineJoin = 'round';
@@ -25906,6 +26466,25 @@ import { getDatabase, ref, get, set } from "https://www.gstatic.com/firebasejs/1
       ctx2.fillRect(tx - tw/2 - 6, ty - 11, tw + 12, 22);
       ctx2.fillStyle = 'rgba(255,255,255,1)';
       ctx2.fillText(label, tx, ty);
+
+      if(state.capHoverId){
+        const capText = state.capReadyId
+          ? state.capHoverName + ' LISTO'
+          : state.capHoverName + ' ' + Math.max(0.1,(CAP_HOVER_MS*(1-state.capHoverProgress))/1000).toFixed(1) + ' s';
+        ctx2.font = 'bold 12px monospace';
+        const capW = Math.max(86,ctx2.measureText(capText).width+18);
+        const capX = Math.max(capW/2+5,Math.min(radarRect.width-capW/2-5,endX));
+        const capY = Math.max(18,Math.min(radarRect.height-20,endY-22));
+        ctx2.fillStyle = 'rgba(4,10,7,0.92)';
+        ctx2.strokeStyle = capLineColor;
+        ctx2.lineWidth = 1;
+        ctx2.fillRect(capX-capW/2,capY-13,capW,26);
+        ctx2.strokeRect(capX-capW/2,capY-13,capW,26);
+        ctx2.fillStyle = '#fff';
+        ctx2.fillText(capText,capX,capY-2);
+        ctx2.fillStyle = state.capReadyId ? '#2ee74f' : '#ffe066';
+        ctx2.fillRect(capX-capW/2+4,capY+7,(capW-8)*state.capHoverProgress,2);
+      }
       ctx2.restore();
 
       guideRaf = requestAnimationFrame(renderGuideOverlay);
