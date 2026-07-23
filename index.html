@@ -206,6 +206,19 @@
     return { aircraft, dart };
   }
 
+  function __SETCA_isLocalGtcMissile(missile){
+    if(!missile || typeof missile !== 'object') return false;
+    return String(missile.launcherType || '').toLowerCase() === 'gtc'
+      || missile.localOnlyAnimation === true
+      || missile.__setcaLocalGtcAnimation === true;
+  }
+
+  function __SETCA_isSharedMissile(missile){
+    return !!missile && !__SETCA_isLocalGtcMissile(missile);
+  }
+  try{ window.__SETCA_isLocalGtcMissile = __SETCA_isLocalGtcMissile; }catch(_){ }
+  try{ window.__SETCA_isSharedMissile = __SETCA_isSharedMissile; }catch(_){ }
+
   const __SETCA_SYNC_STAGING = Object.freeze({
     // SETCA_SYNC_1S: refresco coordinado cada 1 s para sala online.
     // El Instructor es la fuente mandatoria del estado compartido.
@@ -452,40 +465,63 @@
       return false;
     }
   }
-  function __SETCA_applyGtcLaunchOrder(order){
+  function __SETCA_applyGtcOutcomeOrder(order){
     try{
-      if(!order || typeof order !== 'object') return false;
+      if(!order || typeof order !== 'object' || !__SETCA_isInstructorAuthority()) return false;
       const byRole = String(order.byRole || '').toLowerCase();
-      // Solo ODT e INSTRUCTOR pueden originar lanzamientos GTC sincronizados.
-      if(byRole !== 'odt' && byRole !== 'samallocator' && byRole !== 'default') return false;
-      const launcherId = String(order.launcherId || '').trim();
+      if(!['odt','samallocator','default'].includes(byRole)) return false;
+      const result = String(order.result || '').toLowerCase();
+      if(result !== 'hit' && result !== 'miss') return false;
+      const missileId = String(order.missileId || '').trim();
       const targetId = String(order.targetId || '').trim();
-      if(!launcherId || !targetId || !window.st || !Array.isArray(window.st.gtc)) return false;
-      const launcher = window.st.gtc.find(u=>u && String(u.id || '') === launcherId);
-      if(!launcher) return false;
-      launcher.trackPlaneId = targetId;
-      const opts = {
-        fromOrder:true,
-        orderId:String(order.id || ''),
-        missileId:String(order.missileId || ''),
-        missileName:String(order.missileName || ''),
-        byRole:byRole || 'odt'
+      if(!missileId || !window.st) return false;
+      window.st.impactMarks = Array.isArray(window.st.impactMarks) ? window.st.impactMarks : [];
+      if(window.st.impactMarks.some(mark=>mark && String(mark.missileId || '') === missileId)) return false;
+
+      const target = (Array.isArray(window.st.planes) ? window.st.planes : []).find(p=>p && String(p.id || '') === targetId) || null;
+      const impact = {
+        id:'GTC_RESULT_' + missileId.replace(/[^a-z0-9_-]/gi, '_').slice(0, 90),
+        type:result,
+        reason:result === 'hit' ? 'impact' : String(order.reason || 'range').slice(0, 30),
+        x:target && Number.isFinite(+target.x) ? +target.x : (Number.isFinite(+order.x) ? +order.x : 0),
+        y:target && Number.isFinite(+target.y) ? +target.y : (Number.isFinite(+order.y) ? +order.y : 0),
+        by:String(order.launcherId || '').slice(0, 80),
+        missileId,
+        missileName:String(order.missileName || 'MISIL').slice(0, 80),
+        launcherName:String(order.launcherName || order.launcherId || '').slice(0, 80),
+        launcherType:'gtc',
+        targetId,
+        targetName:String(order.targetName || (target && target.name) || targetId || 'BLANCO').slice(0, 80),
+        ts:Number(order.completedAt || order.tsClient || Date.now()) || Date.now(),
+        reportedByRole:byRole
       };
-      if(typeof window.gtcLaunchMissile === 'function'){
-        return !!window.gtcLaunchMissile(launcher, opts);
-      }else if(typeof gtcLaunchMissile === 'function'){
-        return !!gtcLaunchMissile(launcher, opts);
+      if(order.samDualLaunch && typeof order.samDualLaunch === 'object'){
+        try{ impact.samDualLaunch = JSON.parse(JSON.stringify(order.samDualLaunch)); }catch(_){ }
       }
-      return false;
+      window.st.impactMarks.push(impact);
+      window.st.missileStats = __normalizeMissileStats(window.st.missileStats);
+      window.st.missileStats.dart += 1;
+
+      if(result === 'hit' && targetId){
+        window.st.planes = (Array.isArray(window.st.planes) ? window.st.planes : []).filter(p=>String(p && p.id || '') !== targetId);
+        if(window.st.roles && Object.prototype.hasOwnProperty.call(window.st.roles, targetId)) delete window.st.roles[targetId];
+        if(Array.isArray(window.st.sel)) window.st.sel = window.st.sel.filter(id=>String(id || '') !== targetId);
+        if(Array.isArray(window.st.pairs)) window.st.pairs = window.st.pairs.filter(pr=>String(pr && pr.a || '') !== targetId && String(pr && pr.b || '') !== targetId);
+        try{ if(typeof logEvent === 'function') logEvent(`SPLASH GTC: ${impact.targetName} destruido`); }catch(_){ }
+      }else{
+        try{ if(typeof logEvent === 'function') logEvent(`FALLA GTC: ${impact.missileName} no alcanzó a ${impact.targetName}`); }catch(_){ }
+      }
+      return true;
     }catch(e){
-      console.warn('SETCA GTC launch order apply error:', e);
+      console.warn('SETCA GTC outcome apply error:', e);
       return false;
     }
   }
   function __SETCA_applyIncomingOrder(order){
     try{
       const kind = String(order && order.kind || 'aircraft-command').toLowerCase();
-      if(kind === 'gtc-launch') return __SETCA_applyGtcLaunchOrder(order);
+      if(kind === 'gtc-result') return __SETCA_applyGtcOutcomeOrder(order);
+      if(kind === 'gtc-launch') return false;
       return __SETCA_applyAircraftOrder(order);
     }catch(_){
       return false;
@@ -517,87 +553,50 @@
       return false;
     }
   }
-  async function __SETCA_submitGtcLaunchCommand(cmd){
-    try{
-      if(!__SETCA_canSendGtcOrder()) return false;
-      const launcherId = String(cmd && cmd.launcherId || '').trim();
-      const targetId = String(cmd && cmd.targetId || '').trim();
-      if(!launcherId || !targetId) return false;
-      const now = Date.now();
-      const id = `${now}_${Math.random().toString(36).slice(2, 9)}`;
-      const missileId = String(cmd && cmd.missileId || `gtcm_${id}`);
-      const missileName = String(cmd && cmd.missileName || 'DART-' + String(now).slice(-6));
-      await set(ref(db, `rooms/${ROOM_ID}/orders/${id}`), {
-        id,
-        kind:'gtc-launch',
-        launcherId,
-        targetId,
-        missileId,
-        missileName,
-        by:currentUID || 'pending',
-        byRole:__SETCA_getSharedWriteRole() || 'odt',
-        tsClient:now,
-        expiresAt:now + 30000,
-        serverAt:serverTimestamp()
-      });
-      try{ setTimeout(()=>set(ref(db, `rooms/${ROOM_ID}/orders/${id}`), null), 45000); }catch(_){ }
-      return true;
-    }catch(e){
-      console.warn('SETCA GTC launch submit error:', e);
-      return false;
-    }
-  }
-
-  function __SETCA_cleanGtcMissileForDirectSync(missile){
-    const src = (missile && typeof missile === 'object') ? missile : {};
-    const id = String(src.id || '').trim();
-    if(!id) return null;
-    const out = {...src};
-    delete out.__syncAfter;
-    out.id = id;
-    out.name = String(out.name || id).slice(0, 80);
-    out.launcher = String(out.launcher || '').slice(0, 80);
-    out.launcherType = String(out.launcherType || 'gtc').slice(0, 30);
-    out.launcherName = String(out.launcherName || out.launcher || 'LANZADOR').slice(0, 80);
-    out.targetName = String(out.targetName || out.tgt || 'BLANCO').slice(0, 80);
-    out.tgt = String(out.tgt || '').slice(0, 80);
-    ['x','y','tx','ty','alt','spd','drift','travKM','rangeKM','maxAltFt','courseDeg'].forEach(key=>{
-      if(Object.prototype.hasOwnProperty.call(out, key)){
-        const n = Number(out[key]);
-        out[key] = Number.isFinite(n) ? n : 0;
-      }
-    });
-    out.status = String(out.status || 'fly').slice(0, 20);
-    out.syncByRole = __SETCA_getSharedWriteRole() || 'odt';
-    out.syncAt = Date.now();
-    return out;
-  }
-
-  async function __SETCA_publishGtcMissileLaunch(missile){
+  async function __SETCA_submitGtcOutcome(cmd){
     try{
       if(!__SETCA_canLaunchGtcMissile()) return false;
       const role = __SETCA_getSharedWriteRole() || 'odt';
-      if(role !== 'odt' && role !== 'samallocator' && role !== 'default') return false;
-      const clean = __SETCA_cleanGtcMissileForDirectSync(missile);
-      if(!clean || !clean.id) return false;
-      await runTransaction(stateRef, current=>{
-        const base = (current && typeof current === 'object') ? {...current} : {};
-        const missiles = Array.isArray(base.missiles) ? base.missiles.slice() : [];
-        const exists = missiles.some(m=>m && String(m.id || '') === clean.id);
-        if(!exists) missiles.push(clean);
-        base.missiles = missiles;
-        const stats = __normalizeMissileStats(base.missileStats || {});
-        if(!exists) stats.dart += 1;
-        base.missileStats = stats;
-        base.lastWriteBy = currentUID || 'pending';
-        base.lastWriteRole = role;
-        base.instructorAuthority = true;
-        base.lastUpdate = serverTimestamp();
-        return base;
-      });
-      return true;
+      if(!['odt','samallocator','default'].includes(role)) return false;
+      const missileId = String(cmd && cmd.missileId || '').trim();
+      const result = String(cmd && cmd.result || '').toLowerCase();
+      if(!missileId || (result !== 'hit' && result !== 'miss')) return false;
+      const now = Date.now();
+      const id = `gtc_result_${now}_${Math.random().toString(36).slice(2, 9)}`;
+      const payload = {
+        id,
+        kind:'gtc-result',
+        result,
+        reason:String(cmd && cmd.reason || '').slice(0, 30),
+        missileId,
+        missileName:String(cmd && cmd.missileName || 'MISIL').slice(0, 80),
+        launcherId:String(cmd && cmd.launcherId || '').slice(0, 80),
+        launcherName:String(cmd && cmd.launcherName || '').slice(0, 80),
+        targetId:String(cmd && cmd.targetId || '').slice(0, 80),
+        targetName:String(cmd && cmd.targetName || '').slice(0, 80),
+        x:Number.isFinite(+(cmd && cmd.x)) ? +(cmd && cmd.x) : 0,
+        y:Number.isFinite(+(cmd && cmd.y)) ? +(cmd && cmd.y) : 0,
+        completedAt:Number(cmd && cmd.completedAt || now) || now,
+        samDualLaunch:(cmd && cmd.samDualLaunch && typeof cmd.samDualLaunch === 'object') ? cmd.samDualLaunch : null,
+        by:currentUID || 'pending',
+        byRole:role,
+        tsClient:now,
+        expiresAt:now + 600000,
+        serverAt:serverTimestamp()
+      };
+      let lastError = null;
+      for(let attempt=0; attempt<3; attempt++){
+        try{
+          await set(ref(db, `rooms/${ROOM_ID}/orders/${id}`), payload);
+          return true;
+        }catch(e){
+          lastError = e;
+          if(attempt < 2) await new Promise(resolve=>setTimeout(resolve, 350 * (attempt + 1)));
+        }
+      }
+      throw lastError || new Error('No se pudo publicar el resultado GTC');
     }catch(e){
-      console.warn('SETCA GTC missile direct sync error:', e);
+      console.warn('SETCA GTC outcome submit error:', e);
       return false;
     }
   }
@@ -727,8 +726,7 @@
   }
 
   try{ window.__SETCA_submitAircraftCommand = __SETCA_submitAircraftCommand; }catch(_){ }
-  try{ window.__SETCA_submitGtcLaunchCommand = __SETCA_submitGtcLaunchCommand; }catch(_){ }
-  try{ window.__SETCA_publishGtcMissileLaunch = __SETCA_publishGtcMissileLaunch; }catch(_){ }
+  try{ window.__SETCA_submitGtcOutcome = __SETCA_submitGtcOutcome; }catch(_){ }
   try{ window.__SETCA_publishGtcGlobalState = __SETCA_publishGtcGlobalState; }catch(_){ }
   try{ window.__SETCA_publishGtcValidationPatch = __SETCA_publishGtcValidationPatch; }catch(_){ }
   try{ window.__SETCA_mergeSamDualState = __SETCA_mergeSamDualState; }catch(_){ }
@@ -777,12 +775,12 @@
     const completed = __setcaCompletedMissileIds(impactMarks);
     const out = (Array.isArray(payloadMissiles) ? payloadMissiles : []).filter(m=>{
       const id = String(m && m.id || '');
-      return !!m && (!m.status || String(m.status).toLowerCase() === 'fly') && (!id || !completed.has(id));
+      return __SETCA_isSharedMissile(m) && (!m.status || String(m.status).toLowerCase() === 'fly') && (!id || !completed.has(id));
     });
     const seen = new Set(out.map(m=>String(m && m.id || '')).filter(Boolean));
     (Array.isArray(currentMissiles) ? currentMissiles : []).forEach(m=>{
       const id = String(m && m.id || '');
-      if(!id || seen.has(id) || completed.has(id)) return;
+      if(!__SETCA_isSharedMissile(m) || !id || seen.has(id) || completed.has(id)) return;
       if(m && (!m.status || String(m.status).toLowerCase() === 'fly')){
         out.push(m);
         seen.add(id);
@@ -856,7 +854,7 @@
           delete q.__syncAfter;
           return q;
         }) : snap.planes;
-        const missilesClean = Array.isArray(snap.missiles) ? snap.missiles.filter(m=>__setcaSyncIsMature(m, syncNow)).map(m=>{
+        const missilesClean = Array.isArray(snap.missiles) ? snap.missiles.filter(m=>__SETCA_isSharedMissile(m) && __setcaSyncIsMature(m, syncNow)).map(m=>{
           if(!m || typeof m !== 'object') return m;
           const q = {...m};
           delete q.__syncAfter;
@@ -1166,13 +1164,16 @@ let __setcaLastAppliedRemoteTs = 0;
         const completedMissileIds = __setcaCompletedMissileIds([].concat(Array.isArray(st.impactMarks) ? st.impactMarks : [], Array.isArray(v.impactMarks) ? v.impactMarks : []));
         const remoteActiveMissiles = v.missiles.filter(m=>{
           const id = String(m && m.id || '');
-          return !!m && (!m.status || String(m.status).toLowerCase() === 'fly') && (!id || !completedMissileIds.has(id));
+          return __SETCA_isSharedMissile(m) && (!m.status || String(m.status).toLowerCase() === 'fly') && (!id || !completedMissileIds.has(id));
         }).map(m=>{
           const q = {...m};
           delete q.__syncAfter;
           return q;
         });
-        const nextMissiles = __setcaMergeRemoteArray(st.missiles, remoteActiveMissiles, { prefix:'missile' });
+        const nextMissiles = __setcaMergeRemoteArray(st.missiles, remoteActiveMissiles, {
+          prefix:'missile',
+          keepLocal:__SETCA_isLocalGtcMissile
+        });
         missilesChanged = !__setcaSameArrayRefs(st.missiles, nextMissiles);
         if(missilesChanged) st.missiles = nextMissiles;
       }
@@ -1275,6 +1276,8 @@ let __setcaLastAppliedRemoteTs = 0;
       setTimeout(()=>__SETCA_processAircraftOrders(raw), 250);
       return false;
     }
+    const isInstructor = __SETCA_isInstructorAuthority();
+    if(!isInstructor) return false;
     const map = (raw && typeof raw === 'object') ? raw : {};
     const rows = Object.keys(map).map(key=>({ key, value:map[key] }))
       .filter(row=>row.value && typeof row.value === 'object')
@@ -1283,19 +1286,15 @@ let __setcaLastAppliedRemoteTs = 0;
     rows.forEach(row=>{
       const orderId = String(row.value.id || row.key);
       const kind = String(row.value.kind || 'aircraft-command').toLowerCase();
-      const isGtcLaunch = kind === 'gtc-launch';
-      const isInstructor = __SETCA_isInstructorAuthority();
       const expiresAt = Number(row.value.expiresAt || 0);
       if(expiresAt && expiresAt < Date.now()){
-        if(isInstructor) try{ set(ref(db, `rooms/${ROOM_ID}/orders/${row.key}`), null); }catch(_){ }
+        try{ set(ref(db, `rooms/${ROOM_ID}/orders/${row.key}`), null); }catch(_){ }
         return;
       }
-      // Comandos de avión solo los aplica el Instructor. Lanzamientos GTC los aplican todos para que sean visibles y sincronizados.
-      if(!isGtcLaunch && !isInstructor) return;
       if(__setcaProcessedOrderIds.has(orderId)) return;
       __setcaProcessedOrderIds.add(orderId);
-      if(__SETCA_applyIncomingOrder(row.value)) changed = true;
-      if(isInstructor) try{ set(ref(db, `rooms/${ROOM_ID}/orders/${row.key}`), null); }catch(_){ }
+      if(kind !== 'gtc-launch' && __SETCA_applyIncomingOrder(row.value)) changed = true;
+      try{ set(ref(db, `rooms/${ROOM_ID}/orders/${row.key}`), null); }catch(_){ }
     });
     if(changed){
       try{ repaintPlanesList && repaintPlanesList(); }catch(_){ }
@@ -1304,7 +1303,7 @@ let __setcaLastAppliedRemoteTs = 0;
       try{ repaintVuelos && repaintVuelos(); }catch(_){ }
       try{ repaintGTC && repaintGTC(); }catch(_){ }
       try{ paintAlerts && paintAlerts(); }catch(_){ }
-      try{ if(__SETCA_isInstructorAuthority() && window._SETCA_SYNC && typeof window._SETCA_SYNC.push === 'function') window._SETCA_SYNC.push(); }catch(_){ }
+      try{ if(window._SETCA_SYNC && typeof window._SETCA_SYNC.push === 'function') window._SETCA_SYNC.push(); }catch(_){ }
     }
     return changed;
   }
@@ -12235,6 +12234,42 @@ function __registerMissileMiss(missile, reason='range'){
   st.impactMarks.push(mark);
   return mark;
 }
+function __setcaIsLocalGtcAnimation(missile){
+  try{
+    if(window.__SETCA_isLocalGtcMissile) return !!window.__SETCA_isLocalGtcMissile(missile);
+  }catch(_){ }
+  return !!missile && String(missile.launcherType || '').toLowerCase() === 'gtc';
+}
+function __SETCA_finalizeLocalGtcOutcome(missile, result, reason, target){
+  if(!__setcaIsLocalGtcAnimation(missile) || missile.__gtcOutcomeSubmitted) return false;
+  missile.__gtcOutcomeSubmitted = true;
+  const payload = {
+    result:String(result || '').toLowerCase(),
+    reason:String(reason || ''),
+    missileId:String(missile.id || ''),
+    missileName:String(missile.name || 'MISIL'),
+    launcherId:String(missile.launcher || ''),
+    launcherName:String(missile.launcherName || missile.launcher || ''),
+    targetId:String(missile.tgt || (target && target.id) || ''),
+    targetName:String(missile.targetName || (target && target.name) || missile.tgt || 'BLANCO'),
+    x:Number.isFinite(+(target && target.x)) ? +(target && target.x) : (Number.isFinite(+missile.x) ? +missile.x : 0),
+    y:Number.isFinite(+(target && target.y)) ? +(target && target.y) : (Number.isFinite(+missile.y) ? +missile.y : 0),
+    completedAt:Date.now(),
+    samDualLaunch:(missile.samDualLaunch && typeof missile.samDualLaunch === 'object') ? missile.samDualLaunch : null
+  };
+  let instructor = false;
+  try{ instructor = !!(window.__SETCA_isInstructorAuthority && window.__SETCA_isInstructorAuthority()); }catch(_){ }
+  if(instructor) return true;
+  try{
+    if(window.__SETCA_submitGtcOutcome){
+      Promise.resolve(window.__SETCA_submitGtcOutcome(payload)).then(ok=>{
+        if(!ok) try{ logEvent(`GTC: no se pudo publicar el resultado de ${payload.missileName}.`); }catch(_){ }
+      }).catch(()=>{ try{ logEvent(`GTC: error publicando el resultado de ${payload.missileName}.`); }catch(_){ } });
+      return true;
+    }
+  }catch(_){ }
+  return false;
+}
 function __setcaIsActiveMissile(m, completedIds=null){
   if(!m) return false;
   const id = String(m.id || '');
@@ -12258,9 +12293,11 @@ function __setcaPruneConsumedMissiles(){
   }catch(_){ return (window.st && Array.isArray(st.missiles)) ? st.missiles : []; }
 }
 try{ window.__setcaPruneConsumedMissiles = __setcaPruneConsumedMissiles; }catch(_){ }
-function updateMissiles(dt){
+function updateMissiles(dt, options={}){
+  const __localGtcOnly = !!(options && options.localGtcOnly);
   let __impactChanged = false;
   st.missiles.forEach(m=>{
+    if(__localGtcOnly && !__setcaIsLocalGtcAnimation(m)) return;
     if(m.status!=='fly') return;
     const TRef = __resolveMissileTarget(m.tgt);
     const T = TRef && TRef.entity;
@@ -12312,6 +12349,7 @@ function updateMissiles(dt){
       st.splashes.push({x:targetX,y:targetY,t:0});
       if(TRef && TRef.kind === 'plane') T._hit=true;
       __registerMissileImpact(T, m, (TRef && TRef.kind) || 'plane');
+      __SETCA_finalizeLocalGtcOutcome(m, 'hit', 'impact', T);
       __impactChanged = true;
       logEvent(`SPLASH: ${targetName} destruido`);
 
@@ -12329,6 +12367,7 @@ function updateMissiles(dt){
       try{ logEvent(`FALLA/ERROR: ${(m.name||'MISIL')} no alcanzó a ${(m.targetName || (TRef ? __entityName(TRef, m.tgt) : m.tgt) || 'BLANCO')} (${reason === 'alt' ? 'fuera de altura' : 'fuera de alcance'})`); }catch(_){ }
       if(String(m.launcherType || '').toLowerCase() === 'gtc'){
         __registerMissileMiss(m, reason);
+        __SETCA_finalizeLocalGtcOutcome(m, 'miss', reason, T);
         __impactChanged = true;
       }
       m.status='oor';
@@ -12347,6 +12386,7 @@ function updateMissiles(dt){
       st.splashes.push({x:targetX,y:targetY,t:0});
       if(TRef && TRef.kind === 'plane') T._hit=true;
       __registerMissileImpact(T, m, (TRef && TRef.kind) || 'plane');
+      __SETCA_finalizeLocalGtcOutcome(m, 'hit', 'impact', T);
       __impactChanged = true;
       logEvent(`SPLASH: ${targetName} destruido`);
 
@@ -12365,7 +12405,7 @@ function updateMissiles(dt){
       if(isFinite(maxAlt) && maxAlt<Infinity) m.alt = Math.min(m.alt, maxAlt);
     }
   });
-  try{ (Array.isArray(st.missiles) ? st.missiles : []).forEach(m=>{ if(m && m.id && typeof __navRecordMissile === 'function') __navRecordMissile(m, true); }); }catch(_){ }
+  try{ (Array.isArray(st.missiles) ? st.missiles : []).forEach(m=>{ if(m && m.id && (!__localGtcOnly || __setcaIsLocalGtcAnimation(m)) && typeof __navRecordMissile === 'function') __navRecordMissile(m, true); }); }catch(_){ }
   if(typeof __setcaPruneConsumedMissiles === 'function') __setcaPruneConsumedMissiles();
   else st.missiles=st.missiles.filter(m=>m && (!m.status || m.status==='fly'));
   if(__impactChanged){
@@ -12377,7 +12417,7 @@ function updateMissiles(dt){
     try{ repaintVuelos && repaintVuelos(); }catch(_){ }
     try{ repaintGTC && repaintGTC(); }catch(_){ }
     try{ repaintStudent && repaintStudent(); }catch(_){ }
-    try{ if(typeof scheduleSync==='function') scheduleSync(0); }catch(_){ }
+    if(!__localGtcOnly) try{ if(typeof scheduleSync==='function') scheduleSync(0); }catch(_){ }
   }
 }
 function drawMissiles(){
@@ -16249,7 +16289,7 @@ function repaintAlt(){
 setInterval(()=>{ try{ repaintAlt(); }catch(e){} }, 900);
 
 /* ===== Loop ===== */
-let lastTS=0,accFPS=0,frames=0,__SETCA_AUTH_TICK_ACC=0,__SETCA_AUTH_TICK_SEQ=0;
+let lastTS=0,accFPS=0,frames=0,__SETCA_AUTH_TICK_ACC=0,__SETCA_AUTH_TICK_SEQ=0,__SETCA_LOCAL_GTC_TICK_ACC=0;
 const __SETCA_AUTH_TICK_SEC = 1;
 function __SETCA_isAuthoritativeSimulationHost(){
   try{ if(window.__SETCA_isPlanningMode && window.__SETCA_isPlanningMode()) return true; }catch(_){ }
@@ -16298,7 +16338,20 @@ function loop(ts){
     if(__setcaDidAuthTick) __SETCA_publishAuthoritativeTick();
   }else if(!planningMode){
     __SETCA_AUTH_TICK_ACC = 0;
+    if(!serverPaused){
+      __SETCA_LOCAL_GTC_TICK_ACC = Math.min(3, __SETCA_LOCAL_GTC_TICK_ACC + Math.max(0, dt));
+      let __setcaLocalGtcGuard = 0;
+      while(__SETCA_LOCAL_GTC_TICK_ACC >= __SETCA_AUTH_TICK_SEC && __setcaLocalGtcGuard < 3){
+        __SETCA_LOCAL_GTC_TICK_ACC -= __SETCA_AUTH_TICK_SEC;
+        __setcaLocalGtcGuard++;
+        updateMissiles(__SETCA_AUTH_TICK_SEC, {localGtcOnly:true});
+      }
+    }else{
+      __SETCA_LOCAL_GTC_TICK_ACC = 0;
+    }
     updatePairs();
+  }else{
+    __SETCA_LOCAL_GTC_TICK_ACC = 0;
   }
   if(!planningMode && !(st && st.localPause)){
     try{ __refreshLocalDelaySnapshot(false); }catch(_){ }
@@ -17213,7 +17266,18 @@ window.addEventListener('DOMContentLoaded', bindAptoUI);
 $('#modeDigital').onclick=()=>{ st.mode='digital'; if(window.__saveLocalPrefs) window.__saveLocalPrefs(); flash($('#modeDigital')); };
 $('#predPlus').onclick=()=>{ st.predMin=Math.min(60,st.predMin+1); if(window.__saveLocalPrefs) window.__saveLocalPrefs(); if(window.__updateLocalUI) window.__updateLocalUI(); flash($('#predPlus')); };
 $('#predMinus').onclick=()=>{ st.predMin=Math.max(0,st.predMin-1); if(window.__saveLocalPrefs) window.__saveLocalPrefs(); if(window.__updateLocalUI) window.__updateLocalUI(); flash($('#predMinus')); };
+function __SETCA_canCreateAircraftHere(){
+  try{
+    const access = window.__setcaAccess || {};
+    if(access.planning || access.freeplay) return true;
+    if(st && st.modoObservador) return false;
+    if(window.__SETCA_isInstructorAuthority) return !!window.__SETCA_isInstructorAuthority();
+    return String(access.role || '').toLowerCase() === 'default';
+  }catch(_){ return false; }
+}
+try{ window.__SETCA_canCreateAircraftHere = __SETCA_canCreateAircraftHere; }catch(_){ }
 function __spawnEdgeAircraft(cfg){
+  if(!__SETCA_canCreateAircraftHere()) return null;
   const id=(cfg.idPrefix||'AC')+'-'+Date.now()+'-'+Math.floor(Math.random()*1000);
   const __sp = randomPeruSpawnNM(cfg.spawnMargin ?? 20);
   const hdg = Math.random()*360;
@@ -17241,6 +17305,7 @@ function __spawnEdgeAircraft(cfg){
 }
 
 function __spawnInlandAircraft(cfg){
+  if(!__SETCA_canCreateAircraftHere()) return null;
   const n=st.planes.length+1;
   const id=(cfg.idPrefix||'R')+n;
   const __sp = randomPeruSpawnNM(cfg.spawnMargin ?? 20);
@@ -17267,6 +17332,7 @@ function __spawnInlandAircraft(cfg){
 }
 
 $('#addFighter').onclick=()=>{
+  if(!__SETCA_canCreateAircraftHere()) return false;
   const n=st.planes.length+1,id='R'+n,nm=nextSequentialCallsign();
   const __sp = randomPeruSpawnNM(20);
   const spd0 = 900 + (Math.random()*350|0);     // caza: ~900–1250 km/h
@@ -17412,7 +17478,9 @@ requestAnimationFrame(()=>{ repaintPlanesList(); repaintNav(); repaintStudent();
         q(p.x,2), q(p.y,2), q(p.hdg,1), q(p.tgtHdg,1), q(p.spd,1), q(p.tgtSpd,1), q(p.alt,0), q(p.tgtAlt,0),
         q(p.turn,2), String(p.turnBias||'')
       ] : null);
-      const missiles = (Array.isArray(st.missiles) ? st.missiles : []).map(m=>m ? [String(m.id||''), q(m.x,2), q(m.y,2), q(m.hdg,1), q(m.alt,0), q(m.spd,1), String(m.targetId||m.target||'')] : null);
+      const missiles = (Array.isArray(st.missiles) ? st.missiles : [])
+        .filter(m=>!(window.__SETCA_isLocalGtcMissile && window.__SETCA_isLocalGtcMissile(m)))
+        .map(m=>m ? [String(m.id||''), q(m.x,2), q(m.y,2), q(m.hdg,1), q(m.alt,0), q(m.spd,1), String(m.targetId||m.target||'')] : null);
       return JSON.stringify({
         planes,
         roles: st.roles || {},
@@ -18584,6 +18652,10 @@ requestAnimationFrame(()=>{ repaintPlanesList(); repaintNav(); repaintStudent();
   const ROOM_ID = (typeof getRoomId==='function') ? getRoomId() : (window.ROOM_ID || 'sala-default');
   const stateRef = ref(db, `rooms/${ROOM_ID}/state`);
   let currentUID = window.currentUID || ('U' + Math.random().toString(36).slice(2));
+  const isLocalGtcMissile = (m)=>{
+    try{ if(window.__SETCA_isLocalGtcMissile) return !!window.__SETCA_isLocalGtcMissile(m); }catch(_){ }
+    return !!m && String(m.launcherType || '').toLowerCase() === 'gtc';
+  };
 
   // --- Wrap launch() to push missile immediately ---
   const origLaunch = window.launch;
@@ -18594,7 +18666,7 @@ requestAnimationFrame(()=>{ repaintPlanesList(); repaintNav(); repaintStudent();
         const L = (window.st.planes||[]).find(p=>p.id===launcherId);
         const T = (window.st.planes||[]).find(p=>p.id===targetId);
         const missile = (window.st.missiles||[]).slice(-1)[0]; // last missile
-        if(missile){
+        if(missile && !isLocalGtcMissile(missile)){
           const payload = {
             event:'launch',
             missile: missile,
@@ -18603,7 +18675,7 @@ requestAnimationFrame(()=>{ repaintPlanesList(); repaintNav(); repaintStudent();
           };
           set(ref(db, `rooms/${ROOM_ID}/events/MS_${missile.id||Date.now()}`), payload);
         }
-        if(window.scheduleSync) window.scheduleSync();
+        if(missile && !isLocalGtcMissile(missile) && window.scheduleSync) window.scheduleSync();
       }catch(e){ console.warn('Sync launch fail', e); }
       return result;
     };
@@ -18615,8 +18687,8 @@ requestAnimationFrame(()=>{ repaintPlanesList(); repaintNav(); repaintStudent();
     try{
       const s = window.st || {};
       try{ if(typeof window.__setcaPruneConsumedMissiles === 'function') window.__setcaPruneConsumedMissiles(); }catch(_){ }
-      const missiles = Array.isArray(s.missiles) ? s.missiles : [];
-      const impactMarks = Array.isArray(s.impactMarks) ? s.impactMarks : [];
+      const missiles = Array.isArray(s.missiles) ? s.missiles.filter(m=>!isLocalGtcMissile(m)) : [];
+      const impactMarks = Array.isArray(s.impactMarks) ? s.impactMarks.filter(mark=>String(mark && mark.launcherType || '').toLowerCase() !== 'gtc') : [];
       const jammers = s.planes ? s.planes.filter(p=>p.jamming).map(p=>p.id).sort() : [];
       const sig = JSON.stringify({
         missiles: missiles.map(m=>[m && m.id, m && m.x, m && m.y, m && m.tx, m && m.ty, m && m.travKM, m && m.status, m && m.tgt, m && m.launcher]),
@@ -18663,6 +18735,7 @@ requestAnimationFrame(()=>{ repaintPlanesList(); repaintNav(); repaintStudent();
             : new Set();
           const existing = new Set((window.st.missiles||[]).map(m=>m.id));
           next.missiles.forEach(m=>{
+            if(isLocalGtcMissile(m)) return;
             if((typeof __setcaIsActiveMissile === 'function') && !__setcaIsActiveMissile(m, completedMissileIds)) return;
             if(!existing.has(m.id)){
               (window.st.missiles||[]).push(Object.assign({}, m));
@@ -18674,6 +18747,7 @@ requestAnimationFrame(()=>{ repaintPlanesList(); repaintNav(); repaintStudent();
           window.st.impactMarks = Array.isArray(window.st.impactMarks) ? window.st.impactMarks : [];
           const existingMarks = new Set(window.st.impactMarks.map(mark=>String(mark && mark.id || '')).filter(Boolean));
           next.impactMarks.forEach(mark=>{
+            if(String(mark && mark.launcherType || '').toLowerCase() === 'gtc') return;
             const id = String(mark && mark.id || '');
             if(id && !existingMarks.has(id)){
               window.st.impactMarks.push(Object.assign({}, mark));
@@ -18694,6 +18768,7 @@ requestAnimationFrame(()=>{ repaintPlanesList(); repaintNav(); repaintStudent();
       if(!evt || evt.by===currentUID) return;
       if(evt.event==='launch' && evt.missile){
         const m = evt.missile;
+        if(isLocalGtcMissile(m)) return;
         const completedMissileIds = (typeof __setcaCompletedMissileIds === 'function')
           ? __setcaCompletedMissileIds(Array.isArray(window.st.impactMarks) ? window.st.impactMarks : [])
           : new Set();
@@ -23432,14 +23507,13 @@ function gtcLaunchMissile(u, opts={}){
   try{
     if(!u || !u.id) return false;
     const launchOpts = (opts && typeof opts === 'object') ? opts : {};
-    const fromOrder = !!launchOpts.fromOrder;
     const accessRole = String(((window.__setcaAccess||{}).role)||'').toLowerCase();
     const userCanLaunch = accessRole === 'default' || accessRole === 'odt' || accessRole === 'samallocator';
-    if(!fromOrder && !userCanLaunch){
+    if(!userCanLaunch){
       try{ logEvent(`LANZAMIENTO GTC bloqueado: solo ODT, SAM ALOCATOR e INSTRUCTOR pueden disparar.`); }catch(_){ }
       return false;
     }
-    // ODT e Instructor ejecutan el lanzamiento local autorizado; luego se sincroniza el misil.
+    // La trayectoria GTC existe solo en el puesto que dispara; únicamente se publica su resultado final.
     // No se aborta por distancia/altura antes del disparo: eso lo resuelve updateMissiles como SPLASH o FALLA/ERROR.
     if(!__gtcCanLaunch(u)){
       try{ logEvent(`${(u.name||'RADAR')} es solo detección.`); }catch(_){ }
@@ -23501,24 +23575,13 @@ function gtcLaunchMissile(u, opts={}){
       launchedAt: Date.now(),
       launcherShotNumber: Number(u.missileShotsFired || 0),
       launcherRemainingShots: Math.max(0, Number(u.missileMaxShots || SETCA_GTC_LAUNCH_POLICY.maxShots) - Number(u.missileShotsFired || 0)),
-      status: 'fly'
+      status: 'fly',
+      localOnlyAnimation: true,
+      __setcaLocalGtcAnimation: true
     };
     st.missiles.push(__setcaLocalMissile);
     try{ if(typeof __navRecordMissile === 'function') __navRecordMissile(__setcaLocalMissile, true); }catch(_){ }
     try{ if(document.getElementById('navReport') && document.getElementById('navReport').style.display==='block' && typeof renderNavReport === 'function') renderNavReport(false); }catch(_){ }
-    try{ if(typeof __setcaMarkSyncStaged === 'function') __setcaMarkSyncStaged(__setcaLocalMissile, (__SETCA_SYNC_STAGING && __SETCA_SYNC_STAGING.missileAddMs) || 900); }catch(_){ }
-    try{
-      const syncRole = String(launchOpts.byRole || accessRole || '').toLowerCase();
-      if(!fromOrder && (syncRole === 'odt' || syncRole === 'samallocator') && window.__SETCA_publishGtcMissileLaunch){
-        window.__SETCA_publishGtcMissileLaunch(__setcaLocalMissile).then(ok=>{
-          if(!ok){ try{ logEvent(`ODT: lanzamiento creado localmente, pero no se pudo publicar a la sala.`); }catch(_){ } }
-        }).catch(()=>{ try{ logEvent(`ODT: error publicando lanzamiento a la sala.`); }catch(_){ } });
-      }else if(!fromOrder && syncRole === 'default' && window._SETCA_SYNC && typeof window._SETCA_SYNC.push === 'function'){
-        window._SETCA_SYNC.push();
-      }else if(fromOrder && window._SETCA_SYNC && typeof window._SETCA_SYNC.push === 'function'){
-        window._SETCA_SYNC.push();
-      }
-    }catch(_){ }
     try{ logEvent(`LANZAMIENTO: ${(u.name||u.label||'LANZADOR')} -> ${(T.name||pid)} (${name})`); }catch(_){ }
     return true;
   }catch(e){ return false; }
@@ -27450,7 +27513,7 @@ import { getDatabase, ref, get, set } from "https://www.gstatic.com/firebasejs/1
   }
   function canManageAircraft(){
     const r = roleRaw();
-    return isPlanningLike() || r === 'default' || r === 'pseudopilot';
+    return isPlanningLike() || r === 'default';
   }
   function roleLabel(r){
     return ({default:'INSTRUCTOR',pseudopilot:'PSEUDO PILOTO',odi:'ODI-CO',odico:'ODI-CO',odt:'ODT',samallocator:'SAM ALOCATOR',observer:'OBSERVADOR'})[String(r||'default')] || String(r||'INSTRUCTOR').toUpperCase();
@@ -27560,7 +27623,7 @@ import { getDatabase, ref, get, set } from "https://www.gstatic.com/firebasejs/1
     $$('#pUnitMgr button').forEach(b=>b.classList.remove('setca-spawn-btn-armed'));
   }
   function spawnAt(tpl, x, y){
-    if(!tpl || !window.st || !Array.isArray(st.planes)) return null;
+    if(!tpl || !canManageAircraft() || !window.st || !Array.isArray(st.planes)) return null;
     const id = uniqueId(tpl.idPrefix || 'R');
     const spd0 = Math.max(0, (Number(tpl.spd)||450) + ((Math.random()*2-1) * (Number(tpl.spdVar)||0)));
     const alt0 = Math.max(0, (Number(tpl.altMin)||10000) + (Math.random() * (Number(tpl.altVar)||0)) | 0);
