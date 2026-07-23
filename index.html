@@ -237,6 +237,7 @@
     __setcaScheduleStageFlush();
     return item;
   }
+  window.__setcaMarkSyncStaged = __setcaMarkSyncStaged;
 
   function __setcaSyncIsMature(item, nowTs){
     const at = Number(item && item.__syncAfter || 0) || 0;
@@ -338,16 +339,19 @@
     'x','y','hdg','tgtHdg','spd','tgtSpd','alt','tgtAlt','turn','turnBias',
     'routeManualUntil','targetId','beAssignedId','ctxMissileType','vsFpm','verticalRateFpm',
     'speedRateKmhps','awacsSweepAng','xpdr','name','tipo','fail','fuel',
-    'jamming','awacsCoverage','capAssignedId','capTrackDirection','capAssignedAt','__cmdAt'
+    'jamming','awacsCoverage','capAssignedId','capTrackDirection','capAssignedAt',
+    'arwyAssignedId','arwyTrackDirection','arwyAssignedAt','__cmdAt'
   ]);
 
   const __SETCA_AIRCRAFT_ORDER_NUMBER_FIELDS = new Set([
     'x','y','hdg','tgtHdg','spd','tgtSpd','alt','tgtAlt','turn',
     'routeIdx','routeLastChange','routeLastReached','routeFinishedAt',
-    'routeManualUntil','vsFpm','verticalRateFpm','speedRateKmhps','awacsSweepAng','fuel','capAssignedAt','__cmdAt'
+    'routeManualUntil','vsFpm','verticalRateFpm','speedRateKmhps','awacsSweepAng','fuel',
+    'capAssignedAt','arwyAssignedAt','__cmdAt'
   ]);
   const __SETCA_AIRCRAFT_ORDER_STRING_FIELDS = new Set([
-    'turnBias','targetId','beAssignedId','ctxMissileType','xpdr','name','tipo','capAssignedId','capTrackDirection'
+    'turnBias','targetId','beAssignedId','ctxMissileType','xpdr','name','tipo',
+    'capAssignedId','capTrackDirection','arwyAssignedId','arwyTrackDirection'
   ]);
   const __SETCA_AIRCRAFT_ORDER_BOOL_FIELDS = new Set(['jamming','awacsCoverage','routeEnabled','routeLoop','routeCompleted']);
 
@@ -420,13 +424,19 @@
       const headingDifference = Number.isFinite(commandedHeading) && Number.isFinite(currentHeading)
         ? Math.abs((((commandedHeading-currentHeading)+540)%360)-180)
         : Infinity;
-      const hasManualHeading = Object.prototype.hasOwnProperty.call(patch, 'tgtHdg') && !String(patch.capAssignedId || '').trim() && headingDifference > 0.5;
+      const hasManualHeading = Object.prototype.hasOwnProperty.call(patch, 'tgtHdg')
+        && !String(patch.capAssignedId || '').trim()
+        && !String(patch.arwyAssignedId || '').trim()
+        && headingDifference > 0.5;
       if(hasManualHeading && typeof window.__SETCA_clearPlaneCapAssignment === 'function'){
         window.__SETCA_clearPlaneCapAssignment(p, 'manual-heading');
       }
+      if(hasManualHeading && typeof window.__SETCA_clearPlaneArwyAssignment === 'function'){
+        window.__SETCA_clearPlaneArwyAssignment(p, 'manual-heading');
+      }
       Object.keys(patch).forEach(key=>{
         const val = patch[key];
-        if((key === 'targetId' || key === 'beAssignedId' || key === 'capAssignedId' || key === 'capTrackDirection') && !String(val || '').trim()){
+        if((key === 'targetId' || key === 'beAssignedId' || key === 'capAssignedId' || key === 'capTrackDirection' || key === 'arwyAssignedId' || key === 'arwyTrackDirection') && !String(val || '').trim()){
           delete p[key];
           return;
         }
@@ -7960,7 +7970,6 @@ body.setca-modern-ui :is(
           <button id="addAwacs" class="btn mini focusable">📡 AWACS</button>
           <button id="addTanker" class="btn mini focusable">⛽ Tanker</button>
           <button id="addUnknown" class="btn mini focusable">❓ Desconocido</button>
-          <button id="delLast" class="btn mini focusable">🗑️ Eliminar</button>
         </div>
 
         <div class="btn-grid small" style="margin-top:8px">
@@ -11642,7 +11651,10 @@ function updatePlane(p,dt){
     return;
   }
   updatePlaneSpeed(p,dt);
-  try{ if(typeof window.__SETCA_applyCapGuidance === 'function') window.__SETCA_applyCapGuidance(p,dt); }catch(_){ }
+  try{
+    const capGuided = typeof window.__SETCA_applyCapGuidance === 'function' && window.__SETCA_applyCapGuidance(p,dt);
+    if(!capGuided && typeof window.__SETCA_applyArwyGuidance === 'function') window.__SETCA_applyArwyGuidance(p,dt);
+  }catch(_){ }
 // Giro hacia rumbo objetivo (con sesgo opcional I/D)
 const diffCW  = (p.tgtHdg - p.hdg + 360) % 360;   // giro a la derecha (clockwise)
 const diffCCW = (p.hdg - p.tgtHdg + 360) % 360;   // giro a la izquierda (counterclockwise)
@@ -12972,7 +12984,53 @@ function __SETCA_findCapAtClient(clientX, clientY){
   return null;
 }
 
+function __isArwyDrawing(d){
+  return !!(d && d.type === 'arwy' && Number.isFinite(+d.x) && Number.isFinite(+d.y) && Number.isFinite(+d.ex) && Number.isFinite(+d.ey));
+}
+
+function __arwyWorldEndpoints(d){
+  if(!__isArwyDrawing(d)) return null;
+  const a = __getDrawingWorldPoint(d,{x:+d.x,y:+d.y});
+  const b = __getDrawingWorldPoint(d,{x:+d.ex,y:+d.ey});
+  const dx = b.x-a.x, dy = b.y-a.y;
+  const length = Math.hypot(dx,dy);
+  return length > 0.001 ? {a,b,dx,dy,length} : null;
+}
+
+function __arwyNearestTrackPoint(d, wx, wy){
+  const g = __arwyWorldEndpoints(d);
+  if(!g) return null;
+  const rawT = (((+wx || 0)-g.a.x)*g.dx + ((+wy || 0)-g.a.y)*g.dy) / (g.length*g.length);
+  const t = Math.max(0,Math.min(1,rawT));
+  const x = g.a.x+g.dx*t, y = g.a.y+g.dy*t;
+  return {x,y,t,rawT,distance:Math.hypot((+wx || 0)-x,(+wy || 0)-y),geometry:g};
+}
+
+function __SETCA_findArwyAtClient(clientX, clientY){
+  try{
+    const radar = document.getElementById('radar');
+    if(!radar || typeof toScreen !== 'function' || !window.st || !Array.isArray(st.drawings)) return null;
+    const rect = radar.getBoundingClientRect();
+    if(clientX < rect.left || clientX > rect.right || clientY < rect.top || clientY > rect.bottom) return null;
+    const px = clientX-rect.left, py = clientY-rect.top;
+    for(let i=st.drawings.length-1;i>=0;i--){
+      const d = st.drawings[i];
+      if(!__isArwyDrawing(d)) continue;
+      try{ if(typeof isDrawingHiddenLocal === 'function' && isDrawingHiddenLocal(d.id)) continue; }catch(_){ }
+      const g = __arwyWorldEndpoints(d);
+      if(!g) continue;
+      const a = toScreen(g.a.x,g.a.y), b = toScreen(g.b.x,g.b.y);
+      const dx = b.x-a.x, dy = b.y-a.y;
+      const den = dx*dx+dy*dy;
+      const t = den > 0 ? Math.max(0,Math.min(1,((px-a.x)*dx+(py-a.y)*dy)/den)) : 0;
+      if(Math.hypot(px-(a.x+dx*t),py-(a.y+dy*t)) <= 12) return d;
+    }
+  }catch(_){ }
+  return null;
+}
+
 const __SETCA_CAP_GUIDANCE_RUNTIME = new WeakMap();
+const __SETCA_ARWY_GUIDANCE_RUNTIME = new WeakMap();
 
 function __SETCA_clearPlaneCapAssignment(p){
   if(!p) return false;
@@ -12981,6 +13039,16 @@ function __SETCA_clearPlaneCapAssignment(p){
   delete p.capTrackDirection;
   delete p.capAssignedAt;
   __SETCA_CAP_GUIDANCE_RUNTIME.delete(p);
+  return hadAssignment;
+}
+
+function __SETCA_clearPlaneArwyAssignment(p){
+  if(!p) return false;
+  const hadAssignment = !!String(p.arwyAssignedId || '').trim();
+  delete p.arwyAssignedId;
+  delete p.arwyTrackDirection;
+  delete p.arwyAssignedAt;
+  __SETCA_ARWY_GUIDANCE_RUNTIME.delete(p);
   return hadAssignment;
 }
 
@@ -13012,6 +13080,9 @@ function __SETCA_assignPlaneToCap(p, cap){
     capAssignedId:String(cap.id),
     capTrackDirection:guidance.direction,
     capAssignedAt:Date.now(),
+    arwyAssignedId:'',
+    arwyTrackDirection:'',
+    arwyAssignedAt:0,
     routeEnabled:false,
     routeManualUntil:0,
     turnBias:'',
@@ -13020,10 +13091,100 @@ function __SETCA_assignPlaneToCap(p, cap){
   if(typeof __SETCA_routeAircraftPatchToInstructor === 'function' && __SETCA_routeAircraftPatchToInstructor(p,patch,'cap-assignment')){
     return true;
   }
+  __SETCA_clearPlaneArwyAssignment(p);
   Object.assign(p,patch);
   p.turnBias = null;
   __SETCA_CAP_GUIDANCE_RUNTIME.set(p,{capId:String(cap.id),lastTarget:guidance.heading});
   try{ if(window.__SETCA_markAircraftDirty) window.__SETCA_markAircraftDirty(p); }catch(_){ }
+  return true;
+}
+
+function __SETCA_arwyGuidanceTarget(p, arwy, requestedDirection){
+  const nearest = __arwyNearestTrackPoint(arwy,+p.x || 0,+p.y || 0);
+  if(!nearest) return null;
+  const g = nearest.geometry;
+  const headingAB = __SETCA_capBearing(g.a,g.b);
+  const headingBA = __SETCA_capBearing(g.b,g.a);
+  let direction = String(requestedDirection || '').toUpperCase();
+  if(direction !== 'AB' && direction !== 'BA'){
+    const current = Number.isFinite(+p.tgtHdg) ? +p.tgtHdg : (+p.hdg || 0);
+    if(nearest.t <= 0.02) direction = 'AB';
+    else if(nearest.t >= 0.98) direction = 'BA';
+    else direction = __SETCA_capHeadingDifference(current,headingAB) <= __SETCA_capHeadingDifference(current,headingBA) ? 'AB' : 'BA';
+  }
+  const sign = direction === 'AB' ? 1 : -1;
+  const speedNmPerSec = Math.max(0,+p.spd || +p.tgtSpd || 0) / 1.852 / 3600;
+  const lookaheadNm = Math.max(0.6,Math.min(5,Math.max(g.length*0.08,speedNmPerSec*20)));
+  const targetT = Math.max(0,Math.min(1,nearest.t+sign*(lookaheadNm/g.length)));
+  const target = {x:g.a.x+g.dx*targetT,y:g.a.y+g.dy*targetT};
+  const endpoint = direction === 'AB' ? g.b : g.a;
+  return {
+    target,
+    heading:__SETCA_capBearing(p,target),
+    routeHeading:direction === 'AB' ? headingAB : headingBA,
+    direction,
+    nearest,
+    endpoint,
+    endpointDistance:Math.hypot((+p.x || 0)-endpoint.x,(+p.y || 0)-endpoint.y),
+    releaseDistance:Math.max(0.55,Math.min(1.4,0.35+speedNmPerSec*12))
+  };
+}
+
+function __SETCA_assignPlaneToArwy(p, arwy){
+  if(!p || !arwy || !__isArwyDrawing(arwy) || !arwy.id) return false;
+  const guidance = __SETCA_arwyGuidanceTarget(p,arwy,'');
+  if(!guidance) return false;
+  const patch = {
+    arwyAssignedId:String(arwy.id),
+    arwyTrackDirection:guidance.direction,
+    arwyAssignedAt:Date.now(),
+    capAssignedId:'',
+    capTrackDirection:'',
+    capAssignedAt:0,
+    routeEnabled:false,
+    routeManualUntil:0,
+    turnBias:'',
+    tgtHdg:guidance.heading
+  };
+  if(typeof __SETCA_routeAircraftPatchToInstructor === 'function' && __SETCA_routeAircraftPatchToInstructor(p,patch,'arwy-assignment')){
+    return true;
+  }
+  __SETCA_clearPlaneCapAssignment(p);
+  Object.assign(p,patch);
+  p.turnBias = null;
+  __SETCA_ARWY_GUIDANCE_RUNTIME.set(p,{arwyId:String(arwy.id),lastTarget:guidance.heading});
+  try{ if(window.__SETCA_markAircraftDirty) window.__SETCA_markAircraftDirty(p); }catch(_){ }
+  return true;
+}
+
+function __SETCA_applyArwyGuidance(p){
+  const arwyId = String(p && p.arwyAssignedId || '').trim();
+  if(!arwyId || !window.st || !Array.isArray(st.drawings)) return false;
+  const arwy = st.drawings.find(d=>d && String(d.id || '') === arwyId && __isArwyDrawing(d));
+  if(!arwy){
+    __SETCA_clearPlaneArwyAssignment(p);
+    return false;
+  }
+  const runtime = __SETCA_ARWY_GUIDANCE_RUNTIME.get(p);
+  if(runtime && runtime.arwyId === arwyId && Number.isFinite(runtime.lastTarget) && Number.isFinite(+p.tgtHdg) && __SETCA_capHeadingDifference(p.tgtHdg,runtime.lastTarget) > 3){
+    __SETCA_clearPlaneArwyAssignment(p);
+    return false;
+  }
+  const guidance = __SETCA_arwyGuidanceTarget(p,arwy,p.arwyTrackDirection);
+  if(!guidance) return false;
+  const reachedEnd = guidance.direction === 'AB' ? guidance.nearest.rawT >= 0.995 : guidance.nearest.rawT <= 0.005;
+  if(reachedEnd && guidance.endpointDistance <= guidance.releaseDistance){
+    p.tgtHdg = guidance.routeHeading;
+    p.turnBias = null;
+    __SETCA_clearPlaneArwyAssignment(p);
+    return false;
+  }
+  p.routeEnabled = false;
+  p.routeManualUntil = 0;
+  p.turnBias = null;
+  p.arwyTrackDirection = guidance.direction;
+  p.tgtHdg = guidance.heading;
+  __SETCA_ARWY_GUIDANCE_RUNTIME.set(p,{arwyId,lastTarget:guidance.heading});
   return true;
 }
 
@@ -13057,9 +13218,13 @@ try{
   window.__SETCA_capNearestTrackPoint = __capNearestTrackPoint;
   window.__SETCA_capContainsWorldPoint = __capContainsWorldPoint;
   window.__SETCA_findCapAtClient = __SETCA_findCapAtClient;
+  window.__SETCA_findArwyAtClient = __SETCA_findArwyAtClient;
   window.__SETCA_assignPlaneToCap = __SETCA_assignPlaneToCap;
+  window.__SETCA_assignPlaneToArwy = __SETCA_assignPlaneToArwy;
   window.__SETCA_clearPlaneCapAssignment = __SETCA_clearPlaneCapAssignment;
+  window.__SETCA_clearPlaneArwyAssignment = __SETCA_clearPlaneArwyAssignment;
   window.__SETCA_applyCapGuidance = __SETCA_applyCapGuidance;
+  window.__SETCA_applyArwyGuidance = __SETCA_applyArwyGuidance;
 }catch(_){ }
 
 function __canRotateDrawing(d){
@@ -14057,7 +14222,10 @@ addEventListener('blur', ()=>{ __dDown = false; __eDown = false; __etaDrag = nul
   }
 
   function __commitDrawingCoordinateEdit(d){
-    if(d && d.id) st.selectedDrawing = d.id;
+    if(d && d.id){
+      st.selectedDrawing = d.id;
+      try{ if(window.__SETCA_setClipboardFocus) window.__SETCA_setClipboardFocus('drawing'); }catch(_){ }
+    }
     if(typeof repaintNav === 'function') repaintNav();
     if(typeof repaintAlt === 'function') repaintAlt();
     if(typeof repaintPairs === 'function') repaintPairs();
@@ -14464,6 +14632,23 @@ function showWPal(clientX, clientY){
     m.style.top  = y + 'px';
   }
 
+  function __planeContextHasPriorityAt(px, py){
+    try{
+      const access = window.__setcaAccess || {};
+      const role = String(access.role || document.body.getAttribute('data-setca-role') || '').toLowerCase();
+      const instructorAuthority = typeof window.__SETCA_isInstructorAuthority === 'function' && window.__SETCA_isInstructorAuthority();
+      const canOpenPlaneMenu = instructorAuthority || !!access.freeplay || role === 'default' || role === 'pseudopilot' || role === 'odi' || role === 'odico' || role === 'odt';
+      if(!canOpenPlaneMenu || !window.st || !Array.isArray(st.planes) || typeof toScreen !== 'function') return false;
+      const z = typeof zoom === 'number' && Number.isFinite(zoom) && zoom > 0 ? zoom : 1;
+      const tolerance = Math.max(8,Math.min(16,11/Math.sqrt(z)));
+      return st.planes.some(p=>{
+        if(!p) return false;
+        const s = toScreen(+p.x || 0,+p.y || 0);
+        return Math.hypot(px-s.x,py-s.y) <= tolerance;
+      });
+    }catch(_){ return false; }
+  }
+
   // Ocultar menú/paleta al click en cualquier parte
   document.addEventListener('mousedown', (e)=>{
     const m = ensureCtxMenu();
@@ -14488,6 +14673,7 @@ function showWPal(clientX, clientY){
     const hit = pickShapePrecisePx(px, py, SEL_TOL_PX);
     if(hit){
       st.selectedDrawing = hit;
+      try{ if(window.__SETCA_setClipboardFocus) window.__SETCA_setClipboardFocus('drawing'); }catch(_){ }
     }else{
       st.selectedDrawing = null;
     }
@@ -14512,6 +14698,7 @@ function showWPal(clientX, clientY){
     const drawing = hit ? __findDrawingById(hit) : null;
     if(!__isCapDrawing(drawing)) return;
     st.selectedDrawing = hit;
+    try{ if(window.__SETCA_setClipboardFocus) window.__SETCA_setClipboardFocus('drawing'); }catch(_){ }
     try{ if(window.renderDrawingScopePanel) window.renderDrawingScopePanel(); }catch(_){}
     showCtx(e.clientX,e.clientY,hit);
   }, true);
@@ -14522,6 +14709,8 @@ function showWPal(clientX, clientY){
     if(tool && tool.tool && tool.tool !== 'none') return;
     const r = cvs.getBoundingClientRect();
     const px = e.clientX - r.left, py = e.clientY - r.top;
+    // Las aeronaves son el elemento operativo superior, incluso cuando vuelan sobre un gráfico.
+    if(__planeContextHasPriorityAt(px,py)) return;
     // Precisión: para círculo/cuadrado/polígono solo cuenta el perímetro.
     const hit = (typeof pickShapePerimeterPrecisePx==='function')
       ? pickShapePerimeterPrecisePx(px, py, SEL_TOL_PX)
@@ -14530,6 +14719,7 @@ function showWPal(clientX, clientY){
     e.preventDefault();
     if(e.stopImmediatePropagation) e.stopImmediatePropagation(); else e.stopPropagation();
     st.selectedDrawing = hit;
+    try{ if(window.__SETCA_setClipboardFocus) window.__SETCA_setClipboardFocus('drawing'); }catch(_){ }
     try{ if(window.renderDrawingScopePanel) window.renderDrawingScopePanel(); }catch(_){}
     showCtx(e.clientX, e.clientY, hit);
   }, true);
@@ -14549,6 +14739,7 @@ function showWPal(clientX, clientY){
     const d = __findDrawingById(hit);
     if(!d) return;
     st.selectedDrawing = hit;
+    try{ if(window.__SETCA_setClipboardFocus) window.__SETCA_setClipboardFocus('drawing'); }catch(_){ }
     try{ if(window.renderDrawingScopePanel) window.renderDrawingScopePanel(); }catch(_){}
 
     e.preventDefault();
@@ -14617,7 +14808,12 @@ cvs.addEventListener('mousedown',e=>{
     const d=Math.hypot(wx-p.x,wy-p.y);
     if(d<15/zoom && d<bd){bd=d;best=p;}
   });
-  if(best){draggingPlane=best;dragStart={x:e.clientX,y:e.clientY,planeX:Number(best.x||0),planeY:Number(best.y||0)};}
+  if(best){
+    draggingPlane=best;
+    dragStart={x:e.clientX,y:e.clientY,planeX:Number(best.x||0),planeY:Number(best.y||0)};
+    if(Array.isArray(st.sel)) st.sel=[best.id];
+    try{ if(window.__SETCA_setClipboardFocus) window.__SETCA_setClipboardFocus('aircraft'); }catch(_){ }
+  }
 });
 addEventListener('mousemove',e=>{
   if(window.st && window.st.modoObservador){ draggingPlane=null; draggingDrawing=null; dragStart=null; return; }
@@ -15192,7 +15388,12 @@ function repaintPlanesList(){
   st.planes.forEach(p=>{
     const b=document.createElement('button'); b.className='mini btn focusable'; b.textContent=p.name;
     if(st.sel.includes(p.id)) b.classList.add('hi');
-    b.onclick=()=>{const i=st.sel.indexOf(p.id); if(i>=0) st.sel.splice(i,1); else st.sel.push(p.id); repaintNav(); repaintStudent(); repaintAlt(); flash(b);};
+    b.onclick=()=>{
+      const i=st.sel.indexOf(p.id);
+      if(i>=0) st.sel.splice(i,1); else st.sel.push(p.id);
+      try{ if(window.__SETCA_setClipboardFocus) window.__SETCA_setClipboardFocus('aircraft'); }catch(_){ }
+      repaintNav(); repaintStudent(); repaintAlt(); flash(b);
+    };
     list.appendChild(b);
   });
 }
@@ -15915,6 +16116,10 @@ function repaintStudent(){
   });
 }
 function __SETCA_isLocalPlanningLike(){
+  try{
+    const access = window.__setcaAccess || {};
+    if(access.planning || access.freeplay) return true;
+  }catch(_){ }
   try{ if(window.__SETCA_isPlanningMode && window.__SETCA_isPlanningMode()) return true; }catch(_){ }
   try{ if(window.__SETCA_isFreePlayMode && window.__SETCA_isFreePlayMode()) return true; }catch(_){ }
   return false;
@@ -15948,6 +16153,7 @@ function __SETCA_setCommandHdg(p, value){
   const currentCommand = Number(p.tgtHdg);
   const changesHeading = !Number.isFinite(currentCommand) || Math.abs((((hdg-currentCommand)+540)%360)-180) > 0.5;
   try{ if(changesHeading && typeof window.__SETCA_clearPlaneCapAssignment === 'function') window.__SETCA_clearPlaneCapAssignment(p,'manual-heading'); }catch(_){ }
+  try{ if(changesHeading && typeof window.__SETCA_clearPlaneArwyAssignment === 'function') window.__SETCA_clearPlaneArwyAssignment(p,'manual-heading'); }catch(_){ }
   if(__SETCA_routeAircraftPatchToInstructor(p, {tgtHdg:hdg}, 'heading')) return hdg;
   p.tgtHdg = hdg;
   try{ if(window.__SETCA_markAircraftDirty) window.__SETCA_markAircraftDirty(p); }catch(_){ }
@@ -17174,7 +17380,17 @@ requestAnimationFrame(()=>{ repaintPlanesList(); repaintNav(); repaintStudent();
   let __setcaSyncActivityUntil = 0;
   let __setcaLastSharedSig = '';
 
+  function __SETCA_canUseSharedSync(){
+    try{
+      const access = window.__setcaAccess || {};
+      if(access.planning || access.freeplay) return false;
+    }catch(_){ }
+    try{ if(window.__SETCA_isLocalOnlyMode && window.__SETCA_isLocalOnlyMode()) return false; }catch(_){ }
+    return true;
+  }
+
   function __setcaPushNow(){
+    if(!__SETCA_canUseSharedSync()) return false;
     try{
       if(window._SETCA_SYNC && typeof window._SETCA_SYNC.pushNow === 'function') return window._SETCA_SYNC.pushNow();
       if(window._SETCA_SYNC && typeof window._SETCA_SYNC.push === 'function') return window._SETCA_SYNC.push();
@@ -17183,7 +17399,9 @@ requestAnimationFrame(()=>{ repaintPlanesList(); repaintNav(); repaintStudent();
   }
 
   function __SETCA_markSyncActivity(ms=1800){
+    if(!__SETCA_canUseSharedSync()) return false;
     __setcaSyncActivityUntil = Math.max(__setcaSyncActivityUntil, Date.now() + Math.max(500, Number(ms)||1800));
+    return true;
   }
 
   function __SETCA_sharedStateSignature(){
@@ -17212,6 +17430,7 @@ requestAnimationFrame(()=>{ repaintPlanesList(); repaintNav(); repaintStudent();
   let __setcaAircraftSyncTimer = null;
   let __setcaAircraftSyncPending = false;
   function __SETCA_syncPulse(ms=1800){
+    if(!__SETCA_canUseSharedSync()) return false;
     __SETCA_markSyncActivity(ms);
     const now = Date.now();
     const gap = now - __setcaSyncPulseLastAt;
@@ -17230,6 +17449,7 @@ requestAnimationFrame(()=>{ repaintPlanesList(); repaintNav(); repaintStudent();
   }
 
   function __SETCA_scheduleAircraftSync1s(){
+    if(!__SETCA_canUseSharedSync()) return false;
     __SETCA_markSyncActivity(1600);
     __setcaAircraftSyncPending = true;
     if(__setcaAircraftSyncTimer) return true;
@@ -17243,6 +17463,7 @@ requestAnimationFrame(()=>{ repaintPlanesList(); repaintNav(); repaintStudent();
   }
 
   function scheduleSync(delay=__SETCA_SYNC_DEBOUNCE_MS){
+    if(!__SETCA_canUseSharedSync()) return false;
     __SETCA_markSyncActivity();
     __syncPending = true;
     if(__syncTimer) clearTimeout(__syncTimer);
@@ -17252,14 +17473,17 @@ requestAnimationFrame(()=>{ repaintPlanesList(); repaintNav(); repaintStudent();
       __syncPending = false;
       __setcaPushNow();
     }, Math.max(0, Number.isFinite(+delay) ? +delay : __SETCA_SYNC_DEBOUNCE_MS));
+    return true;
   }
 
   function flushSync(){
+    if(!__SETCA_canUseSharedSync()) return false;
     try{
       if(__syncTimer){ clearTimeout(__syncTimer); __syncTimer=null; }
       __syncPending = false;
-      __setcaPushNow();
+      return __setcaPushNow();
     }catch(e){}
+    return false;
   }
 
   // Exponer para compatibilidad
@@ -17270,7 +17494,7 @@ requestAnimationFrame(()=>{ repaintPlanesList(); repaintNav(); repaintStudent();
   window.__SETCA_scheduleAircraftSync1s = __SETCA_scheduleAircraftSync1s;
 
   // Conectar con los botones principales
-  ['#addFighter','#addCom','#addTrans','#addHeli','#addAwacs','#addTanker','#addUnknown','#delLast','#pause','#start'].forEach(id=>{
+  ['#addFighter','#addCom','#addTrans','#addHeli','#addAwacs','#addTanker','#addUnknown','#pause','#start'].forEach(id=>{
     const el = document.querySelector(id);
     if(el){
       const orig = el.onclick;
@@ -18487,29 +18711,6 @@ requestAnimationFrame(()=>{ repaintPlanesList(); repaintNav(); repaintStudent();
 })();
 /* === END PATCH === */
 
-// === Override: Delete specific plane instead of last ===
-(function(){
-  const btn = document.getElementById('delLast');
-  if(!btn) return;
-  btn.onclick = ()=>{
-    if(!st || !Array.isArray(st.planes) || st.planes.length===0) return;
-    const options = st.planes.map(p=> `${p.id} — ${p.name}`).join('\n');
-    const pick = prompt('Eliminar avion (ID - Nombre):\n' + options + '\n\nEscribe el ID exactamente tal cual aparece:');
-    if(!pick) return;
-    const id = pick.split('—')[0].trim();
-    const before = st.planes.length;
-    st.planes = st.planes.filter(p=> p.id !== id);
-    if(st.sel && st.sel.includes(id)){ st.sel = st.sel.filter(x=>x!==id); }
-    if(before !== st.planes.length){
-      repaintPlanesList && repaintPlanesList();
-      repaintNav && repaintNav();
-      repaintAlt && repaintAlt();
-      // push to cloud if available
-      if(window._SETCA_SYNC && typeof window._SETCA_SYNC.push==='function'){ window._SETCA_SYNC.push(); }
-    }
-  };
-})();
-
 </script>
 
 
@@ -18550,86 +18751,6 @@ requestAnimationFrame(()=>{ repaintPlanesList(); repaintNav(); repaintStudent();
     </div>
   </div>
 </div>
-
-<div id="deleteModal" style="position:fixed;top:0;left:0;width:100%;height:100%;display:none;justify-content:center;align-items:center;background:rgba(0,0,0,0.6);z-index:9999;">
-  <div style="background:#1b1b1b;padding:20px;border-radius:6px;color:#eaffea;min-width:260px;">
-    <h3>Eliminar avión</h3>
-    <select id="deleteSelect" style="width:100%;margin-top:10px;margin-bottom:15px;background:#111;color:#eaffea;border:1px solid #555;"></select>
-    <button id="confirmDelete" class="btn mini focusable">Eliminar</button>
-    <button id="cancelDelete" class="btn mini focusable" style="margin-left:10px;">Cancelar</button>
-  </div>
-</div>
-
-
-<script>
-(function setupDeleteUI(){
-  function bind(){
-    const btn = document.getElementById('delLast');
-    const modal = document.getElementById('deleteModal');
-    const sel = document.getElementById('deleteSelect');
-    const ok = document.getElementById('confirmDelete');
-    const cancel = document.getElementById('cancelDelete');
-    if(!btn || !modal || !sel || !ok || !cancel) return false;
-
-    // Make sure no previous listeners accumulate
-    btn.replaceWith(btn.cloneNode(true));
-    const newBtn = document.getElementById('delLast');
-
-    newBtn.addEventListener('click', ()=>{
-      // Populate select fresh
-      sel.innerHTML = '';
-      if(window.st && Array.isArray(st.planes)){
-        st.planes.forEach(p=>{
-          const opt = document.createElement('option');
-          opt.value = p.id;
-          opt.textContent = p.id + " — " + p.name;
-          sel.appendChild(opt);
-        });
-      }
-      modal.style.display='flex';
-    });
-
-    ok.replaceWith(ok.cloneNode(true));
-    cancel.replaceWith(cancel.cloneNode(true));
-    const ok2 = document.getElementById('confirmDelete');
-    const cancel2 = document.getElementById('cancelDelete');
-
-    ok2.addEventListener('click', ()=>{
-      const id = sel.value;
-      if(id && window.st && Array.isArray(st.planes)){
-        st.planes = st.planes.filter(p=>p.id!==id);
-        if(st.sel) st.sel = st.sel.filter(x=>x!==id);
-        if(typeof repaintPlanesList==='function') repaintPlanesList();
-        if(typeof repaintNav==='function') repaintNav();
-        if(typeof repaintAlt==='function') repaintAlt();
-        if(typeof repaintPairs==='function') repaintPairs();
-        try{ if(window.__saveLocalDrawingsSoon) window.__saveLocalDrawingsSoon(); }catch(_){}
-        if(window._SETCA_SYNC && typeof window._SETCA_SYNC.push==='function'){ window._SETCA_SYNC.push(); }
-      }
-      modal.style.display='none';
-    });
-    cancel2.addEventListener('click', ()=>{ modal.style.display='none'; });
-
-    // Also close modal on background click
-    modal.addEventListener('click', (e)=>{
-      if(e.target===modal) modal.style.display='none';
-    });
-
-    return true;
-  }
-
-  if(document.readyState === 'complete' || document.readyState === 'interactive'){
-    bind();
-  } else {
-    document.addEventListener('DOMContentLoaded', bind, { once:true });
-  }
-
-  // Fallback rebinder (in case other code rebinds later)
-  setTimeout(bind, 800);
-  setTimeout(bind, 2000);
-})();
-</script>
-
 
 <script>
 function fitRadar(){
@@ -19086,6 +19207,7 @@ function renderDrawingScopePanel(){
 
     const selectRow = ()=>{
       st.selectedDrawing = d.id;
+      try{ if(window.__SETCA_setClipboardFocus) window.__SETCA_setClipboardFocus('drawing'); }catch(_){ }
       refreshDrawingScopeSelection();
     };
     row.addEventListener('click', selectRow);
@@ -19215,6 +19337,16 @@ window.setDrawingGroupHiddenLocal = setDrawingGroupHiddenLocal;
 window.getDrawingCreatorName = getDrawingCreatorName;
 
 const __SETCA_DRAWING_CLIPBOARD = { drawing:null, pasteCount:0 };
+const __SETCA_AIRCRAFT_CLIPBOARD = { plane:null, role:'Neutral', pasteCount:0 };
+let __SETCA_ACTIVE_CLIPBOARD_KIND = '';
+let __SETCA_CLIPBOARD_FOCUS = '';
+
+function __SETCA_setClipboardFocus(kind){
+  const value = String(kind || '').toLowerCase();
+  __SETCA_CLIPBOARD_FOCUS = value === 'aircraft' || value === 'drawing' ? value : '';
+  return __SETCA_CLIPBOARD_FOCUS;
+}
+window.__SETCA_setClipboardFocus = __SETCA_setClipboardFocus;
 
 function __setcaCloneDrawingPlain(d){
   if(!d || typeof d !== 'object') return null;
@@ -19278,8 +19410,126 @@ function __setcaDrawingPasteOffset(pasteCount){
   const n = Math.max(1, Number(pasteCount) || 1);
   return { dx:stepNm * n, dy:stepNm * n };
 }
+function __setcaIsInstructorAircraftClipboardAuthority(){
+  try{
+    if(window.st && st.modoObservador) return false;
+    if(typeof window.__SETCA_isInstructorAuthority === 'function') return !!window.__SETCA_isInstructorAuthority();
+    const access = window.__setcaAccess || {};
+    return !access.planning && !access.freeplay && String(access.role || '').toLowerCase() === 'default';
+  }catch(_){ return false; }
+}
+function __setcaSelectedAircraftForClipboard(){
+  if(!__setcaIsInstructorAircraftClipboardAuthority() || !window.st || !Array.isArray(st.planes) || !Array.isArray(st.sel)) return null;
+  for(let i=st.sel.length-1;i>=0;i--){
+    const id = String(st.sel[i] || '');
+    const plane = st.planes.find(p=>p && String(p.id || '') === id);
+    if(plane) return plane;
+  }
+  return null;
+}
+function __setcaNewAircraftCopyId(source){
+  const used = new Set((window.st && Array.isArray(st.planes) ? st.planes : []).map(p=>String(p && p.id || '')));
+  const base = String(source && source.id || 'AC').replace(/[^A-Za-z0-9_-]/g,'').slice(0,18) || 'AC';
+  let index = 2;
+  let id = `${base}-C${index}`;
+  while(used.has(id)) id = `${base}-C${++index}`;
+  return id;
+}
+function __setcaUniqueAircraftCopyName(source){
+  const rawBase = String(source && (source.name || source.callsign || source.id) || 'AERONAVE').trim() || 'AERONAVE';
+  const base = rawBase.slice(0,26);
+  const names = new Set((window.st && Array.isArray(st.planes) ? st.planes : []).map(p=>String(p && (p.name || p.callsign) || '').trim().toLowerCase()).filter(Boolean));
+  let index = 2;
+  let name = `${base}-${index}`;
+  while(names.has(name.toLowerCase())) name = `${base}-${++index}`;
+  return name.slice(0,32);
+}
+function __setcaCloneAircraftPlain(p){
+  if(!p || typeof p !== 'object') return null;
+  try{ return JSON.parse(JSON.stringify(p)); }catch(_){ return {...p}; }
+}
+function __setcaRefreshAfterAircraftPaste(copy){
+  if(copy && copy.id){
+    st.sel = [copy.id];
+    __SETCA_setClipboardFocus('aircraft');
+  }
+  try{ if(typeof repaintPlanesList === 'function') repaintPlanesList(); }catch(_){ }
+  try{ if(typeof repaintNav === 'function') repaintNav(); }catch(_){ }
+  try{ if(typeof repaintVuelos === 'function') repaintVuelos(); }catch(_){ }
+  try{ if(typeof repaintPairs === 'function') repaintPairs(); }catch(_){ }
+  try{ if(typeof repaintAlt === 'function') repaintAlt(); }catch(_){ }
+  try{ if(typeof repaintStudent === 'function') repaintStudent(); }catch(_){ }
+  try{ if(typeof draw === 'function') draw(); }catch(_){ }
+}
+function __SETCA_copySelectedAircraft(){
+  const source = __setcaSelectedAircraftForClipboard();
+  if(!source) return false;
+  const copy = __setcaCloneAircraftPlain(source);
+  if(!copy) return false;
+  __SETCA_AIRCRAFT_CLIPBOARD.plane = copy;
+  __SETCA_AIRCRAFT_CLIPBOARD.role = String((st.roles && st.roles[source.id]) || 'Neutral');
+  __SETCA_AIRCRAFT_CLIPBOARD.pasteCount = 0;
+  __SETCA_ACTIVE_CLIPBOARD_KIND = 'aircraft';
+  __SETCA_setClipboardFocus('aircraft');
+  return true;
+}
+function __SETCA_pasteAircraft(){
+  if(!__setcaIsInstructorAircraftClipboardAuthority() || !window.st || !Array.isArray(st.planes)) return false;
+  const source = __SETCA_AIRCRAFT_CLIPBOARD.plane;
+  if(!source) return false;
+  const copy = __setcaCloneAircraftPlain(source);
+  if(!copy) return false;
+  __SETCA_AIRCRAFT_CLIPBOARD.pasteCount += 1;
+  const offset = __setcaDrawingPasteOffset(__SETCA_AIRCRAFT_CLIPBOARD.pasteCount);
+  copy.id = __setcaNewAircraftCopyId(source);
+  copy.name = __setcaUniqueAircraftCopyName(source);
+  if(Object.prototype.hasOwnProperty.call(copy,'callsign')) copy.callsign = copy.name;
+  copy.x = (Number(source.x) || 0) + offset.dx;
+  copy.y = (Number(source.y) || 0) + offset.dy;
+  copy.ghosts = [];
+  copy.lastDet = 0;
+  copy._gt = 0;
+  copy.kills = 0;
+  copy.fuel = 100;
+  copy.fail = {comms:false,eng:'none',cab:'none',gear:false,bird:false};
+  copy.__cmdAt = Date.now();
+  delete copy.__syncAfter;
+  delete copy._hit;
+  delete copy._killConfirmedAt;
+  delete copy._killConfirmedBy;
+  delete copy.capAssignedId;
+  delete copy.capTrackDirection;
+  delete copy.capAssignedAt;
+  delete copy.arwyAssignedId;
+  delete copy.arwyTrackDirection;
+  delete copy.arwyAssignedAt;
+  st.planes.push(copy);
+  st.roles = st.roles && typeof st.roles === 'object' ? st.roles : {};
+  const copiedRole = String(__SETCA_AIRCRAFT_CLIPBOARD.role || 'Neutral');
+  st.roles[copy.id] = copiedRole === 'Kill-confirm' ? 'Neutral' : copiedRole;
+  let staged = false;
+  try{
+    if(typeof window.__setcaMarkSyncStaged === 'function'){
+      window.__setcaMarkSyncStaged(copy,(window.__SETCA_SYNC_STAGING && window.__SETCA_SYNC_STAGING.planeAddMs) || 1000);
+      staged = true;
+    }
+  }catch(_){ }
+  try{ if(window.__SETCA_markAircraftDirty) window.__SETCA_markAircraftDirty(copy); }catch(_){ }
+  try{ if(typeof logEvent === 'function') logEvent(`AERONAVE DUPLICADA: ${source.name || source.id} → ${copy.name}`); }catch(_){ }
+  __setcaRefreshAfterAircraftPaste(copy);
+  if(!staged){
+    try{
+      if(typeof window.__SETCA_scheduleAircraftSync1s === 'function') window.__SETCA_scheduleAircraftSync1s();
+      else if(typeof scheduleSync === 'function') scheduleSync(1000);
+    }catch(_){ }
+  }
+  return copy;
+}
 function __setcaRefreshAfterDrawingPaste(copy){
-  if(copy && copy.id) st.selectedDrawing = copy.id;
+  if(copy && copy.id){
+    st.selectedDrawing = copy.id;
+    __SETCA_setClipboardFocus('drawing');
+  }
   try{ if(typeof repaintNav === 'function') repaintNav(); }catch(_){ }
   try{ if(typeof repaintAlt === 'function') repaintAlt(); }catch(_){ }
   try{ if(typeof repaintPairs === 'function') repaintPairs(); }catch(_){ }
@@ -19299,6 +19549,8 @@ function __SETCA_copySelectedDrawing(){
   if(!source) return false;
   __SETCA_DRAWING_CLIPBOARD.drawing = __setcaCloneDrawingPlain(source);
   __SETCA_DRAWING_CLIPBOARD.pasteCount = 0;
+  __SETCA_ACTIVE_CLIPBOARD_KIND = 'drawing';
+  __SETCA_setClipboardFocus('drawing');
   return !!__SETCA_DRAWING_CLIPBOARD.drawing;
 }
 function __SETCA_pasteDrawing(){
@@ -19322,18 +19574,27 @@ function __SETCA_pasteDrawing(){
 }
 window.__SETCA_copySelectedDrawing = __SETCA_copySelectedDrawing;
 window.__SETCA_pasteDrawing = __SETCA_pasteDrawing;
+window.__SETCA_copySelectedAircraft = __SETCA_copySelectedAircraft;
+window.__SETCA_pasteAircraft = __SETCA_pasteAircraft;
 
 document.addEventListener('keydown', (ev)=>{
   if(!ev || !ev.ctrlKey || ev.altKey || ev.repeat) return;
   if(typeof __isEditableHotkeyTarget === 'function' && __isEditableHotkeyTarget(ev.target)) return;
   const key = String(ev.key || '').toLowerCase();
   if(key === 'c'){
-    if(__SETCA_copySelectedDrawing()){
+    let copied = false;
+    if(__SETCA_CLIPBOARD_FOCUS === 'aircraft') copied = !!__SETCA_copySelectedAircraft();
+    else if(__SETCA_CLIPBOARD_FOCUS === 'drawing') copied = !!__SETCA_copySelectedDrawing();
+    else copied = !!__SETCA_copySelectedDrawing() || !!__SETCA_copySelectedAircraft();
+    if(copied){
       ev.preventDefault();
       if(ev.stopImmediatePropagation) ev.stopImmediatePropagation(); else ev.stopPropagation();
     }
   }else if(key === 'v'){
-    if(__SETCA_pasteDrawing()){
+    const pasted = __SETCA_ACTIVE_CLIPBOARD_KIND === 'aircraft'
+      ? __SETCA_pasteAircraft()
+      : (__SETCA_ACTIVE_CLIPBOARD_KIND === 'drawing' ? __SETCA_pasteDrawing() : false);
+    if(pasted){
       ev.preventDefault();
       if(ev.stopImmediatePropagation) ev.stopImmediatePropagation(); else ev.stopPropagation();
     }
@@ -22188,6 +22449,9 @@ document.querySelectorAll('#pCmdBody .btn').forEach(btn=>{
 
   function pushSync(){
     try{
+      if(window.__SETCA_isLocalOnlyMode && window.__SETCA_isLocalOnlyMode()) return false;
+      const access = window.__setcaAccess || {};
+      if(access.planning || access.freeplay) return false;
       if(typeof flushSync === 'function') flushSync();
       else if(window._SETCA_SYNC && typeof window._SETCA_SYNC.push === 'function') window._SETCA_SYNC.push();
       else if(typeof scheduleSync === 'function') scheduleSync(0);
@@ -22274,7 +22538,15 @@ document.querySelectorAll('#pCmdBody .btn').forEach(btn=>{
   let odiBeMenu = null;
   let odiBeTargetPlaneId = null;
 
+  function isFreePlayAircraftContext(){
+    try{
+      const access = window.__setcaAccess || {};
+      if(access.freeplay) return true;
+    }catch(_){ }
+    try{ return !!(window.__SETCA_isFreePlayMode && window.__SETCA_isFreePlayMode()); }catch(_){ return false; }
+  }
   function isAircraftDeferredContext(){
+    if(isFreePlayAircraftContext()) return true;
     try{ if(window.__SETCA_isInstructorAuthority && window.__SETCA_isInstructorAuthority()) return true; }catch(_){ }
     try{ if(window.__SETCA_canSendAircraftOrder && window.__SETCA_canSendAircraftOrder()) return true; }catch(_){ }
     try{
@@ -22286,7 +22558,15 @@ document.querySelectorAll('#pCmdBody .btn').forEach(btn=>{
   function canOpenAircraftContextMenu(){
     return isAircraftDeferredContext();
   }
+  function canDeletePlaneFromContext(){
+    try{
+      if(typeof window.__SETCA_isInstructorAuthority === 'function') return !!window.__SETCA_isInstructorAuthority();
+      const access = window.__setcaAccess || {};
+      return !access.planning && !access.freeplay && String(access.role || '').toLowerCase() === 'default';
+    }catch(_){ return false; }
+  }
   function aircraftDeferredLabel(){
+    if(isFreePlayAircraftContext()) return 'Free Play: Enter aplica y cierra (solo local)';
     try{
       const access = window.__setcaAccess || {};
       if(String(access.role || '').toLowerCase() === 'pseudopilot') return 'Pseudo Piloto: Enter aplica y cierra';
@@ -22408,6 +22688,7 @@ document.querySelectorAll('#pCmdBody .btn').forEach(btn=>{
         #setcaPlaneBeCtx .ctxCols1.ctxFull{grid-template-columns:minmax(0,1fr);}
         #setcaPlaneBeCtx .ctxFld{ display:flex; min-width:0; flex-direction:column; gap:4px; }
         #setcaPlaneBeCtx .ctxFld.full{ grid-column:1 / -1; }
+        #setcaPlaneBeCtx .ctxRoleStack{ display:flex; min-width:0; flex-direction:column; gap:6px; }
         #setcaPlaneBeCtx .ctxHidden{ display:none !important; }
         #setcaPlaneBeCtx .ctxLbl{
           color:#b9c5cf; font-size:10px; font-weight:700; line-height:1.15;
@@ -22442,6 +22723,16 @@ document.querySelectorAll('#pCmdBody .btn').forEach(btn=>{
         #setcaPlaneBeCtx .ctxFoot button[data-act="fire"]{
           border-color:#b99a1e !important; background:#5b4b12 !important;
         }
+        #setcaPlaneBeCtx .ctxDeletePlane{
+          display:flex !important; align-items:center; justify-content:center;
+          width:100%; min-height:28px; box-sizing:border-box;
+          border:1px solid #d55a5a !important; border-radius:5px !important;
+          background:#7a2020 !important; color:#fff !important;
+          padding:5px 8px !important; font:750 10px/1.1 system-ui,Segoe UI,Roboto,Arial,sans-serif !important;
+          letter-spacing:0 !important; text-transform:uppercase; cursor:pointer;
+        }
+        #setcaPlaneBeCtx .ctxDeletePlane:hover{ background:#962727 !important; }
+        #setcaPlaneBeCtx .ctxDeletePlane.ctxHidden{ display:none !important; }
         #setcaPlaneBeCtx .ctxFoot button:hover{ filter:brightness(1.16); }
         #setcaPlaneBeCtx .ctxHint{
           margin-top:7px; color:#8fa0ad; font-size:10px; line-height:1.2; text-align:right;
@@ -22518,10 +22809,13 @@ document.querySelectorAll('#pCmdBody .btn').forEach(btn=>{
               <span class="ctxLbl">TIPO</span>
               <input id="setcaPlaneCtxTipo" type="text" maxlength="40" placeholder="Tipo">
             </label>
-            <label class="ctxFld">
-              <span class="ctxLbl">ROL</span>
-              <select id="setcaPlaneCtxRole">${getPlaneRoleOptionsHtml('Neutral')}</select>
-            </label>
+            <div class="ctxRoleStack">
+              <button id="setcaPlaneCtxDelete" class="ctxDeletePlane ctxHidden" type="button" data-act="delete">ELIMINAR AERONAVE</button>
+              <label class="ctxFld">
+                <span class="ctxLbl">ROL</span>
+                <select id="setcaPlaneCtxRole">${getPlaneRoleOptionsHtml('Neutral')}</select>
+              </label>
+            </div>
           </div>
           <div class="ctxRow ctxCols2">
             <label class="ctxFld">
@@ -22558,6 +22852,7 @@ document.querySelectorAll('#pCmdBody .btn').forEach(btn=>{
         if(!btn) return;
         consume(e);
         const act = btn.getAttribute('data-act');
+        if(act === 'delete'){ deleteTargetPlane(); return; }
         if(act === 'apply'){
           applyMenuValues();
           if(isAircraftDeferredContext()) hideMenu();
@@ -22625,6 +22920,28 @@ document.querySelectorAll('#pCmdBody .btn').forEach(btn=>{
   function getTargetPlane(){
     return (window.st && Array.isArray(st.planes)) ? st.planes.find(x => x && x.id === targetPlaneId) : null;
   }
+  function deleteTargetPlane(){
+    if(!canDeletePlaneFromContext()) return false;
+    const p = getTargetPlane();
+    if(!p || !window.st || !Array.isArray(st.planes)) return false;
+    const planeId = String(p.id || '');
+    if(!planeId) return false;
+    const planeName = String(p.name || p.id || 'Aeronave');
+    st.planes = st.planes.filter(item=>String(item && item.id || '') !== planeId);
+    if(st.roles && Object.prototype.hasOwnProperty.call(st.roles,planeId)) delete st.roles[planeId];
+    if(Array.isArray(st.sel)) st.sel = st.sel.filter(id=>String(id || '') !== planeId);
+    if(Array.isArray(st.pairs)) st.pairs = st.pairs.filter(pr=>String(pr && pr.a || '') !== planeId && String(pr && pr.b || '') !== planeId);
+    st.planes.forEach(item=>{
+      if(item && String(item.targetId || '') === planeId) delete item.targetId;
+    });
+    try{ if(typeof window.__SETCA_persistLocalPairs === 'function') window.__SETCA_persistLocalPairs(); }catch(_){ }
+    try{ if(typeof logEvent === 'function') logEvent(`AERONAVE ELIMINADA: ${planeName} (${planeId})`); }catch(_){ }
+    hideMenu();
+    repaintAll();
+    try{ if(typeof draw === 'function') draw(); }catch(_){ }
+    pushSync();
+    return true;
+  }
   function fillBeOptions(sel, p){
     if(!sel) return;
     const list = getBullseyeDrawings();
@@ -22673,6 +22990,7 @@ document.querySelectorAll('#pCmdBody .btn').forEach(btn=>{
     const iffIn = m.querySelector('#setcaPlaneCtxIFF');
     const targetSel = m.querySelector('#setcaPlaneCtxTarget');
     const missileSel = m.querySelector('#setcaPlaneCtxMissile');
+    const deleteBtn = m.querySelector('#setcaPlaneCtxDelete');
     const hint = m.querySelector('#setcaPlaneCtxHint');
     const be = p.beAssignedId ? findBullseyeById(p.beAssignedId) : null;
     const roleVal = normalizePlaneRole(String((st.roles && st.roles[p.id]) || 'Neutral'));
@@ -22701,6 +23019,7 @@ document.querySelectorAll('#pCmdBody .btn').forEach(btn=>{
     }
     if(iffIn) iffIn.value = String(getPlaneXpdr(p) || '');
     if(missileSel) missileSel.value = String(p.ctxMissileType || 'AMRAAM');
+    if(deleteBtn) deleteBtn.classList.toggle('ctxHidden',!canDeletePlaneFromContext());
     if(hint){
       let text = isAircraftDeferredContext() ? aircraftDeferredLabel() : 'Cambios sincronizados';
       try{
@@ -22834,12 +23153,14 @@ document.querySelectorAll('#pCmdBody .btn').forEach(btn=>{
     if(isOdiBullseyeRole()){
       consume(e);
       try{ if(Array.isArray(st.sel)) st.sel = [p.id]; }catch(_){ }
+      try{ if(window.__SETCA_setClipboardFocus) window.__SETCA_setClipboardFocus('aircraft'); }catch(_){ }
       showOdiBeMenu(e.clientX, e.clientY, p);
       return;
     }
     if(!canOpenAircraftContextMenu()) return;
     consume(e);
     try{ if(Array.isArray(st.sel)) st.sel = [p.id]; }catch(_){ }
+    try{ if(window.__SETCA_setClipboardFocus) window.__SETCA_setClipboardFocus('aircraft'); }catch(_){ }
     showMenu(e.clientX, e.clientY, p);
   }, true);
 })();
@@ -26129,7 +26450,12 @@ import { getDatabase, ref, get, set } from "https://www.gstatic.com/firebasejs/1
     capHoverSince: 0,
     capHoverProgress: 0,
     capReadyId: null,
-    capHoverName: ''
+    capHoverName: '',
+    arwyHoverId: null,
+    arwyHoverSince: 0,
+    arwyHoverProgress: 0,
+    arwyReadyId: null,
+    arwyHoverName: ''
   };
 
   const CAP_HOVER_MS = 2000;
@@ -26172,35 +26498,67 @@ import { getDatabase, ref, get, set } from "https://www.gstatic.com/firebasejs/1
     if(!state.planeId || !window.st || !Array.isArray(st.planes)) return null;
     return st.planes.find(p => p && String(p.id||'') === String(state.planeId)) || null;
   }
-  function resetCapHover(){
+  function resetCapOnly(){
     state.capHoverId = null;
     state.capHoverSince = 0;
     state.capHoverProgress = 0;
     state.capReadyId = null;
     state.capHoverName = '';
   }
+  function resetArwyOnly(){
+    state.arwyHoverId = null;
+    state.arwyHoverSince = 0;
+    state.arwyHoverProgress = 0;
+    state.arwyReadyId = null;
+    state.arwyHoverName = '';
+  }
+  function resetCapHover(){
+    resetCapOnly();
+    resetArwyOnly();
+  }
   function updateCapHover(clientX, clientY){
-    if(!state.active || typeof window.__SETCA_findCapAtClient !== 'function'){
+    if(!state.active){
       resetCapHover();
       return null;
     }
-    const cap = window.__SETCA_findCapAtClient(clientX,clientY);
+    const cap = typeof window.__SETCA_findCapAtClient === 'function'
+      ? window.__SETCA_findCapAtClient(clientX,clientY)
+      : null;
     const capId = String(cap && cap.id || '').trim();
-    if(!capId){
-      resetCapHover();
+    if(capId){
+      resetArwyOnly();
+      if(state.capHoverId !== capId){
+        state.capHoverId = capId;
+        state.capHoverSince = nowMs();
+        state.capHoverProgress = 0;
+        state.capReadyId = null;
+        state.capHoverName = String(cap.name || (cap.type === 'cap_l' ? 'CAP L' : 'CAP S'));
+      }
+      const elapsed = Math.max(0,nowMs()-state.capHoverSince);
+      state.capHoverProgress = Math.min(1,elapsed/CAP_HOVER_MS);
+      if(elapsed >= CAP_HOVER_MS) state.capReadyId = capId;
+      return cap;
+    }
+    resetCapOnly();
+    const arwy = typeof window.__SETCA_findArwyAtClient === 'function'
+      ? window.__SETCA_findArwyAtClient(clientX,clientY)
+      : null;
+    const arwyId = String(arwy && arwy.id || '').trim();
+    if(!arwyId){
+      resetArwyOnly();
       return null;
     }
-    if(state.capHoverId !== capId){
-      state.capHoverId = capId;
-      state.capHoverSince = nowMs();
-      state.capHoverProgress = 0;
-      state.capReadyId = null;
-      state.capHoverName = String(cap.name || (cap.type === 'cap_l' ? 'CAP L' : 'CAP S'));
+    if(state.arwyHoverId !== arwyId){
+      state.arwyHoverId = arwyId;
+      state.arwyHoverSince = nowMs();
+      state.arwyHoverProgress = 0;
+      state.arwyReadyId = null;
+      state.arwyHoverName = String(arwy.name || 'ARWY');
     }
-    const elapsed = Math.max(0,nowMs()-state.capHoverSince);
-    state.capHoverProgress = Math.min(1,elapsed/CAP_HOVER_MS);
-    if(elapsed >= CAP_HOVER_MS) state.capReadyId = capId;
-    return cap;
+    const elapsed = Math.max(0,nowMs()-state.arwyHoverSince);
+    state.arwyHoverProgress = Math.min(1,elapsed/CAP_HOVER_MS);
+    if(elapsed >= CAP_HOVER_MS) state.arwyReadyId = arwyId;
+    return arwy;
   }
   function resolveTurnBias(currentHdg, targetHdg){
     const cur = normDeg(currentHdg);
@@ -26213,7 +26571,9 @@ import { getDatabase, ref, get, set } from "https://www.gstatic.com/firebasejs/1
   }
   function pushSync(){
     try{
-      if(window.__SETCA_isPlanningMode && window.__SETCA_isPlanningMode()) return;
+      if(window.__SETCA_isLocalOnlyMode && window.__SETCA_isLocalOnlyMode()) return false;
+      const access = window.__setcaAccess || {};
+      if(access.planning || access.freeplay) return false;
       if(typeof window.__SETCA_scheduleAircraftSync1s === 'function') window.__SETCA_scheduleAircraftSync1s();
       else if(typeof window.scheduleSync === 'function') window.scheduleSync(1000);
       else if(window._SETCA_SYNC && typeof window._SETCA_SYNC.push === 'function') window._SETCA_SYNC.push();
@@ -26242,6 +26602,7 @@ import { getDatabase, ref, get, set } from "https://www.gstatic.com/firebasejs/1
     try{
       if(Array.isArray(st.sel)) st.sel = [p.id];
     }catch(_){}
+    try{ if(window.__SETCA_setClipboardFocus) window.__SETCA_setClipboardFocus('aircraft'); }catch(_){ }
     refreshPanels();
     requestGuideOverlay();
     return true;
@@ -26270,14 +26631,20 @@ import { getDatabase, ref, get, set } from "https://www.gstatic.com/firebasejs/1
     if(commit){
       const p = getPlane();
       if(p){
-        let assignedToCap = false;
+        let assignedToPath = false;
         const cap = state.capReadyId && window.st && Array.isArray(st.drawings)
           ? st.drawings.find(d=>d && String(d.id || '') === String(state.capReadyId))
           : null;
         if(cap && typeof window.__SETCA_assignPlaneToCap === 'function'){
-          assignedToCap = !!window.__SETCA_assignPlaneToCap(p,cap);
+          assignedToPath = !!window.__SETCA_assignPlaneToCap(p,cap);
         }
-        if(!assignedToCap){
+        const arwy = !assignedToPath && state.arwyReadyId && window.st && Array.isArray(st.drawings)
+          ? st.drawings.find(d=>d && String(d.id || '') === String(state.arwyReadyId))
+          : null;
+        if(arwy && typeof window.__SETCA_assignPlaneToArwy === 'function'){
+          assignedToPath = !!window.__SETCA_assignPlaneToArwy(p,arwy);
+        }
+        if(!assignedToPath){
           if(Number.isFinite(state.targetHdg)){
             if(typeof window.__SETCA_setCommandHdg === 'function') window.__SETCA_setCommandHdg(p, state.targetHdg);
             else p.tgtHdg = normDeg(state.targetHdg);
@@ -26431,9 +26798,13 @@ import { getDatabase, ref, get, set } from "https://www.gstatic.com/firebasejs/1
       const py = ux;
       const label = String(Math.round(normDeg(Number.isFinite(state.targetHdg) ? state.targetHdg : (p.tgtHdg || p.hdg || 0)))).padStart(3,'0') + '°';
       const ctx2 = guideCtx;
-      const capLineColor = state.capReadyId
+      const guidanceReadyId = state.capReadyId || state.arwyReadyId;
+      const guidanceHoverId = state.capHoverId || state.arwyHoverId;
+      const guidanceHoverName = state.capHoverId ? state.capHoverName : state.arwyHoverName;
+      const guidanceHoverProgress = state.capHoverId ? state.capHoverProgress : state.arwyHoverProgress;
+      const capLineColor = guidanceReadyId
         ? 'rgba(46,231,79,0.98)'
-        : (state.capHoverId ? 'rgba(255,224,102,0.98)' : 'rgba(255,255,255,0.92)');
+        : (guidanceHoverId ? 'rgba(255,224,102,0.98)' : 'rgba(255,255,255,0.92)');
 
       ctx2.save();
       ctx2.strokeStyle = capLineColor;
@@ -26467,10 +26838,10 @@ import { getDatabase, ref, get, set } from "https://www.gstatic.com/firebasejs/1
       ctx2.fillStyle = 'rgba(255,255,255,1)';
       ctx2.fillText(label, tx, ty);
 
-      if(state.capHoverId){
-        const capText = state.capReadyId
-          ? state.capHoverName + ' LISTO'
-          : state.capHoverName + ' ' + Math.max(0.1,(CAP_HOVER_MS*(1-state.capHoverProgress))/1000).toFixed(1) + ' s';
+      if(guidanceHoverId){
+        const capText = guidanceReadyId
+          ? guidanceHoverName + ' LISTO'
+          : guidanceHoverName + ' ' + Math.max(0.1,(CAP_HOVER_MS*(1-guidanceHoverProgress))/1000).toFixed(1) + ' s';
         ctx2.font = 'bold 12px monospace';
         const capW = Math.max(86,ctx2.measureText(capText).width+18);
         const capX = Math.max(capW/2+5,Math.min(radarRect.width-capW/2-5,endX));
@@ -26482,8 +26853,8 @@ import { getDatabase, ref, get, set } from "https://www.gstatic.com/firebasejs/1
         ctx2.strokeRect(capX-capW/2,capY-13,capW,26);
         ctx2.fillStyle = '#fff';
         ctx2.fillText(capText,capX,capY-2);
-        ctx2.fillStyle = state.capReadyId ? '#2ee74f' : '#ffe066';
-        ctx2.fillRect(capX-capW/2+4,capY+7,(capW-8)*state.capHoverProgress,2);
+        ctx2.fillStyle = guidanceReadyId ? '#2ee74f' : '#ffe066';
+        ctx2.fillRect(capX-capW/2+4,capY+7,(capW-8)*guidanceHoverProgress,2);
       }
       ctx2.restore();
 
