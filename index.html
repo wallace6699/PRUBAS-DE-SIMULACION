@@ -994,7 +994,7 @@
     q.statusGlyph = String(q.statusGlyph || (q.canLaunch ? '▲' : '⌁')).slice(0, 8);
     q.groupName = String(q.groupName || '').slice(0, 80);
     q.trackPlaneId = String(q.trackPlaneId || '').slice(0, 80);
-    ['x','y','covR','covH','covOpacity','misR','misH','missileMaxShots','missileSalvoSize','missileShotIntervalMs','missileReloadMs','missileShotsFired','missileSalvoShots','missileLastLaunchAt','missileNextLaunchAt','missileReloadUntil','runtimeUpdatedAt'].forEach(key=>{
+    ['x','y','covR','covH','covOpacity','misR','misH','detectionProfileVersion','missileMaxShots','missileSalvoSize','missileShotIntervalMs','missileReloadMs','missileShotsFired','missileSalvoShots','missileLastLaunchAt','missileNextLaunchAt','missileReloadUntil','runtimeUpdatedAt'].forEach(key=>{
       const n = Number(q[key]);
       q[key] = Number.isFinite(n) ? n : 0;
     });
@@ -2013,16 +2013,27 @@ function __normalizeMissileStats(src){
   .setca-brief-body{overflow:auto;padding:14px 15px 15px}
   .setca-brief-section-title{display:flex;align-items:center;justify-content:space-between;gap:10px;margin:0 0 8px;color:#b9eac9;font:800 10px/1.2 ui-monospace,SFMono-Regular,Consolas,monospace;letter-spacing:.12em;text-transform:uppercase}
   .setca-brief-live-count{color:#fff;font-size:10px;letter-spacing:0}
-  .setca-brief-roster{display:flex;flex-direction:column;gap:9px;margin-bottom:15px}
-  .setca-brief-tier{border-top:1px solid rgba(85,255,160,.14);padding-top:8px}
-  .setca-brief-tier:first-child{border-top:0;padding-top:0}
-  .setca-brief-tier-name{margin-bottom:5px;color:#78d99a;font:800 9px/1.2 ui-monospace,SFMono-Regular,Consolas,monospace;letter-spacing:.1em;text-transform:uppercase}
-  .setca-brief-person{display:grid;grid-template-columns:8px minmax(0,1fr) auto;align-items:center;gap:8px;min-height:30px;padding:5px 7px;border-bottom:1px solid rgba(85,255,160,.08)}
-  .setca-brief-person:last-child{border-bottom:0}
+  .setca-brief-roster{display:flex;flex-direction:column;gap:8px;margin-bottom:15px}
+  .setca-brief-tier{overflow:hidden;border:1px solid #486253;border-radius:6px;background:#101a14}
+  .setca-brief-tier-name{padding:7px 9px;border-bottom:1px solid #52695a;background:#26332b;color:#f4f7f5;font:800 9px/1.2 ui-monospace,SFMono-Regular,Consolas,monospace;letter-spacing:.1em;text-transform:uppercase}
+  .setca-brief-tier:nth-child(1){border-color:#8d783d}
+  .setca-brief-tier:nth-child(1) .setca-brief-tier-name{background:#3b3420;color:#ffe7a0}
+  .setca-brief-tier:nth-child(2){border-color:#3e7386}
+  .setca-brief-tier:nth-child(2) .setca-brief-tier-name{background:#193a47;color:#bceeff}
+  .setca-brief-tier:nth-child(3){border-color:#47795a}
+  .setca-brief-tier:nth-child(3) .setca-brief-tier-name{background:#1d422c;color:#c8f5d7}
+  .setca-brief-role-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr))}
+  .setca-brief-role-grid.single{grid-template-columns:minmax(0,1fr)}
+  .setca-brief-role-cell{min-width:0;min-height:82px;border-left:1px solid #4a5f51;background:#15221a}
+  .setca-brief-role-cell:first-child{border-left:0}
+  .setca-brief-role-head{display:flex;align-items:center;justify-content:space-between;gap:8px;min-height:28px;padding:6px 8px;border-bottom:1px solid #53675a;background:#27362d}
+  .setca-brief-role-name{min-width:0;color:#f5fff8;font:800 10px/1.2 ui-monospace,SFMono-Regular,Consolas,monospace;letter-spacing:.04em;text-transform:uppercase}
+  .setca-brief-role-count{flex:0 0 auto;min-width:20px;padding:2px 5px;border:1px solid #789581;border-radius:4px;background:#18231c;color:#fff;font:800 9px/1 ui-monospace,SFMono-Regular,Consolas,monospace;text-align:center}
+  .setca-brief-role-members{display:grid;grid-template-columns:repeat(auto-fit,minmax(128px,1fr));gap:6px;padding:8px;background:#17231b}
+  .setca-brief-person{display:grid;grid-template-columns:8px minmax(0,1fr);align-items:center;gap:8px;min-height:33px;padding:6px 8px;border:1px solid #607869;border-radius:4px;background:#2a3b30;box-shadow:inset 0 1px 0 rgba(255,255,255,.04)}
   .setca-brief-live-dot{width:7px;height:7px;border-radius:50%;background:#35ff79;box-shadow:0 0 8px rgba(53,255,121,.66)}
-  .setca-brief-callsign{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:#fff;font:800 12px/1.2 ui-monospace,SFMono-Regular,Consolas,monospace}
-  .setca-brief-role{color:#a9d8b8;font:700 9px/1.2 ui-monospace,SFMono-Regular,Consolas,monospace;text-transform:uppercase}
-  .setca-brief-empty{padding:7px;color:#729480;font:600 10px/1.35 ui-monospace,SFMono-Regular,Consolas,monospace}
+  .setca-brief-callsign{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:#fff;font:800 12px/1.2 ui-monospace,SFMono-Regular,Consolas,monospace;text-shadow:0 1px 1px rgba(0,0,0,.7)}
+  .setca-brief-empty{display:grid;place-items:center;min-height:31px;padding:5px 7px;border:1px dashed #53675a;border-radius:4px;background:#1d2921;color:#9fb2a5;font:600 9px/1.35 ui-monospace,SFMono-Regular,Consolas,monospace;text-align:center;text-transform:uppercase}
   .setca-brief-editor{border-top:1px solid rgba(85,255,160,.18);padding-top:13px}
   #setcaBriefText{display:block;width:100%;min-height:150px;max-height:300px;resize:vertical;box-sizing:border-box;cursor:text;background:#061009;border-color:rgba(85,255,160,.26);color:#ecfff2;font:13px/1.45 ui-sans-serif,system-ui,sans-serif}
   #setcaBriefText:read-only{color:#d4e8db;border-color:rgba(150,190,162,.18);background:#08100b;cursor:default}
@@ -2034,8 +2045,9 @@ function __normalizeMissileStats(src){
     .setca-brief-head{gap:8px;padding:11px}
     .setca-brief-room{max-width:105px}
     .setca-brief-body{padding:11px}
-    .setca-brief-person{grid-template-columns:8px minmax(0,1fr)}
-    .setca-brief-role{grid-column:2}
+    .setca-brief-role-grid{grid-template-columns:minmax(0,1fr)}
+    .setca-brief-role-cell{border-left:0;border-top:1px solid rgba(85,255,160,.14)}
+    .setca-brief-role-cell:first-child{border-top:0}
   }
     #alumnoBtn,#odtBtn,#observerBtn,#salasBtn,#offBtn,#exitBtn,#configBtn{
     flex:0 0 auto;
@@ -12224,6 +12236,40 @@ function drawPlane(p){
   }
   syncPlaneRoleState(p);
   const s=toScreen(p.x,p.y);
+  const __acquisitionVisual = (typeof window.__SETCA_getPlaneAcquisitionVisual === 'function')
+    ? window.__SETCA_getPlaneAcquisitionVisual(__livePlaneRef || p)
+    : null;
+  if(__acquisitionVisual && __acquisitionVisual.visible && !__acquisitionVisual.showDataBlock){
+    const __echoRole = syncPlaneRoleState(p);
+    const __echoColor = getRoleUiColor(__echoRole);
+    const __echoScale = Math.max(0.3, Math.min(1, Number(__acquisitionVisual.scale) || 0.3));
+    const __echoAlpha = Math.max(0.1, Math.min(0.95, Number(__acquisitionVisual.alpha) || 0.1));
+    const __echoRadius = 1.35 + 3.15 * __echoScale;
+    const __pulse = 0.5 + 0.5 * Math.sin(performance.now() / 145);
+    ctx.save();
+    ctx.globalAlpha = __echoAlpha;
+    ctx.fillStyle = __echoColor;
+    ctx.beginPath();
+    ctx.arc(s.x, s.y, __echoRadius, 0, 2*Math.PI);
+    ctx.fill();
+    ctx.globalAlpha = __echoAlpha * (0.25 + 0.35 * __pulse);
+    ctx.strokeStyle = __echoColor;
+    ctx.lineWidth = 0.8;
+    ctx.beginPath();
+    ctx.arc(s.x, s.y, __echoRadius + 2 + __pulse * 2, 0, 2*Math.PI);
+    ctx.stroke();
+    if(__echoScale > 0.62){
+      const __echoHdg = ((Number(p.hdg) || 0) - 90) * Math.PI / 180;
+      const __echoLead = 3 + 7 * __echoScale;
+      ctx.globalAlpha = __echoAlpha * Math.min(1, (__echoScale - 0.62) / 0.38);
+      ctx.beginPath();
+      ctx.moveTo(s.x, s.y);
+      ctx.lineTo(s.x + Math.cos(__echoHdg) * __echoLead, s.y + Math.sin(__echoHdg) * __echoLead);
+      ctx.stroke();
+    }
+    ctx.restore();
+    return;
+  }
 
   if(st.showAwacsCoverage && isAwacsPlane(p) && p.awacsCoverage !== false){
     const rPx = AWACS_COVERAGE_NM * zoom * PX_PER_NM;
@@ -13423,41 +13469,54 @@ function drawGTC(){
       const hNorm = Math.max(0, Math.min(1, (isFinite(hFt)?hFt:0) / 120000));
       const fillA = Math.max(0, Math.min(0.85, Number.isFinite(+u.covOpacity) ? +u.covOpacity : (0.05 + 0.08*hNorm)));
       const edgeA = 0.34 + 0.34*hNorm;
-      ctx.fillStyle = canLaunch ? `rgba(255,0,0,${fillA.toFixed(3)})` : `rgba(80,190,255,${fillA.toFixed(3)})`;
+      const detectionFillA = canLaunch ? fillA * 0.42 : fillA;
+      ctx.fillStyle = `rgba(80,190,255,${detectionFillA.toFixed(3)})`;
       ctx.beginPath(); ctx.arc(s.x, s.y, rPx, 0, 2*Math.PI); ctx.fill();
-      ctx.strokeStyle = canLaunch ? `rgba(255,0,0,${edgeA.toFixed(3)})` : `rgba(80,190,255,${edgeA.toFixed(3)})`;
+      ctx.strokeStyle = `rgba(80,190,255,${edgeA.toFixed(3)})`;
       ctx.lineWidth = 1;
       ctx.setLineDash([4,4]);
       ctx.beginPath(); ctx.arc(s.x, s.y, rPx, 0, 2*Math.PI); ctx.stroke();
       ctx.setLineDash([]);
+      const fireRNm = canLaunch && Number.isFinite(+u.misR) ? Math.max(0, +u.misR) : 0;
+      if(fireRNm > 0){
+        const firePx = fireRNm * zoom * PX_PER_NM;
+        const fireFillA = Math.max(0.055, Math.min(0.28, fillA * 0.72));
+        ctx.fillStyle = `rgba(255,45,45,${fireFillA.toFixed(3)})`;
+        ctx.beginPath(); ctx.arc(s.x, s.y, firePx, 0, 2*Math.PI); ctx.fill();
+        ctx.strokeStyle = 'rgba(255,64,64,0.78)';
+        ctx.lineWidth = 1.2;
+        ctx.setLineDash([]);
+        ctx.beginPath(); ctx.arc(s.x, s.y, firePx, 0, 2*Math.PI); ctx.stroke();
+      }
       const __sel = (typeof gtcSelId !== 'undefined' && gtcSelId && gtcSelId === u.id);
       const __dragHold = (typeof gtcDrag !== 'undefined' && gtcDrag && gtcDrag.id === u.id);
       const __dragFree = (typeof gtcRadiusDrag !== 'undefined' && gtcRadiusDrag && gtcRadiusDrag.id === u.id);
       const __showHandles = __sel || __dragHold || __dragFree;
       if(__showHandles){
-        ctx.fillStyle = theme.icon;
+        ctx.fillStyle = 'rgba(110,210,255,0.95)';
         ctx.beginPath(); ctx.arc(s.x + rPx, s.y, 5, 0, 2*Math.PI); ctx.fill();
         ctx.fillStyle = 'rgba(0,0,0,0.55)';
         ctx.font = '9px monospace';
         ctx.textAlign = 'center';
         ctx.fillText('R', s.x + rPx, s.y + 3);
-        ctx.fillStyle = theme.icon;
+        ctx.fillStyle = 'rgba(110,210,255,0.95)';
         ctx.beginPath(); ctx.rect(s.x - 5, s.y - 22, 10, 10); ctx.fill();
         ctx.fillStyle = 'rgba(0,0,0,0.55)';
         ctx.fillText('H', s.x, s.y - 14);
-        ctx.strokeStyle = theme.edge;
+        ctx.strokeStyle = 'rgba(80,190,255,0.72)';
         ctx.lineWidth = 1;
         ctx.beginPath(); ctx.moveTo(s.x, s.y - 12); ctx.lineTo(s.x, s.y - 2); ctx.stroke();
       }
       if(isFinite(hFt) && hFt > 0 && st.showLabels){
         ctx.font = '10px monospace';
         ctx.textAlign = 'center';
-        ctx.fillStyle = theme.text;
+        ctx.fillStyle = canLaunch ? 'rgba(190,235,255,0.96)' : theme.text;
         const rTxt = st.metric ? `${(rNm*NM2KM).toFixed(0)}km` : `${rNm.toFixed(0)}NM`;
+        const fireTxt = st.metric ? `${(fireRNm*NM2KM).toFixed(0)}km` : `${fireRNm.toFixed(0)}NM`;
         let hTxt = '';
         if(st.altUnit === 'm'){ const m = hFt*0.3048; hTxt = (m>=1000) ? `${(m/1000).toFixed(1)}km` : `${m.toFixed(0)}m`; }
         else hTxt = (hFt>=1000) ? `${(hFt/1000).toFixed(0)}kft` : `${Math.round(hFt)}ft`;
-        ctx.fillText(`R:${rTxt} H:${hTxt}`, s.x, s.y + rPx + 12);
+        ctx.fillText(canLaunch ? `DET:${rTxt} · FUEGO:${fireTxt}` : `DET:${rTxt} H:${hTxt}`, s.x, s.y + rPx + 12);
       }
     }
     if(canLaunch){
@@ -17021,6 +17080,8 @@ try{
       ctx.lineWidth=1;
       st.planes.forEach(p=>{
         if(!window.__SETCA_canRenderPlane || !window.__SETCA_canRenderPlane(p)) return;
+        const acquisition = (typeof window.__SETCA_getPlaneAcquisitionVisual === 'function') ? window.__SETCA_getPlaneAcquisitionVisual(p) : null;
+        if(acquisition && !acquisition.showDataBlock) return;
         if(p.ghosts.length>1){
           ctx.beginPath();
           p.ghosts.forEach((g,i)=>{
@@ -21518,10 +21579,7 @@ import { getDatabase, ref, onValue, set } from "https://www.gstatic.com/firebase
     const callsign = document.createElement('span');
     callsign.className = 'setca-brief-callsign';
     callsign.textContent = person.callsign;
-    const role = document.createElement('span');
-    role.className = 'setca-brief-role';
-    role.textContent = ROLE_LABELS[person.role] || person.role.toUpperCase();
-    row.append(dot, callsign, role);
+    row.append(dot, callsign);
     container.appendChild(row);
   }
   function renderRoster(){
@@ -21546,15 +21604,35 @@ import { getDatabase, ref, onValue, set } from "https://www.gstatic.com/firebase
       title.className = 'setca-brief-tier-name';
       title.textContent = tier.label;
       section.appendChild(title);
-      const group = users.filter(user=>tier.roles.includes(user.role));
-      if(group.length){
-        group.forEach(person=>appendPerson(section, person));
-      }else{
-        const empty = document.createElement('div');
-        empty.className = 'setca-brief-empty';
-        empty.textContent = 'Sin conexión.';
-        section.appendChild(empty);
-      }
+      const grid = document.createElement('div');
+      grid.className = 'setca-brief-role-grid' + (tier.roles.length === 1 ? ' single' : '');
+      tier.roles.forEach(roleKey=>{
+        const members = users.filter(user=>user.role === roleKey);
+        const cell = document.createElement('div');
+        cell.className = 'setca-brief-role-cell';
+        cell.dataset.role = roleKey;
+        const head = document.createElement('div');
+        head.className = 'setca-brief-role-head';
+        const roleName = document.createElement('span');
+        roleName.className = 'setca-brief-role-name';
+        roleName.textContent = ROLE_LABELS[roleKey] || roleKey.toUpperCase();
+        const roleCount = document.createElement('span');
+        roleCount.className = 'setca-brief-role-count';
+        roleCount.textContent = String(members.length);
+        head.append(roleName, roleCount);
+        const memberGrid = document.createElement('div');
+        memberGrid.className = 'setca-brief-role-members';
+        if(members.length) members.forEach(person=>appendPerson(memberGrid, person));
+        else{
+          const empty = document.createElement('div');
+          empty.className = 'setca-brief-empty';
+          empty.textContent = 'Puesto disponible';
+          memberGrid.appendChild(empty);
+        }
+        cell.append(head, memberGrid);
+        grid.appendChild(cell);
+      });
+      section.appendChild(grid);
       rosterEl.appendChild(section);
     });
   }
@@ -22096,6 +22174,7 @@ document.querySelectorAll('#pCmdBody .btn').forEach(btn=>{
     let best = null, bd = 1e9;
     for(const p of st.planes){
       if(!p) continue;
+      if(window.__SETCA_canRenderPlane && !window.__SETCA_canRenderPlane(p)) continue;
       const s = toScreen(p.x||0, p.y||0);
       const d = Math.hypot(px - s.x, py - s.y);
       if(d <= thPx && d < bd){ bd = d; best = p; }
@@ -23339,6 +23418,7 @@ document.querySelectorAll('#pCmdBody .btn').forEach(btn=>{
     const th = planePickThresholdPx();
     for(const p of st.planes){
       if(!p || p._hit) continue;
+      if(window.__SETCA_canRenderPlane && !window.__SETCA_canRenderPlane(p)) continue;
       const s = toScreen(p.x||0, p.y||0);
       const d = Math.hypot((s.x||0) - px, (s.y||0) - py);
       if(d <= th && d < bestD){ bestD = d; best = p; }
@@ -24140,11 +24220,11 @@ const GTC_PRESETS = Object.freeze({
   radar_mediano:{ key:'radar_mediano', category:'radar', kind:'radar', label:'RADAR 230', shortLabel:'R230', buttonLabel:'R230', namePrefix:'RAD230', covR:230/NM2KM, covH:120000, misR:0, misH:0, canLaunch:false, statusGlyph:'⌁' },
   radar_corto:{ key:'radar_corto', category:'radar', kind:'radar', label:'RADAR 120', shortLabel:'R120', buttonLabel:'R120', namePrefix:'RAD120', covR:120/NM2KM, covH:120000, misR:0, misH:0, canLaunch:false, statusGlyph:'⌁' },
   radar_muy_corto:{ key:'radar_muy_corto', category:'radar', kind:'radar', label:'RADAR 50', shortLabel:'R50', buttonLabel:'R50', namePrefix:'RAD50', covR:50/NM2KM, covH:120000, misR:0, misH:0, canLaunch:false, statusGlyph:'⌁' },
-  misil_largo:{ key:'misil_largo', category:'missile', kind:'launcher', label:'MISIL 150', shortLabel:'M150', buttonLabel:'M150', namePrefix:'MIS150', covR:150/NM2KM, covH:98000, misR:150/NM2KM, misH:98000, canLaunch:true, missileCode:'M150', statusGlyph:'▲' },
-  misil_mediano:{ key:'misil_mediano', category:'missile', kind:'launcher', label:'MISIL 70', shortLabel:'M70', buttonLabel:'M70', namePrefix:'MIS70', covR:70/NM2KM, covH:65000, misR:70/NM2KM, misH:65000, canLaunch:true, missileCode:'M70', statusGlyph:'▲' },
-  misil_35:{ key:'misil_35', category:'missile', kind:'launcher', label:'MISIL 35', shortLabel:'M35', buttonLabel:'M35', namePrefix:'MIS35', covR:35/NM2KM, covH:49000, misR:35/NM2KM, misH:49000, canLaunch:true, missileCode:'M35', statusGlyph:'▲' },
-  misil_corto:{ key:'misil_corto', category:'missile', kind:'launcher', label:'MISIL 15', shortLabel:'M15', buttonLabel:'M15', namePrefix:'MIS15', covR:15/NM2KM, covH:32800, misR:15/NM2KM, misH:32800, canLaunch:true, missileCode:'M15', statusGlyph:'▲' },
-  misil_autoproteccion:{ key:'misil_autoproteccion', category:'missile', kind:'launcher', label:'AP 8', shortLabel:'AP8', buttonLabel:'AP8', namePrefix:'AP8', covR:8/NM2KM, covH:26000, misR:8/NM2KM, misH:26000, canLaunch:true, missileCode:'AP8', statusGlyph:'▲' }
+  misil_largo:{ key:'misil_largo', category:'missile', kind:'launcher', label:'MISIL 150', shortLabel:'M150', buttonLabel:'M150', namePrefix:'MIS150', covR:230/NM2KM, covH:120000, misR:150/NM2KM, misH:98000, canLaunch:true, missileCode:'M150', statusGlyph:'▲', detectionProfileVersion:2 },
+  misil_mediano:{ key:'misil_mediano', category:'missile', kind:'launcher', label:'MISIL 70', shortLabel:'M70', buttonLabel:'M70', namePrefix:'MIS70', covR:120/NM2KM, covH:120000, misR:70/NM2KM, misH:65000, canLaunch:true, missileCode:'M70', statusGlyph:'▲', detectionProfileVersion:2 },
+  misil_35:{ key:'misil_35', category:'missile', kind:'launcher', label:'MISIL 35', shortLabel:'M35', buttonLabel:'M35', namePrefix:'MIS35', covR:70/NM2KM, covH:120000, misR:35/NM2KM, misH:49000, canLaunch:true, missileCode:'M35', statusGlyph:'▲', detectionProfileVersion:2 },
+  misil_corto:{ key:'misil_corto', category:'missile', kind:'launcher', label:'MISIL 15', shortLabel:'M15', buttonLabel:'M15', namePrefix:'MIS15', covR:35/NM2KM, covH:120000, misR:15/NM2KM, misH:32800, canLaunch:true, missileCode:'M15', statusGlyph:'▲', detectionProfileVersion:2 },
+  misil_autoproteccion:{ key:'misil_autoproteccion', category:'missile', kind:'launcher', label:'AP 8', shortLabel:'AP8', buttonLabel:'AP8', namePrefix:'AP8', covR:20/NM2KM, covH:120000, misR:8/NM2KM, misH:26000, canLaunch:true, missileCode:'AP8', statusGlyph:'▲', detectionProfileVersion:2 }
 });
 const gtcUiById = new Map();
 const gtcPlaneSelById = new Map();
@@ -24225,12 +24305,12 @@ function gtcUpdatePlaneSelectOptions(){
 function gtcCheckContact(u){
   try{
     if(!u) return {count:0, nearest:null, dist:Infinity, reason:'noUnit'};
-    const rNm = +u.covR || 0;
-    const hFt = +u.covH || 0;
+    const canLaunch = __gtcCanLaunch(u);
+    const rNm = canLaunch ? (+u.misR || 0) : (+u.covR || 0);
+    const hFt = canLaunch ? (+u.misH || 0) : (+u.covH || 0);
     if(!(isFinite(rNm) && rNm > 0 && isFinite(hFt) && hFt > 0)) return {count:0, nearest:null, dist:Infinity, reason:'noCov'};
     const planes = gtcActivePlanes();
     if(!planes.length) return {count:0, nearest:null, dist:Infinity, reason:'noPlanes'};
-    const canLaunch = __gtcCanLaunch(u);
     const pid = String(u.trackPlaneId || '');
     if(canLaunch && pid){
       const p = planes.find(x=>x && String(x.id||'') === pid) || null;
@@ -24627,6 +24707,17 @@ function gtcNormalizeUnit(u, idx){
   item.covOpacity = Math.max(0, Math.min(1, +item.covOpacity));
   if(!Number.isFinite(+item.misR)) item.misR = item.canLaunch ? 20 : 0;
   if(!Number.isFinite(+item.misH)) item.misH = item.canLaunch ? 30000 : 0;
+  if(item.canLaunch && Number(item.detectionProfileVersion || 0) < 2){
+    const preset = GTC_PRESETS[String(item.presetKey || '')] || null;
+    if(preset && Number(preset.covR) > Number(preset.misR)){
+      item.covR = Number(preset.covR);
+      item.covH = Math.max(Number(item.covH) || 0, Number(preset.covH) || 0);
+    }else if(Number(item.covR) <= Number(item.misR)){
+      item.covR = Math.max(Number(item.misR) * 1.5, Number(item.misR) + 10/NM2KM);
+      item.covH = Math.max(Number(item.covH) || 0, 120000);
+    }
+    item.detectionProfileVersion = 2;
+  }
   if(item.trackPlaneId === undefined || item.trackPlaneId === null) item.trackPlaneId = '';
   if(!String(item.statusGlyph || '').trim()) item.statusGlyph = item.canLaunch ? '▲' : '⌁';
   if(item.canLaunch && typeof __setcaNormalizeLauncherPolicy === 'function') __setcaNormalizeLauncherPolicy(item, Date.now());
@@ -24862,11 +24953,11 @@ function repaintGTC(){
       box.appendChild(top); box.appendChild(rng);
       return { box, num, rng };
     };
-    const cR = mkCtrl('Cob. Radio', rUnit);
-    const cH = mkCtrl('Cob. Altura', hUnit);
+    const cR = mkCtrl('Radar detección', rUnit);
+    const cH = mkCtrl('Techo detección', hUnit);
     const cO = mkCtrl('Opacidad', '%');
-    const mR = mkCtrl('Misil Radio', rUnit);
-    const mH = mkCtrl('Misil Altura', hUnit);
+    const mR = mkCtrl('Alcance fuego', rUnit);
+    const mH = mkCtrl('Techo fuego', hUnit);
     [[cR, rRange, getCovRDisp()], [mR, rRange, getMisRDisp()]].forEach(([ctrl, range, value])=>{
       ctrl.num.min = 0; ctrl.num.max = range.max; ctrl.num.step = range.step;
       ctrl.rng.min = 0; ctrl.rng.max = range.max; ctrl.rng.step = range.step;
@@ -25772,10 +25863,7 @@ import { getAuth } from "https://www.gstatic.com/firebasejs/10.12.3/firebase-aut
       return Math.hypot(dx, dy) <= AWACS_COVERAGE_NM;
     });
   }
-  window.__SETCA_canSeePlane = function(p){
-    return baseCanSeePlane(p);
-  };
-  window.__SETCA_canRenderPlane = function(p){
+  function legacyCanRenderPlane(p){
     if(!p) return false;
     const awacsList = awacsCoveragePlanes();
     if(isAwacsPlane(p)){
@@ -25786,6 +25874,168 @@ import { getAuth } from "https://www.gstatic.com/firebasejs/10.12.3/firebase-aut
       return insideAwacsCoverage(p);
     }
     return baseCanSeePlane(p);
+  }
+  const SETCA_RADAR_ACQUIRE_MS = 2600;
+  const SETCA_RADAR_VISUAL_CACHE_MS = 14;
+  const SETCA_GROUND_DETECTION_CACHE_MS = 120;
+  const SETCA_GROUND_DETECTION_CELL_NM = 64;
+  const setcaRadarAcquisition = new Map();
+  const setcaGroundDetectionByPlane = new Map();
+  let setcaRadarVisualByPlane = new WeakMap();
+  let setcaRadarAccessCache = {source:null, roleValue:null, planning:false, freeplay:false, mode:0, restricted:false};
+  let setcaGroundDetectionSnapshot = {at:0, version:0, assets:[], grid:new Map()};
+  let setcaRadarAcquisitionPrunedAt = 0;
+  function planeDetectionKey(p){
+    const raw = p && (p.id || p.name);
+    return typeof raw === 'string' ? raw : String(raw || '');
+  }
+  function radarAccessView(){
+    const source = window.__setcaAccess || {};
+    const roleValue = source.role || 'default';
+    const planning = !!source.planning;
+    const freeplay = !!source.freeplay;
+    if(setcaRadarAccessCache.source === source && setcaRadarAccessCache.roleValue === roleValue &&
+      setcaRadarAccessCache.planning === planning && setcaRadarAccessCache.freeplay === freeplay) return setcaRadarAccessCache;
+    const role = String(roleValue).toLowerCase();
+    const restricted = !planning && !freeplay && (role === 'odt' || role === 'samallocator');
+    setcaRadarAccessCache = {
+      source,
+      roleValue,
+      planning,
+      freeplay,
+      restricted,
+      mode:restricted ? (role === 'odt' ? 1 : 2) : 0
+    };
+    return setcaRadarAccessCache;
+  }
+  function groundDetectionAssets(now){
+    if(now - setcaGroundDetectionSnapshot.at < SETCA_GROUND_DETECTION_CACHE_MS) return setcaGroundDetectionSnapshot;
+    const assets = ((window.st && Array.isArray(st.gtc)) ? st.gtc : []).map(asset=>{
+      if(!asset || asset._hit) return null;
+      const x = Number(asset.x), y = Number(asset.y);
+      const rangeNm = Math.max(0, Number(asset.covR) || 0);
+      const ceilingFt = Math.max(0, Number(asset.covH) || 0);
+      if(!Number.isFinite(x) || !Number.isFinite(y) || !(rangeNm > 0) || !(ceilingFt > 0)) return null;
+      return {x, y, rangeNm, rangeSq:rangeNm * rangeNm, ceilingFt};
+    }).filter(Boolean);
+    const grid = new Map();
+    assets.forEach(asset=>{
+      const minX = Math.floor((asset.x - asset.rangeNm) / SETCA_GROUND_DETECTION_CELL_NM);
+      const maxX = Math.floor((asset.x + asset.rangeNm) / SETCA_GROUND_DETECTION_CELL_NM);
+      const minY = Math.floor((asset.y - asset.rangeNm) / SETCA_GROUND_DETECTION_CELL_NM);
+      const maxY = Math.floor((asset.y + asset.rangeNm) / SETCA_GROUND_DETECTION_CELL_NM);
+      for(let gx=minX; gx<=maxX; gx++){
+        for(let gy=minY; gy<=maxY; gy++){
+          const key = `${gx}:${gy}`;
+          const bucket = grid.get(key);
+          if(bucket) bucket.push(asset); else grid.set(key, [asset]);
+        }
+      }
+    });
+    setcaGroundDetectionSnapshot = {
+      at:now,
+      version:setcaGroundDetectionSnapshot.version + 1,
+      assets,
+      grid
+    };
+    return setcaGroundDetectionSnapshot;
+  }
+  function insideGroundDetection(p){
+    if(!p || !window.st || !Array.isArray(st.gtc)) return false;
+    const now = Date.now();
+    const px = Number(p.x), py = Number(p.y), alt = Math.max(0, Number(p.alt) || 0);
+    if(!Number.isFinite(px) || !Number.isFinite(py)) return false;
+    const snapshot = groundDetectionAssets(now);
+    const id = planeDetectionKey(p);
+    const cached = setcaGroundDetectionByPlane.get(id);
+    if(cached && cached.version === snapshot.version && now - cached.at < SETCA_GROUND_DETECTION_CACHE_MS) return cached.inside;
+    const cellKey = `${Math.floor(px / SETCA_GROUND_DETECTION_CELL_NM)}:${Math.floor(py / SETCA_GROUND_DETECTION_CELL_NM)}`;
+    const candidates = snapshot.grid.get(cellKey) || [];
+    const inside = candidates.some(asset=>{
+      if(alt > asset.ceilingFt) return false;
+      const dx = px - asset.x, dy = py - asset.y;
+      return dx*dx + dy*dy <= asset.rangeSq;
+    });
+    setcaGroundDetectionByPlane.set(id, {at:now, version:snapshot.version, x:px, y:py, alt, inside});
+    return inside;
+  }
+  function pruneRadarAcquisition(now){
+    if(now - setcaRadarAcquisitionPrunedAt < 15000) return;
+    setcaRadarAcquisitionPrunedAt = now;
+    const activeIds = new Set(((window.st && Array.isArray(st.planes)) ? st.planes : []).map(planeDetectionKey).filter(Boolean));
+    for(const id of setcaRadarAcquisition.keys()){
+      if(!activeIds.has(id)) setcaRadarAcquisition.delete(id);
+    }
+    for(const id of setcaGroundDetectionByPlane.keys()){
+      if(!activeIds.has(id)) setcaGroundDetectionByPlane.delete(id);
+    }
+  }
+  window.__SETCA_isPlaneInsideGroundDetection = insideGroundDetection;
+  window.__SETCA_RADAR_ACQUIRE_MS = SETCA_RADAR_ACQUIRE_MS;
+  window.__SETCA_resetRadarAcquisition = function(){
+    setcaRadarAcquisition.clear();
+    setcaGroundDetectionByPlane.clear();
+    setcaRadarVisualByPlane = new WeakMap();
+    setcaGroundDetectionSnapshot = {at:0, version:setcaGroundDetectionSnapshot.version + 1, assets:[], grid:new Map()};
+  };
+  function rememberRadarVisual(id, state, p, now, viewMode, fadeUntil, result){
+    setcaRadarVisualByPlane.set(p, {at:now, x:p.x, y:p.y, alt:p.alt, viewMode, fadeUntil, result});
+    if(state) setcaRadarAcquisition.set(id, state);
+    return result;
+  }
+  window.__SETCA_getPlaneAcquisitionVisual = function(p){
+    if(!p) return {visible:false, showDataBlock:false, alpha:0, scale:0, phase:'hidden'};
+    const now = Date.now();
+    pruneRadarAcquisition(now);
+    const id = planeDetectionKey(p);
+    const accessView = radarAccessView();
+    const restricted = accessView.restricted;
+    const fadeEntry = window.st && st.contingencies && st.contingencies.fadeLost && st.contingencies.fadeLost[id];
+    const fadeUntil = Math.max(0, Number(fadeEntry && fadeEntry.until) || 0);
+    const visualCached = setcaRadarVisualByPlane.get(p);
+    if(visualCached && now - visualCached.at < SETCA_RADAR_VISUAL_CACHE_MS &&
+      visualCached.viewMode === accessView.mode && visualCached.fadeUntil === fadeUntil) return visualCached.result;
+    let state = setcaRadarAcquisition.get(id);
+    const inCoverage = restricted ? insideGroundDetection(p) : legacyCanRenderPlane(p);
+    const faded = fadeUntil > now || ((!(fadeUntil > 0)) && (typeof window.__SETCA_getActiveFadeLost === 'function') ? !!window.__SETCA_getActiveFadeLost(p) : false);
+    if(!inCoverage || faded){
+      if(!state) state = {hidden:true, acquiredAt:0, reason:''};
+      state.hidden = true;
+      state.acquiredAt = 0;
+      state.reason = faded ? 'fade' : 'coverage';
+      return rememberRadarVisual(id, state, p, now, accessView.mode, fadeUntil, {visible:false, showDataBlock:false, alpha:0, scale:0, phase:state.reason});
+    }
+    if(!state){
+      if(!restricted) return rememberRadarVisual(id, null, p, now, accessView.mode, fadeUntil, {visible:true, showDataBlock:true, alpha:1, scale:1, phase:'track'});
+      state = {hidden:false, acquiredAt:now, reason:'acquiring'};
+    }else if(state.hidden || !(state.acquiredAt > 0)){
+      state.hidden = false;
+      state.acquiredAt = now;
+      state.reason = 'acquiring';
+    }
+    const elapsed = Math.max(0, now - state.acquiredAt);
+    if(elapsed >= SETCA_RADAR_ACQUIRE_MS){
+      state.reason = 'track';
+      return rememberRadarVisual(id, state, p, now, accessView.mode, fadeUntil, {visible:true, showDataBlock:true, alpha:1, scale:1, phase:'track', elapsed});
+    }
+    const progress = Math.max(0, Math.min(1, elapsed / SETCA_RADAR_ACQUIRE_MS));
+    return rememberRadarVisual(id, state, p, now, accessView.mode, fadeUntil, {
+      visible:true,
+      showDataBlock:false,
+      alpha:0.14 + progress * 0.76,
+      scale:0.32 + progress * 0.68,
+      phase:'echo',
+      elapsed,
+      progress
+    });
+  };
+  window.__SETCA_canSeePlane = function(p){
+    const visual = window.__SETCA_getPlaneAcquisitionVisual(p);
+    return !!(visual && visual.visible);
+  };
+  window.__SETCA_canRenderPlane = function(p){
+    const visual = window.__SETCA_getPlaneAcquisitionVisual(p);
+    return !!(visual && visual.visible);
   };
   window.__SETCA_canSeeOwnedEntity = function(){
     return true;
