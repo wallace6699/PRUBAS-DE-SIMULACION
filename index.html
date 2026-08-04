@@ -18,7 +18,7 @@
       const parsed = JSON.parse(raw);
       if(!parsed || typeof parsed !== 'object') return null;
       const role = String(parsed.role || '').toLowerCase();
-      if(!['default','odi','odt','samallocator','observer'].includes(role)){
+      if(!['default','odi','atc','odt','samallocator','observer'].includes(role)){
         sessionStorage.removeItem(GATE_KEY);
         return null;
       }
@@ -790,7 +790,7 @@
     'routeManualUntil','targetId','beAssignedId','ctxMissileType','vsFpm','verticalRateFpm',
     'speedRateKmhps','awacsSweepAng','xpdr','name','tipo','fail','fuel',
     'jamming','awacsCoverage','capAssignedId','capTrackDirection','capAssignedAt',
-    'arwyAssignedId','arwyTrackDirection','arwyAssignedAt','__cmdAt'
+    'arwyAssignedId','arwyTrackDirection','arwyAssignedAt','flightProcedure','__cmdAt'
   ]);
 
   function __setcaPlaneWithDynamicFields(base, dynamicSrc){
@@ -2024,6 +2024,7 @@ function __normalizeMissileStats(src){
   .setca-brief-tier:nth-child(3) .setca-brief-tier-name{background:#1d422c;color:#c8f5d7}
   .setca-brief-role-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr))}
   .setca-brief-role-grid.single{grid-template-columns:minmax(0,1fr)}
+  .setca-brief-role-grid.cols-3{grid-template-columns:repeat(3,minmax(0,1fr))}
   .setca-brief-role-cell{min-width:0;min-height:82px;border-left:1px solid #4a5f51;background:#15221a}
   .setca-brief-role-cell:first-child{border-left:0}
   .setca-brief-role-head{display:flex;align-items:center;justify-content:space-between;gap:8px;min-height:28px;padding:6px 8px;border-bottom:1px solid #53675a;background:#27362d}
@@ -2046,6 +2047,7 @@ function __normalizeMissileStats(src){
     .setca-brief-room{max-width:105px}
     .setca-brief-body{padding:11px}
     .setca-brief-role-grid{grid-template-columns:minmax(0,1fr)}
+    .setca-brief-role-grid.cols-3{grid-template-columns:minmax(0,1fr)}
     .setca-brief-role-cell{border-left:0;border-top:1px solid rgba(85,255,160,.14)}
     .setca-brief-role-cell:first-child{border-top:0}
   }
@@ -2922,6 +2924,7 @@ canvas#radar {
 }
 body[data-setca-role="odi"] #setcaLocalDrawLauncher,
 body[data-setca-role="odico"] #setcaLocalDrawLauncher,
+body[data-setca-role="atc"] #setcaLocalDrawLauncher,
 body[data-setca-role="odt"] #setcaLocalDrawLauncher,
 body.mode-odi-overlay #setcaLocalDrawLauncher,
 body.mode-odt-overlay #setcaLocalDrawLauncher{
@@ -2929,10 +2932,10 @@ body.mode-odt-overlay #setcaLocalDrawLauncher{
   align-items:center;
   justify-content:center;
 }
-body:is([data-setca-role="odi"],[data-setca-role="odico"],[data-setca-role="odt"],.mode-odi-overlay,.mode-odt-overlay):not(.setca-local-draw-open) #pDraw{
+body:is([data-setca-role="odi"],[data-setca-role="odico"],[data-setca-role="atc"],[data-setca-role="odt"],.mode-odi-overlay,.mode-odt-overlay):not(.setca-local-draw-open) #pDraw{
   display:none !important;
 }
-body:is([data-setca-role="odi"],[data-setca-role="odico"],[data-setca-role="odt"],.mode-odi-overlay,.mode-odt-overlay).setca-local-draw-open #pDraw{
+body:is([data-setca-role="odi"],[data-setca-role="odico"],[data-setca-role="atc"],[data-setca-role="odt"],.mode-odi-overlay,.mode-odt-overlay).setca-local-draw-open #pDraw{
   display:flex !important;
   max-height:42vh;
   overflow:auto;
@@ -2943,7 +2946,7 @@ body:is(.mode-odi-overlay,.mode-odt-overlay).setca-local-draw-open #pDraw{
   width:clamp(260px, calc(var(--setca-center-w, 100vw) * 0.28), 360px) !important;
   max-height:calc(var(--setca-center-h, 100vh) * 0.42) !important;
 }
-body:is([data-setca-role="odi"],[data-setca-role="odico"],[data-setca-role="odt"],.mode-odi-overlay,.mode-odt-overlay) #pDraw .panel-header h3::after{
+body:is([data-setca-role="odi"],[data-setca-role="odico"],[data-setca-role="atc"],[data-setca-role="odt"],.mode-odi-overlay,.mode-odt-overlay) #pDraw .panel-header h3::after{
   content:" LOCAL";
   margin-left:6px;
   color:#d8b4fe;
@@ -2970,6 +2973,7 @@ body:is([data-setca-role="odi"],[data-setca-role="odico"],[data-setca-role="odt"
   margin-top:6px !important;
 }
 body[data-setca-role="odi"] #pUnitMgr,
+body[data-setca-role="atc"] #pUnitMgr,
 body[data-setca-role="odt"] #pUnitMgr,
 body[data-setca-role="observer"] #pUnitMgr{
   display:none !important;
@@ -4521,15 +4525,36 @@ body[data-setca-role="default"] #pNav{
 }
 #navReportContent{
   display:grid !important;
-  grid-template-rows:auto auto auto minmax(0,1fr) auto !important;
+  grid-template-rows:auto minmax(0,1fr) auto !important;
   gap:6px;
   height:calc(97.6vh - 24px);
   min-height:0;
+  position:relative;
+}
+.navReportHeader{
+  display:grid;
+  grid-template-columns:minmax(220px,auto) minmax(0,1fr) auto;
+  align-items:center;
+  gap:10px;
+  min-width:0;
 }
 #navReportContent h2{
-  margin:0 32px 2px 0 !important;
+  margin:0 !important;
   font-size:20px;
   line-height:1.05;
+}
+.navControlsDrawer{
+  position:absolute;
+  z-index:8;
+  top:38px;
+  right:36px;
+  width:min(1040px, calc(100% - 48px));
+  max-height:min(44vh, 360px);
+  overflow:auto;
+  box-sizing:border-box;
+}
+.navControlsDrawer[hidden]{
+  display:none !important;
 }
 .navReportToolbar{
   margin:0 !important;
@@ -4658,9 +4683,22 @@ body[data-setca-role="default"] #pNav{
   .navLegendItem{ min-width:210px; max-width:240px; }
 }
 @media (max-width: 1100px){
-  #navReportContent{ grid-template-rows:auto auto auto minmax(0,1fr) auto !important; }
+  #navReportContent{ grid-template-rows:auto minmax(0,1fr) auto !important; }
+  .navReportHeader{grid-template-columns:minmax(180px,auto) minmax(0,1fr) auto;}
+  .navControlsDrawer{right:0;width:100%;}
   .navReportToolbar{ justify-content:flex-start !important; }
   .navPairLocalGroup{ justify-content:flex-start !important; }
+}
+@media (max-width: 680px){
+  .navReportHeader{grid-template-columns:minmax(0,1fr) auto;}
+  .navReportHeader #navReportMeta{display:none !important;}
+  #navReportContent h2{font-size:15px !important;}
+  .navControlsDrawer{
+    top:34px;
+    right:0;
+    width:100%;
+    max-height:min(58vh, 430px);
+  }
 }
 </style>
 
@@ -5162,7 +5200,8 @@ body.setca-modern-ui .roleAssistBox{margin:0 0 7px;padding:7px 8px;border:1px so
 #setcaAirwaysToggle{width:100%;min-height:28px!important;font-size:10px!important;border-color:rgba(56,189,248,.32)!important;color:#dff7ff!important;background:linear-gradient(180deg,rgba(8,47,73,.88),rgba(3,20,36,.94))!important}
 #setcaAirwaysToggle.is-on{background:linear-gradient(180deg,rgba(14,116,144,.96),rgba(8,47,73,.98))!important;border-color:rgba(125,211,252,.62)!important;box-shadow:0 0 18px rgba(56,189,248,.16)!important}
 body.setca-modern-ui[data-setca-role="odt"] #pGTC,body.setca-modern-ui[data-setca-role="odt"] #pAlerts{border-color:rgba(248,113,113,.34)!important;box-shadow:0 0 0 1px rgba(248,113,113,.08),0 12px 28px rgba(0,0,0,.24)}
-body.setca-modern-ui[data-setca-role="odi"] #pVuelos,body.setca-modern-ui[data-setca-role="odi"] #pPlanes{border-color:rgba(96,165,250,.32)!important}
+body.setca-modern-ui:is([data-setca-role="odi"],[data-setca-role="atc"]) #pVuelos,
+body.setca-modern-ui:is([data-setca-role="odi"],[data-setca-role="atc"]) #pPlanes{border-color:rgba(96,165,250,.32)!important}
 body.setca-modern-ui[data-setca-role="observer"] aside#left,body.setca-modern-ui[data-setca-role="observer"] aside#right{opacity:.92}
 body.setca-modern-ui ::-webkit-scrollbar{width:8px;height:8px}body.setca-modern-ui ::-webkit-scrollbar-thumb{background:rgba(126,255,181,.22);border-radius:999px}body.setca-modern-ui ::-webkit-scrollbar-track{background:rgba(0,0,0,.18)}
 @media(max-width:1100px){#setcaRoleConsole{order:2}.navCardData{grid-template-columns:repeat(2,minmax(0,1fr))!important}}
@@ -5648,7 +5687,8 @@ body.setca-gal-final-collapsed:is([data-setca-role="odt"],[data-setca-role="sama
   }
   body.observer-mode header #offBtn,
   body.observer-mode header #observerBtn,
-  body.observer-mode header #exitBtn{
+  body.observer-mode header #exitBtn,
+  body.observer-mode header #configBtn{
     display:inline-block !important;
   }
 
@@ -7858,9 +7898,9 @@ body.setca-gal-final-collapsed:is([data-setca-role="odt"],[data-setca-role="sama
 body.setca-gal-final-collapsed:is([data-setca-role="odt"],[data-setca-role="samallocator"],.mode-odt-overlay) #pGTC .panel-header .toggle::after{
   content:'';
 }
-/* 2) ODI-CO no muestra Panel de Navegación */
-body:is([data-setca-role="odi"],[data-setca-role="odico"],.mode-odi-overlay) #pNav,
-body:is([data-setca-role="odi"],[data-setca-role="odico"],.mode-odi-overlay) #navCards{
+/* 2) ODI-CO y ATC no muestran Panel de Navegación */
+body:is([data-setca-role="odi"],[data-setca-role="odico"],[data-setca-role="atc"],.mode-odi-overlay) #pNav,
+body:is([data-setca-role="odi"],[data-setca-role="odico"],[data-setca-role="atc"],.mode-odi-overlay) #navCards{
   display:none!important;
 }
 /* 5) Menú contextual de avión: solo Launch Missile y Cerrar */
@@ -7941,6 +7981,7 @@ body.setca-v43-7-gal-open:is([data-setca-role="odt"],[data-setca-role="samalloca
   border:1px solid rgba(125,211,252,.28) !important;
   box-shadow:0 28px 72px rgba(0,0,0,.58), inset 0 1px 0 rgba(255,255,255,.04) !important;
   color:#dbeafe !important;
+  z-index:9700 !important;
 }
 #navReportContent{
   color:#dbeafe !important;
@@ -7951,6 +7992,78 @@ body.setca-v43-7-gal-open:is([data-setca-role="odt"],[data-setca-role="samalloca
   font:900 18px/1.05 ui-monospace,SFMono-Regular,Menlo,Consolas,monospace !important;
   text-transform:uppercase !important;
   text-shadow:0 0 14px rgba(56,189,248,.28) !important;
+}
+#navReport .navReportHeader{
+  min-height:32px;
+  padding-right:36px;
+}
+#navReport .navReportHeader #navReportMeta{
+  justify-self:center;
+  max-width:100%;
+  min-width:0;
+  overflow:hidden;
+  text-overflow:ellipsis;
+  white-space:nowrap;
+}
+#navReport .navControlsToggle{
+  width:auto !important;
+  min-width:104px !important;
+  height:30px !important;
+  min-height:30px !important;
+  padding:0 10px !important;
+  display:inline-flex !important;
+  align-items:center !important;
+  justify-content:center !important;
+  gap:7px !important;
+  border:1px solid rgba(125,211,252,.34) !important;
+  border-radius:7px !important;
+  background:linear-gradient(180deg,#122033,#0b1626) !important;
+  color:#e0f2fe !important;
+  box-shadow:inset 0 1px 0 rgba(255,255,255,.05),0 5px 14px rgba(0,0,0,.24) !important;
+  font:900 10px/1 ui-monospace,SFMono-Regular,Menlo,Consolas,monospace !important;
+  letter-spacing:0 !important;
+  cursor:pointer;
+}
+#navReport .navControlsToggle::after{
+  content:"+";
+  color:#7dd3fc;
+  font:900 15px/1 system-ui,Segoe UI,sans-serif;
+}
+#navReport .navControlsToggle:hover{
+  background:linear-gradient(180deg,#1e3a5f,#132642) !important;
+  border-color:rgba(125,211,252,.58) !important;
+}
+#navReport .navControlsToggle[aria-expanded="true"]{
+  background:linear-gradient(180deg,#d3ad16 0%,#927000 100%) !important;
+  border-color:#ffe066 !important;
+  color:#ffffff !important;
+  box-shadow:inset 0 1px 0 rgba(255,255,255,.30),0 0 16px rgba(255,214,64,.25) !important;
+}
+#navReport .navControlsToggle[aria-expanded="true"]::after{
+  content:"−";
+  color:#ffffff;
+}
+#navReport .navControlsDrawer{
+  padding:8px;
+  border:1px solid rgba(125,211,252,.28);
+  border-radius:8px;
+  background:rgba(3,10,19,.96);
+  box-shadow:0 18px 44px rgba(0,0,0,.52),inset 0 1px 0 rgba(255,255,255,.04);
+  backdrop-filter:blur(10px);
+  -webkit-backdrop-filter:blur(10px);
+}
+#navReport .navControlsDrawer .navReportToolbar{
+  justify-content:flex-start !important;
+  padding:7px !important;
+  border:1px solid rgba(125,211,252,.18) !important;
+  border-radius:7px !important;
+}
+#navReport .navControlsDrawer .navPairLocalWrap{
+  margin-top:7px !important;
+}
+#navReport .navControlsDrawer .navPairLocalGroup{
+  padding:7px !important;
+  border-radius:7px !important;
 }
 #navReport .close{
   color:#e2e8f0 !important;
@@ -8051,6 +8164,17 @@ body.setca-v43-7-gal-open:is([data-setca-role="odt"],[data-setca-role="samalloca
   font:800 10px/1.15 ui-monospace,SFMono-Regular,Menlo,Consolas,monospace !important;
   letter-spacing:.06em !important;
   text-transform:uppercase !important;
+}
+@media (max-width:680px){
+  #navReport .navReportHeader{padding-right:34px;}
+  #navReport .navControlsToggle{
+    min-width:34px !important;
+    width:34px !important;
+    padding:0 !important;
+  }
+  #navReport .navControlsToggle span{display:none;}
+  #navReport .navControlsToggle::after{content:"+";}
+  #navReport .navControlsToggle[aria-expanded="true"]::after{content:"−";}
 }
 /* X de salida inicial */
 #setcaGateExitX{
@@ -8657,7 +8781,52 @@ body.setca-modern-ui :is(
 
 <!-- Reporte -->
 <div id="report" class="modal"><span id="closeReport" class="close">&times;</span><div id="reportContent"></div></div>
-<div id="navReport" class="modal"><span id="closeNavReport" class="close">&times;</span><div id="navReportContent"><h2>ANÁLISIS DE NAVEGACIONES</h2><div class="navReportToolbar"><div class="navZoomGroup"><button id="navZoomOut" class="navZoomBtn" type="button" title="Alejar">−</button><div id="navZoomReadout" class="navZoomReadout">100%</div><button id="navZoomIn" class="navZoomBtn" type="button" title="Acercar">+</button><button id="navZoomReset" class="navZoomBtn" type="button" title="Restablecer vista">Reset</button></div><div class="navReplayGroup"><button id="navMeasureToggle" class="navModeBtn" type="button" title="Usar regla local en NAV">📏 Regla</button><button id="nav3DToggle" class="navModeBtn" type="button" title="Ver perfil de vuelo 3D local">🧱 3D</button><button id="navReplayToggle" class="navModeBtn" type="button" title="Activar replay local">⏯ Replay</button><button id="navReplayBack" class="navMiniBtn" type="button" title="Retroceder 5 segundos">⏪</button><button id="navReplayPlay" class="navMiniBtn" type="button" title="Reproducir / pausar replay">▶</button><button id="navReplayFwd" class="navMiniBtn" type="button" title="Avanzar 5 segundos">⏩</button><input id="navReplayRange" class="navReplayRange" type="range" min="0" max="1000" step="1" value="1000" aria-label="Replay local NAV"><div id="navReplayTime" class="navReplayTime">LIVE</div></div></div><div class="navPairLocalWrap"><div class="navPairLocalGroup"><span class="navPairLocalLabel">Pareo local NAV</span><select id="navPairLocalA" aria-label="Aeronave A para pareo local"></select><select id="navPairLocalB" aria-label="Aeronave B para pareo local"></select><button id="navPairLocalAdd" class="navModeBtn" type="button" title="Agregar pareo local para análisis">PAREAR</button><button id="navPairLocalClear" class="navMiniBtn" type="button" title="Limpiar todos los pareos locales">✕</button><span class="navPairLocalHint">Solo local · arrastra con el mouse en 2D o 3D · no sincroniza</span></div><div id="navPairLocalList" class="navPairLocalList"></div></div><div id="navReportMeta" class="navReportMeta"></div><canvas id="navReportCanvas"></canvas><div id="navLegend" class="navLegend"></div></div></div>
+<div id="navReport" class="modal">
+  <span id="closeNavReport" class="close">&times;</span>
+  <div id="navReportContent">
+    <div class="navReportHeader">
+      <h2>ANÁLISIS DE NAVEGACIONES</h2>
+      <div id="navReportMeta" class="navReportMeta"></div>
+      <button id="navControlsToggle" class="navControlsToggle" type="button"
+        aria-expanded="false" aria-controls="navControlsDrawer" title="Mostrar controles de análisis">
+        <span>CONTROLES</span>
+      </button>
+    </div>
+    <div id="navControlsDrawer" class="navControlsDrawer" hidden>
+      <div class="navReportToolbar">
+        <div class="navZoomGroup">
+          <button id="navZoomOut" class="navZoomBtn" type="button" title="Alejar">−</button>
+          <div id="navZoomReadout" class="navZoomReadout">100%</div>
+          <button id="navZoomIn" class="navZoomBtn" type="button" title="Acercar">+</button>
+          <button id="navZoomReset" class="navZoomBtn" type="button" title="Restablecer vista">Reset</button>
+        </div>
+        <div class="navReplayGroup">
+          <button id="navMeasureToggle" class="navModeBtn" type="button" title="Usar regla local en NAV">📏 Regla</button>
+          <button id="nav3DToggle" class="navModeBtn" type="button" title="Ver perfil de vuelo 3D local">🧱 3D</button>
+          <button id="navReplayToggle" class="navModeBtn" type="button" title="Activar replay local">⏯ Replay</button>
+          <button id="navReplayBack" class="navMiniBtn" type="button" title="Retroceder 5 segundos">⏪</button>
+          <button id="navReplayPlay" class="navMiniBtn" type="button" title="Reproducir o pausar replay">▶</button>
+          <button id="navReplayFwd" class="navMiniBtn" type="button" title="Avanzar 5 segundos">⏩</button>
+          <input id="navReplayRange" class="navReplayRange" type="range" min="0" max="1000" step="1" value="1000" aria-label="Replay local NAV">
+          <div id="navReplayTime" class="navReplayTime">LIVE</div>
+        </div>
+      </div>
+      <div class="navPairLocalWrap">
+        <div class="navPairLocalGroup">
+          <span class="navPairLocalLabel">Pareo local NAV</span>
+          <select id="navPairLocalA" aria-label="Aeronave A para pareo local"></select>
+          <select id="navPairLocalB" aria-label="Aeronave B para pareo local"></select>
+          <button id="navPairLocalAdd" class="navModeBtn" type="button" title="Agregar pareo local para análisis">PAREAR</button>
+          <button id="navPairLocalClear" class="navMiniBtn" type="button" title="Limpiar todos los pareos locales">✕</button>
+          <span class="navPairLocalHint">Solo local · arrastra con el mouse en 2D o 3D · no sincroniza</span>
+        </div>
+        <div id="navPairLocalList" class="navPairLocalList"></div>
+      </div>
+    </div>
+    <canvas id="navReportCanvas"></canvas>
+    <div id="navLegend" class="navLegend"></div>
+  </div>
+</div>
 <div id="araReport" class="modal"><span id="closeAraReport" class="close">&times;</span><div id="araReportContent"><div class="araTop"><div><h2>ARA - AIRCRAFT RISK ANALYZER</h2><div id="araMeta" class="araSub">Analisis horizontal, vertical, exposicion y maniobras</div></div><div class="araControls"><select id="araFocusSelect" aria-label="Filtro ARA"><option value="">Todas las aeronaves</option></select><button id="araRefreshBtn" type="button">ACTUALIZAR</button></div></div><div id="araKpis" class="araKpis"></div><div id="araBody" class="araBody"></div></div></div>
 <div id="spiderWebPanel" class="modal" aria-hidden="true"><span id="closeSpiderWebPanel" class="close">&times;</span><div id="spiderWebContent"><h2>SPIDER WEB</h2><div class="spiderControls"><label>Avion base<select id="spiderBaseSelect" aria-label="Avion base para Spider Web"></select></label><button id="spiderWebToggle" type="button" class="is-on">ON</button></div><div class="spiderLegend"><span><i class="spiderDot red"></i>Cerca</span><span><i class="spiderDot orange"></i>Medio</span><span><i class="spiderDot green"></i>Lejos</span></div><div id="spiderWebList" class="spiderWebList"></div></div></div>
 <div id="drawingScopeModal" class="modal drawingScopeModal" aria-hidden="true"><span id="closeDrawingScopeModal" class="close">&times;</span><div id="drawingScopeModalContent"><h2>RELACIÓN DE GRÁFICOS</h2><div class="drawingScopeModalToolbar"><span class="drawingScopeModalHint">Grupos minimizables · ocultado local por grupo</span><span id="drawingScopeCount" class="drawingScopeCount">0</span></div><div id="drawingScopeList" class="drawingScopeModalList" aria-label="Listado de gráficos"></div></div></div>
@@ -9312,7 +9481,7 @@ function __SETCA_isLocalDrawingWorkstation(){
   try{
     const access = window.__setcaAccess || {};
     const role = String(access.role || document.body.getAttribute('data-setca-role') || '').toLowerCase();
-    return !access.planning && !access.freeplay && (role === 'odi' || role === 'odico' || role === 'odt');
+    return !access.planning && !access.freeplay && (role === 'odi' || role === 'odico' || role === 'atc' || role === 'odt');
   }catch(_){ return false; }
 }
 function __SETCA_getDefaultDrawingVisibility(){
@@ -11306,7 +11475,50 @@ document.addEventListener('click', (e)=>{
   const replayPlayBtn = document.getElementById('navReplayPlay');
   const replayFwdBtn = document.getElementById('navReplayFwd');
   const replayRange = document.getElementById('navReplayRange');
+  const controlsToggle = document.getElementById('navControlsToggle');
+  const controlsDrawer = document.getElementById('navControlsDrawer');
   if(!canvas) return;
+
+  const navControlsPreferenceKey = 'setca.nav.controls.open.v1';
+  const setNavControlsOpen = (open, persist=true)=>{
+    const expanded = !!open;
+    if(controlsDrawer) controlsDrawer.hidden = !expanded;
+    if(controlsToggle){
+      controlsToggle.setAttribute('aria-expanded', expanded ? 'true' : 'false');
+      controlsToggle.title = expanded ? 'Ocultar controles de análisis' : 'Mostrar controles de análisis';
+    }
+    const report = document.getElementById('navReport');
+    if(report) report.classList.toggle('nav-controls-open', expanded);
+    if(persist){
+      try{ localStorage.setItem(navControlsPreferenceKey, expanded ? '1' : '0'); }catch(_){ }
+    }
+    try{
+      requestAnimationFrame(()=>{
+        if(typeof renderNavReport === 'function' && report && report.style.display === 'block') renderNavReport(true);
+      });
+    }catch(_){ }
+    return expanded;
+  };
+  const readNavControlsPreference = ()=>{
+    try{ return localStorage.getItem(navControlsPreferenceKey) === '1'; }catch(_){ return false; }
+  };
+  window.__SETCA_setNavControlsOpen = setNavControlsOpen;
+  window.__SETCA_applyNavControlsPreference = ()=>setNavControlsOpen(readNavControlsPreference(), false);
+  setNavControlsOpen(readNavControlsPreference(), false);
+  if(controlsToggle){
+    controlsToggle.onclick = (e)=>{
+      e.preventDefault();
+      e.stopPropagation();
+      setNavControlsOpen(controlsToggle.getAttribute('aria-expanded') !== 'true');
+    };
+  }
+  document.addEventListener('keydown', (e)=>{
+    if(e.key !== 'Escape' || !controlsToggle || controlsToggle.getAttribute('aria-expanded') !== 'true') return;
+    const report = document.getElementById('navReport');
+    if(!report || report.style.display !== 'block') return;
+    setNavControlsOpen(false);
+    try{ controlsToggle.focus({preventScroll:true}); }catch(_){ }
+  });
 
   const applyZoom = (factor, clientX=null, clientY=null)=>{
     const m = canvas.__navViewMetrics;
@@ -12067,7 +12279,58 @@ function getPlaneVerticalProfile(p){
   if(tipo.includes('comercial') || tipo.includes('airliner') || tipo.includes('civil')) return { climb:COMMERCIAL_VERTICAL_FPM, descend:COMMERCIAL_VERTICAL_FPM, tau:2.2, settle:220 };
   return { climb:2000, descend:1600, tau:2.6, settle:170 };
 }
+const SETCA_FLIGHT_PROCEDURE_PROFILES = Object.freeze({
+  scramble:Object.freeze({
+    mode:'scramble',
+    label:'SCRAMBLE',
+    targetAltFt:10000,
+    targetSpeedKts:350,
+    rotateKts:155,
+    climbFpm:12000,
+    accelKmhps:28,
+    decelKmhps:38,
+    tau:0.85,
+    settle:12
+  }),
+  departure:Object.freeze({
+    mode:'departure',
+    label:'DPT',
+    targetAltFt:10000,
+    targetSpeedKts:240,
+    rotateKts:145,
+    climbFpm:2500,
+    accelKmhps:9,
+    decelKmhps:16,
+    tau:1.8,
+    settle:7
+  })
+});
+function getPlaneFlightProcedure(p){
+  const fp = p && p.flightProcedure;
+  if(!fp || typeof fp !== 'object') return null;
+  const mode = String(fp.mode || '').toLowerCase();
+  return (mode === 'scramble' || mode === 'departure' || mode === 'arrival') ? fp : null;
+}
+function getPlaneProcedureSpeedProfile(p){
+  const fp = getPlaneFlightProcedure(p);
+  if(!fp) return null;
+  if(fp.mode === 'scramble' || fp.mode === 'departure'){
+    const profile = SETCA_FLIGHT_PROCEDURE_PROFILES[fp.mode];
+    return profile ? {
+      accel:profile.accelKmhps,
+      decel:profile.decelKmhps,
+      tau:profile.tau,
+      settle:profile.settle
+    } : null;
+  }
+  if(fp.mode === 'arrival'){
+    return {accel:8, decel:18, tau:1.65, settle:6};
+  }
+  return null;
+}
 function getPlaneSpeedProfile(p){
+  const procedureProfile = getPlaneProcedureSpeedProfile(p);
+  if(procedureProfile) return procedureProfile;
   const tipo = normalizePlaneTipoKey(getPlaneTipoDisplay(p) || (p && p.tipo) || '');
   if(tipo.includes('caza') || tipo.includes('fighter')) return { accel:120, decel:150, tau:0.55, settle:18 };
   if(tipo.includes('awacs')) return { accel:10, decel:13, tau:1.9, settle:7 };
@@ -12117,6 +12380,12 @@ function getPlaneConfiguredVerticalRateFpm(p){
   const configured = Number(p && p.verticalRateFpm);
   return Number.isFinite(configured) && configured > 0 ? configured : 0;
 }
+function getPlaneActiveVerticalRateFpm(p){
+  const fp = getPlaneFlightProcedure(p);
+  const procedureRate = Number(fp && fp.verticalRateFpm);
+  if(Number.isFinite(procedureRate) && procedureRate > 0) return procedureRate;
+  return getPlaneConfiguredVerticalRateFpm(p);
+}
 function getPlaneVerticalRateForMenu(p){
   const configured = getPlaneConfiguredVerticalRateFpm(p);
   if(configured > 0) return configured;
@@ -12132,7 +12401,7 @@ function updatePlaneAltitude(p,dt){
   const target = Math.max(0, +p.tgtAlt || 0);
   const current = Math.max(0, +p.alt || 0);
   const delta = target - current;
-  const configuredRate = getPlaneConfiguredVerticalRateFpm(p);
+  const configuredRate = getPlaneActiveVerticalRateFpm(p);
 
   if(configuredRate > 0){
     if(Math.abs(delta) <= 0.0001){
@@ -12189,6 +12458,104 @@ function updatePlaneAltitude(p,dt){
     p.vsFpm = 0;
   }
 }
+function setcaProcedureBearing(from, to){
+  return ((Math.atan2((+to.x || 0)-(+from.x || 0),-((+to.y || 0)-(+from.y || 0)))*180/Math.PI)%360+360)%360;
+}
+function updatePlaneFlightProcedure(p){
+  const fp = getPlaneFlightProcedure(p);
+  if(!fp) return false;
+
+  if(fp.mode === 'scramble' || fp.mode === 'departure'){
+    const profile = SETCA_FLIGHT_PROCEDURE_PROFILES[fp.mode];
+    if(!profile){ p.flightProcedure = null; return false; }
+    const targetSpeed = profile.targetSpeedKts * KTS2KMH;
+    const rotateSpeed = profile.rotateKts * KTS2KMH;
+    fp.targetAltFt = profile.targetAltFt;
+    fp.targetSpeedKts = profile.targetSpeedKts;
+    fp.verticalRateFpm = profile.climbFpm;
+    p.tgtSpd = targetSpeed;
+    if(String(fp.phase || 'ground') === 'ground'){
+      p.tgtAlt = 0;
+      if((+p.spd || 0) >= rotateSpeed){
+        fp.phase = 'climb';
+        fp.rotatedAt = Date.now();
+        p.tgtAlt = profile.targetAltFt;
+      }
+    }else{
+      fp.phase = 'climb';
+      p.tgtAlt = profile.targetAltFt;
+    }
+    if((+p.alt || 0) >= profile.targetAltFt - 15 && (+p.spd || 0) >= targetSpeed - 2){
+      p.alt = profile.targetAltFt;
+      p.tgtAlt = profile.targetAltFt;
+      p.tgtSpd = targetSpeed;
+      p.flightProcedure = null;
+      try{ if(typeof logEvent === 'function') logEvent(`${profile.label} COMPLETADO: ${p.name || p.id}`); }catch(_){ }
+    }
+    return false;
+  }
+
+  const target = fp.target;
+  if(fp.mode !== 'arrival' || !target || !Number.isFinite(+target.x) || !Number.isFinite(+target.y)){
+    p.flightProcedure = null;
+    return false;
+  }
+  const tx = +target.x;
+  const ty = +target.y;
+  if(String(fp.phase || '') === 'rollout'){
+    p.x = tx;
+    p.y = ty;
+    p.alt = 0;
+    p.tgtAlt = 0;
+    p.tgtSpd = 0;
+    fp.verticalRateFpm = 700;
+    if((+p.spd || 0) <= 1){
+      p.spd = 0;
+      p.speedRateKmhps = 0;
+      p.flightProcedure = null;
+      try{ if(typeof logEvent === 'function') logEvent(`ARR COMPLETADO: ${p.name || p.id}`); }catch(_){ }
+    }
+    return true;
+  }
+
+  const dx = tx - (+p.x || 0);
+  const dy = ty - (+p.y || 0);
+  const distanceNm = Math.hypot(dx,dy);
+  const speedKts = Math.max(1,(+p.spd || +p.tgtSpd || 0) * KMH2KTS);
+  const glideAltFt = Math.max(0,distanceNm * 300);
+  const currentAltFt = Math.max(0,+p.alt || 0);
+  const desiredAltFt = Math.min(currentAltFt,glideAltFt);
+  const minutesToTarget = Math.max(0.35,distanceNm / Math.max(120,speedKts) * 60);
+  const requiredFpm = Math.max(500,Math.min(6000,(currentAltFt-desiredAltFt) / minutesToTarget));
+
+  fp.phase = distanceNm > 20 ? 'arrival' : distanceNm > 3 ? 'approach' : 'final';
+  fp.distanceNm = distanceNm;
+  fp.verticalRateFpm = desiredAltFt <= 1000
+    ? Math.max(500,Math.min(1000,requiredFpm))
+    : Math.max(900,requiredFpm);
+  p.routeEnabled = false;
+  p.routeManualUntil = 0;
+  p.turnBias = null;
+  p.tgtHdg = setcaProcedureBearing(p,target);
+  p.tgtAlt = desiredAltFt;
+  p.tgtSpd = (distanceNm > 20 ? 250 : distanceNm > 10 ? 210 : distanceNm > 3 ? 170 : distanceNm > 0.7 ? 145 : 130) * KTS2KMH;
+
+  if(distanceNm <= 0.16 && currentAltFt <= 90){
+    fp.phase = 'rollout';
+    fp.touchdownAt = Date.now();
+    p.x = tx;
+    p.y = ty;
+    p.alt = 0;
+    p.tgtAlt = 0;
+    p.tgtSpd = 0;
+    return true;
+  }
+  return false;
+}
+try{
+  window.__SETCA_FLIGHT_PROCEDURE_PROFILES = SETCA_FLIGHT_PROCEDURE_PROFILES;
+  window.__SETCA_updatePlaneFlightProcedure = updatePlaneFlightProcedure;
+}catch(_){ }
 function updatePlane(p,dt){
   if(isPlaneKillConfirmed(p)){
     if(!Number.isFinite(+p.hdg)) p.hdg = Number.isFinite(+p.tgtHdg) ? +p.tgtHdg : 0;
@@ -12196,6 +12563,7 @@ function updatePlane(p,dt){
     if(!Number.isFinite(+p.spd)) p.spd = 0;
     return;
   }
+  const procedureHoldsPosition = updatePlaneFlightProcedure(p);
   updatePlaneSpeed(p,dt);
   try{
     const capGuided = typeof window.__SETCA_applyCapGuidance === 'function' && window.__SETCA_applyCapGuidance(p,dt);
@@ -12222,8 +12590,10 @@ if (Math.min(diffCW, diffCCW) > 0.1) {
   const nmps=(p.spd/NM2KM)/3600;
   const vrad=(st.windDir-90)*Math.PI/180,wnd=(st.windKmh/NM2KM)/3600;
   const hrad=(p.hdg-90)*Math.PI/180;
-  p.x+=Math.cos(hrad)*nmps*dt+Math.cos(vrad)*wnd*dt;
-  p.y+=Math.sin(hrad)*nmps*dt+Math.sin(vrad)*wnd*dt;
+  if(!procedureHoldsPosition){
+    p.x+=Math.cos(hrad)*nmps*dt+Math.cos(vrad)*wnd*dt;
+    p.y+=Math.sin(hrad)*nmps*dt+Math.sin(vrad)*wnd*dt;
+  }
   p._gt=(p._gt||0)+dt*1000;if(p._gt>1800){p.ghosts.push({x:p.x,y:p.y});if(p.ghosts.length>40)p.ghosts.shift();p._gt=0;}
 }
 function drawPlane(p){
@@ -13430,6 +13800,44 @@ function drawPeruMap(){
   }catch(e){ /* silent */ }
 }
 
+function drawFlightProcedureGuidance(){
+  if(!window.st || !Array.isArray(st.planes)) return;
+  ctx.save();
+  for(const p of st.planes){
+    const fp = getPlaneFlightProcedure(p);
+    const target = fp && fp.mode === 'arrival' ? fp.target : null;
+    if(!target || !Number.isFinite(+target.x) || !Number.isFinite(+target.y)) continue;
+    const a = toScreen(+p.x || 0,+p.y || 0);
+    const b = toScreen(+target.x,+target.y);
+    ctx.strokeStyle = 'rgba(255,216,77,0.72)';
+    ctx.lineWidth = 1;
+    ctx.setLineDash([7,6]);
+    ctx.beginPath();
+    ctx.moveTo(a.x,a.y);
+    ctx.lineTo(b.x,b.y);
+    ctx.stroke();
+    ctx.setLineDash([]);
+    ctx.beginPath();
+    ctx.arc(b.x,b.y,7,0,Math.PI*2);
+    ctx.strokeStyle = 'rgba(255,216,77,0.94)';
+    ctx.lineWidth = 1.4;
+    ctx.stroke();
+    ctx.beginPath();
+    ctx.moveTo(b.x-10,b.y);
+    ctx.lineTo(b.x+10,b.y);
+    ctx.moveTo(b.x,b.y-10);
+    ctx.lineTo(b.x,b.y+10);
+    ctx.stroke();
+    ctx.fillStyle = '#ffe783';
+    ctx.font = '700 10px ui-monospace, SFMono-Regular, Consolas, monospace';
+    ctx.textAlign = 'left';
+    ctx.textBaseline = 'bottom';
+    ctx.fillText(`ARR ${p.name || p.id}`,b.x+12,b.y-5);
+  }
+  ctx.restore();
+}
+try{ window.__SETCA_drawFlightProcedureGuidance = drawFlightProcedureGuidance; }catch(_){ }
+
 
 
 const tool={tool:'none',drawing:false,a:null,b:null,poly:[]};
@@ -13705,25 +14113,69 @@ function __SETCA_findCapAtClient(clientX, clientY){
 }
 
 function __isArwyDrawing(d){
-  return !!(d && d.type === 'arwy' && Number.isFinite(+d.x) && Number.isFinite(+d.y) && Number.isFinite(+d.ex) && Number.isFinite(+d.ey));
+  if(!d || d.type !== 'arwy') return false;
+  if(Array.isArray(d.pts)){
+    const validPoints = d.pts.filter(pt=>pt && Number.isFinite(+pt.x) && Number.isFinite(+pt.y));
+    if(validPoints.length >= 2) return true;
+  }
+  return Number.isFinite(+d.x) && Number.isFinite(+d.y) && Number.isFinite(+d.ex) && Number.isFinite(+d.ey);
 }
 
-function __arwyWorldEndpoints(d){
+function __arwyStoredPoints(d){
   if(!__isArwyDrawing(d)) return null;
-  const a = __getDrawingWorldPoint(d,{x:+d.x,y:+d.y});
-  const b = __getDrawingWorldPoint(d,{x:+d.ex,y:+d.ey});
-  const dx = b.x-a.x, dy = b.y-a.y;
-  const length = Math.hypot(dx,dy);
-  return length > 0.001 ? {a,b,dx,dy,length} : null;
+  if(Array.isArray(d.pts) && d.pts.length >= 2){
+    const pts = d.pts
+      .filter(pt=>pt && Number.isFinite(+pt.x) && Number.isFinite(+pt.y))
+      .map(pt=>({x:+pt.x,y:+pt.y}));
+    if(pts.length >= 2) return pts;
+  }
+  return [{x:+d.x,y:+d.y},{x:+d.ex,y:+d.ey}];
+}
+
+function __arwyWorldTrack(d){
+  const stored = __arwyStoredPoints(d);
+  if(!stored || stored.length < 2) return null;
+  const points = stored.map(pt=>__getDrawingWorldPoint(d,pt));
+  const segments = [];
+  let totalLength = 0;
+  for(let i=0;i<points.length-1;i++){
+    const a=points[i], b=points[i+1];
+    const dx=b.x-a.x, dy=b.y-a.y;
+    const length=Math.hypot(dx,dy);
+    if(length <= 0.001) continue;
+    segments.push({a,b,dx,dy,length,startS:totalLength,endS:totalLength+length,index:i});
+    totalLength += length;
+  }
+  if(!segments.length || totalLength <= 0.001) return null;
+  const a=segments[0].a, b=segments[segments.length-1].b;
+  return {points,segments,totalLength,length:totalLength,a,b,dx:b.x-a.x,dy:b.y-a.y};
+}
+
+function __arwyTrackPointAt(track, distance){
+  if(!track || !Array.isArray(track.segments) || !track.segments.length) return null;
+  const s=Math.max(0,Math.min(track.totalLength,+distance || 0));
+  const seg=track.segments.find(item=>s <= item.endS) || track.segments[track.segments.length-1];
+  const t=seg.length > 0 ? Math.max(0,Math.min(1,(s-seg.startS)/seg.length)) : 0;
+  return {x:seg.a.x+seg.dx*t,y:seg.a.y+seg.dy*t,segment:seg,t,s};
 }
 
 function __arwyNearestTrackPoint(d, wx, wy){
-  const g = __arwyWorldEndpoints(d);
-  if(!g) return null;
-  const rawT = (((+wx || 0)-g.a.x)*g.dx + ((+wy || 0)-g.a.y)*g.dy) / (g.length*g.length);
-  const t = Math.max(0,Math.min(1,rawT));
-  const x = g.a.x+g.dx*t, y = g.a.y+g.dy*t;
-  return {x,y,t,rawT,distance:Math.hypot((+wx || 0)-x,(+wy || 0)-y),geometry:g};
+  const track = __arwyWorldTrack(d);
+  if(!track) return null;
+  const qx=+wx || 0, qy=+wy || 0;
+  let best=null;
+  track.segments.forEach(seg=>{
+    const rawSegmentT=((qx-seg.a.x)*seg.dx+(qy-seg.a.y)*seg.dy)/(seg.length*seg.length);
+    const segmentT=Math.max(0,Math.min(1,rawSegmentT));
+    const x=seg.a.x+seg.dx*segmentT, y=seg.a.y+seg.dy*segmentT;
+    const distance=Math.hypot(qx-x,qy-y);
+    if(!best || distance < best.distance){
+      const s=seg.startS+seg.length*segmentT;
+      const rawS=seg.startS+seg.length*rawSegmentT;
+      best={x,y,distance,s,rawS,t:s/track.totalLength,rawT:rawS/track.totalLength,segmentT,rawSegmentT,segment:seg,geometry:track};
+    }
+  });
+  return best;
 }
 
 function __SETCA_findArwyAtClient(clientX, clientY){
@@ -13737,13 +14189,13 @@ function __SETCA_findArwyAtClient(clientX, clientY){
       const d = st.drawings[i];
       if(!__isArwyDrawing(d)) continue;
       try{ if(typeof isDrawingHiddenLocal === 'function' && isDrawingHiddenLocal(d.id)) continue; }catch(_){ }
-      const g = __arwyWorldEndpoints(d);
-      if(!g) continue;
-      const a = toScreen(g.a.x,g.a.y), b = toScreen(g.b.x,g.b.y);
-      const dx = b.x-a.x, dy = b.y-a.y;
-      const den = dx*dx+dy*dy;
-      const t = den > 0 ? Math.max(0,Math.min(1,((px-a.x)*dx+(py-a.y)*dy)/den)) : 0;
-      if(Math.hypot(px-(a.x+dx*t),py-(a.y+dy*t)) <= 12) return d;
+      const track = __arwyWorldTrack(d);
+      if(!track) continue;
+      const hit=track.segments.some(seg=>{
+        const a=toScreen(seg.a.x,seg.a.y), b=toScreen(seg.b.x,seg.b.y);
+        return __distPointToSegPx(px,py,a.x,a.y,b.x,b.y) <= 12;
+      });
+      if(hit) return d;
     }
   }catch(_){ }
   return null;
@@ -13823,8 +14275,9 @@ function __SETCA_arwyGuidanceTarget(p, arwy, requestedDirection){
   const nearest = __arwyNearestTrackPoint(arwy,+p.x || 0,+p.y || 0);
   if(!nearest) return null;
   const g = nearest.geometry;
-  const headingAB = __SETCA_capBearing(g.a,g.b);
-  const headingBA = __SETCA_capBearing(g.b,g.a);
+  const tangent=nearest.segment;
+  const headingAB = __SETCA_capBearing(tangent.a,tangent.b);
+  const headingBA = __SETCA_capBearing(tangent.b,tangent.a);
   let direction = String(requestedDirection || '').toUpperCase();
   if(direction !== 'AB' && direction !== 'BA'){
     const current = Number.isFinite(+p.tgtHdg) ? +p.tgtHdg : (+p.hdg || 0);
@@ -13834,14 +14287,18 @@ function __SETCA_arwyGuidanceTarget(p, arwy, requestedDirection){
   }
   const sign = direction === 'AB' ? 1 : -1;
   const speedNmPerSec = Math.max(0,+p.spd || +p.tgtSpd || 0) / 1.852 / 3600;
-  const lookaheadNm = Math.max(0.6,Math.min(5,Math.max(g.length*0.08,speedNmPerSec*20)));
-  const targetT = Math.max(0,Math.min(1,nearest.t+sign*(lookaheadNm/g.length)));
-  const target = {x:g.a.x+g.dx*targetT,y:g.a.y+g.dy*targetT};
+  const lookaheadNm = Math.max(0.6,Math.min(5,Math.max(g.totalLength*0.08,speedNmPerSec*20)));
+  const target = __arwyTrackPointAt(g,nearest.s+sign*lookaheadNm);
+  if(!target) return null;
   const endpoint = direction === 'AB' ? g.b : g.a;
+  const terminalSegment = direction === 'AB' ? g.segments[g.segments.length-1] : g.segments[0];
+  const routeHeading = direction === 'AB'
+    ? __SETCA_capBearing(terminalSegment.a,terminalSegment.b)
+    : __SETCA_capBearing(terminalSegment.b,terminalSegment.a);
   return {
     target,
     heading:__SETCA_capBearing(p,target),
-    routeHeading:direction === 'AB' ? headingAB : headingBA,
+    routeHeading,
     direction,
     nearest,
     endpoint,
@@ -13963,11 +14420,11 @@ function __getDrawingAngleRad(d){
 
 function __getDrawingAnchorWorld(d){
   if(!d) return {x:0, y:0};
+  if((d.type==='route' || d.type==='polygon' || d.type==='arwy') && Array.isArray(d.pts) && d.pts.length){
+    try{ return polyCentroid(d.pts); }catch(_){ }
+  }
   if((d.type==='line' || d.type==='arwy') && d.ex!==undefined){
     return { x: ((+d.x || 0) + (+d.ex || 0)) / 2, y: ((+d.y || 0) + (+d.ey || 0)) / 2 };
-  }
-  if((d.type==='route' || d.type==='polygon') && Array.isArray(d.pts) && d.pts.length){
-    try{ return polyCentroid(d.pts); }catch(_){ }
   }
   return { x:(+d.x || 0), y:(+d.y || 0) };
 }
@@ -14143,7 +14600,17 @@ function drawShapes(){
 
     
     // --- ARWY (línea entrecortada más delgada) ---
-    if(d.type === 'arwy' && d.ex!==undefined){
+    if(d.type === 'arwy' && Array.isArray(d.pts) && d.pts.length >= 2){
+      ctx.lineWidth = __lw;
+      ctx.beginPath();
+      const p0 = __getDrawingScreenPoint(d, d.pts[0]);
+      ctx.moveTo(p0.x, p0.y);
+      for(let i=1;i<d.pts.length;i++){
+        const pi = __getDrawingScreenPoint(d, d.pts[i]);
+        ctx.lineTo(pi.x, pi.y);
+      }
+      ctx.stroke();
+    }else if(d.type === 'arwy' && d.ex!==undefined){
       const a0 = __getDrawingScreenPoint(d, {x:d.x, y:d.y});
       const e = __getDrawingScreenPoint(d, {x:d.ex, y:d.ey});
       ctx.lineWidth = __lw;
@@ -14217,7 +14684,10 @@ function drawShapes(){
     // Se muestra para todos los gráficos excepto Punto (solo punto) y Etiqueta (ya tiene texto).
     if(d.name && d.type!=='label' && (d.type!=='point' || d.showName)){
       let nx=d.x, ny=d.y;
-      if((d.type==='line' || d.type==='arwy') && d.ex!==undefined){
+      if(d.type==='arwy' && Array.isArray(d.pts) && d.pts.length>=2){
+        try{ const c=polyCentroid(d.pts); nx=c.x; ny=c.y; }catch(_){ }
+      }
+      else if((d.type==='line' || d.type==='arwy') && d.ex!==undefined){
         const mid = __getDrawingAnchorWorld(d); nx=mid.x; ny=mid.y;
       }
       else if(d.type==='route' && Array.isArray(d.pts) && d.pts.length>=2){
@@ -14254,7 +14724,7 @@ function drawShapes(){
       ctx.lineWidth = 0.6;
     }
 
-    if(tool.tool === 'polygon' || tool.tool === 'route'){
+    if(tool.tool === 'polygon' || tool.tool === 'route' || tool.tool === 'arwy'){
       const pts = Array.isArray(tool.poly) ? tool.poly : [];
       if(pts.length){
         ctx.beginPath();
@@ -14318,7 +14788,7 @@ function drawShapes(){
     // Siempre en km (desaparece al soltar click porque tool.drawing pasa a false)
     try{
       let measureTxt = '';
-      if(tool.tool === 'polygon' || tool.tool === 'route'){
+      if(tool.tool === 'polygon' || tool.tool === 'route' || tool.tool === 'arwy'){
         const pts = Array.isArray(tool.poly) ? tool.poly : [];
         if(pts.length >= 1 && tool.b){
           let totalNM = 0;
@@ -14408,7 +14878,7 @@ function pickShape(wx, wy){
       continue;
     }
 
-    if(d.type === 'route' && Array.isArray(d.pts) && d.pts.length >= 2){
+    if((d.type === 'route' || d.type === 'arwy') && Array.isArray(d.pts) && d.pts.length >= 2){
       let best = 1e9;
       for(let j=0;j<d.pts.length-1;j++){
         const a=d.pts[j], b=d.pts[j+1];
@@ -14505,7 +14975,7 @@ function __hitDrawingPx(d, px, py, tolPx){
     return best <= tolPx;
   }
 
-  if(d.type==='route' && Array.isArray(d.pts) && d.pts.length>=2){
+  if((d.type==='route' || d.type==='arwy') && Array.isArray(d.pts) && d.pts.length>=2){
     let best=1e9;
     for(let i=0;i<d.pts.length-1;i++){
       const a=d.pts[i], b=d.pts[i+1];
@@ -14591,7 +15061,7 @@ function __hitDrawingPerimeterPx(d, px, py, tolPx){
     return Math.min(dt,db,dl,dr) <= tolPx;
   }
 
-  if((d.type==='polygon' || d.type==='route') && Array.isArray(d.pts) && d.pts.length>=2){
+  if((d.type==='polygon' || d.type==='route' || d.type==='arwy') && Array.isArray(d.pts) && d.pts.length>=2){
     let best = 1e9;
     const closed = d.type==='polygon' && d.pts.length >= 3;
     const n = d.pts.length;
@@ -14728,8 +15198,15 @@ function __drawLocalEtaOverlays(){
 // ===== D + CLICK: arrastrar gráficos (dibujos) =====
 let __dDown = false;
 let __eDown = false;
-addEventListener('keydown', (e)=>{ if(window.st && window.st.modoObservador) return; if(__isEditableHotkeyTarget(e.target)) return; if(e.key==='d' || e.key==='D') __dDown = true; if(e.key==='e' || e.key==='E') __eDown = true; });
-addEventListener('keyup',   (e)=>{ if(window.st && window.st.modoObservador) return; if(e.key==='d' || e.key==='D') __dDown = false; if(e.key==='e' || e.key==='E') __eDown = false; });
+addEventListener('keydown', (e)=>{
+  if(__isEditableHotkeyTarget(e.target)) return;
+  if(e.key==='e' || e.key==='E') __eDown = true;
+  if(!(window.st && window.st.modoObservador) && (e.key==='d' || e.key==='D')) __dDown = true;
+});
+addEventListener('keyup', (e)=>{
+  if(e.key==='e' || e.key==='E') __eDown = false;
+  if(e.key==='d' || e.key==='D') __dDown = false;
+});
 addEventListener('blur', ()=>{ __dDown = false; __eDown = false; __etaDrag = null; }, true);
 
 // Captura primero para no interferir con otras interacciones
@@ -14881,8 +15358,8 @@ addEventListener('blur', ()=>{ __dDown = false; __eDown = false; __etaDrag = nul
         {key:'2', label:'Punta 2', get:()=>__lineVisualEndpoints(d).b, set:(p)=>{ const e=__lineVisualEndpoints(d); return __setLineVisualEndpoints(d, e.a, p); }}
       ];
     }
-    if((d.type === 'route' || d.type === 'polygon') && Array.isArray(d.pts) && d.pts.length){
-      const base = d.type === 'route' ? 'Punto ruta' : 'Esquina';
+    if((d.type === 'route' || d.type === 'arwy' || d.type === 'polygon') && Array.isArray(d.pts) && d.pts.length){
+      const base = d.type === 'route' ? 'Punto ruta' : (d.type === 'arwy' ? 'Punto aerovía' : 'Esquina');
       return d.pts.map((pt, i)=>({
         key:String(i + 1),
         label:`${base} ${i + 1}`,
@@ -15357,7 +15834,7 @@ function showWPal(clientX, clientY){
       const access = window.__setcaAccess || {};
       const role = String(access.role || document.body.getAttribute('data-setca-role') || '').toLowerCase();
       const instructorAuthority = typeof window.__SETCA_isInstructorAuthority === 'function' && window.__SETCA_isInstructorAuthority();
-      const canOpenPlaneMenu = instructorAuthority || !!access.freeplay || role === 'default' || role === 'odi' || role === 'odico' || role === 'odt';
+      const canOpenPlaneMenu = instructorAuthority || !!access.freeplay || role === 'default' || role === 'odi' || role === 'odico' || role === 'atc' || role === 'odt';
       if(!canOpenPlaneMenu || !window.st || !Array.isArray(st.planes) || typeof toScreen !== 'function') return false;
       const z = typeof zoom === 'number' && Number.isFinite(zoom) && zoom > 0 ? zoom : 1;
       const tolerance = Math.max(8,Math.min(16,11/Math.sqrt(z)));
@@ -15473,7 +15950,6 @@ function showWPal(clientX, clientY){
 })();
 
 cvs.addEventListener('mousedown',e=>{
-  if(window.st && window.st.modoObservador) return;
   if(e.button!==0 || e.altKey || !__eDown) return;
   if(tool && tool.tool && tool.tool!=='none') return;
   const r=cvs.getBoundingClientRect();
@@ -15610,7 +16086,7 @@ addEventListener('mouseup',(e)=>{
     });
   });
 
-  // Polygon: click to add vertices, double-click to finish
+  // Polygon, Route and ARWY: click to add vertices, double-click to finish
   cvs.addEventListener('mousedown', e=>{
     if(window.st && window.st.modoObservador) return;
     if(e.button!==0 || e.altKey) return;
@@ -15619,7 +16095,7 @@ addEventListener('mouseup',(e)=>{
     const r=cvs.getBoundingClientRect();
     const w=toWorld(e.clientX-r.left, e.clientY-r.top);
 
-    if(tool.tool==='polygon' || tool.tool==='route'){
+    if(tool.tool==='polygon' || tool.tool==='route' || tool.tool==='arwy'){
       tool.poly = Array.isArray(tool.poly) ? tool.poly : [];
       tool.poly.push({x:w.x, y:w.y});
       tool.a = tool.poly[0];
@@ -15636,7 +16112,7 @@ addEventListener('mouseup',(e)=>{
 
   addEventListener('mousemove', e=>{
     // Polygon preview follows mouse even without holding button
-    if((tool.tool==='polygon' || tool.tool==='route') && Array.isArray(tool.poly) && tool.poly.length){
+    if((tool.tool==='polygon' || tool.tool==='route' || tool.tool==='arwy') && Array.isArray(tool.poly) && tool.poly.length){
       const r=cvs.getBoundingClientRect();
       const w=toWorld(e.clientX-r.left, e.clientY-r.top);
       tool.b = {x:w.x, y:w.y};
@@ -15652,15 +16128,22 @@ addEventListener('mouseup',(e)=>{
   });
 
   addEventListener('dblclick', e=>{
-    if(tool.tool!=='polygon' && tool.tool!=='route') return;
+    if(tool.tool!=='polygon' && tool.tool!=='route' && tool.tool!=='arwy') return;
     const minPts = (tool.tool==='polygon') ? 3 : 2;
     if(!Array.isArray(tool.poly) || tool.poly.length < minPts) return;
     e.preventDefault();
 
-    const pts = tool.poly.slice(0);
+    const pts = tool.tool === 'arwy'
+      ? tool.poly.reduce((out,pt)=>{
+          const prev=out[out.length-1];
+          if(!prev || Math.hypot(pt.x-prev.x,pt.y-prev.y) > 0.0001) out.push({x:pt.x,y:pt.y});
+          return out;
+        },[])
+      : tool.poly.slice(0);
+    if(pts.length < minPts) return;
     const c = polyCentroid(pts);
     const id='D-'+Math.random().toString(36).slice(2,6).toUpperCase();
-    st.drawings.push({ownerSide:(window.__SETCA_getCurrentSide ? window.__SETCA_getCurrentSide() : 'neutral'),visibility:'global',createdBy:(window.__SETCA_getCurrentDrawingCreator ? window.__SETCA_getCurrentDrawingCreator() : 'sinNombre'),id,type:tool.tool,x:c.x,y:c.y,pts,lw:0.6});
+    st.drawings.push({ownerSide:(window.__SETCA_getCurrentSide ? window.__SETCA_getCurrentSide() : 'neutral'),visibility:'global',createdBy:(window.__SETCA_getCurrentDrawingCreator ? window.__SETCA_getCurrentDrawingCreator() : 'sinNombre'),id,type:tool.tool,x:c.x,y:c.y,pts,lw:tool.tool==='arwy' ? 0.4 : 0.6});
     const __newDrawing = st.drawings[st.drawings.length-1];
     try{ if(window.__SETCA_isLocalDrawingWorkstation && window.__SETCA_isLocalDrawingWorkstation()) __newDrawing.visibility = 'local'; }catch(_){}
     ensureDrawingName(__newDrawing);
@@ -15673,8 +16156,8 @@ addEventListener('mouseup',(e)=>{
   }, true);
 
   addEventListener('mouseup', e=>{
-    // Polygon / Route finalizan con doble click (arriba)
-    if(tool.tool==='polygon' || tool.tool==='route') return;
+    // Polygon / Route / ARWY finalizan con doble click (arriba)
+    if(tool.tool==='polygon' || tool.tool==='route' || tool.tool==='arwy') return;
 
     if(!tool.drawing || !tool.a || !tool.b) return;
     const a=tool.a, b=tool.b;
@@ -15687,9 +16170,6 @@ addEventListener('mouseup',(e)=>{
       st.drawings.push({ownerSide:(window.__SETCA_getCurrentSide ? window.__SETCA_getCurrentSide() : 'neutral'),visibility:'global',createdBy:(window.__SETCA_getCurrentDrawingCreator ? window.__SETCA_getCurrentDrawingCreator() : 'sinNombre'),id,type:'point',x:a.x,y:a.y}); created = true;
 } else if(tool.tool==='line'){
       st.drawings.push({ownerSide:(window.__SETCA_getCurrentSide ? window.__SETCA_getCurrentSide() : 'neutral'),visibility:'global',createdBy:(window.__SETCA_getCurrentDrawingCreator ? window.__SETCA_getCurrentDrawingCreator() : 'sinNombre'),id,type:'line',x:a.x,y:a.y,ex:b.x,ey:b.y,lw:0.6}); created = true;
-      ensureDrawingName(st.drawings[st.drawings.length-1]);
-    } else if(tool.tool==='arwy'){
-      st.drawings.push({ownerSide:(window.__SETCA_getCurrentSide ? window.__SETCA_getCurrentSide() : 'neutral'),visibility:'global',createdBy:(window.__SETCA_getCurrentDrawingCreator ? window.__SETCA_getCurrentDrawingCreator() : 'sinNombre'),id,type:'arwy',x:a.x,y:a.y,ex:b.x,ey:b.y,lw:0.4}); created = true;
       ensureDrawingName(st.drawings[st.drawings.length-1]);
     } else if(tool.tool==='circle'){
       const r=Math.hypot(b.x-a.x,b.y-a.y);
@@ -16284,7 +16764,7 @@ function applyVuelosRoleVisual(roleSelect, tr, role, centerBtn){
     centerBtn.textContent = (rv === 'Unknown' || rv === 'Kill-confirm') ? '×' : '';
     centerBtn.classList.toggle('isUnknown', rv === 'Unknown');
     centerBtn.classList.toggle('isKillConfirm', rv === 'Kill-confirm');
-    centerBtn.title = `Centrar radar en este avión · ${rv}`;
+    centerBtn.title = `Seleccionar y centrar este avión · ${rv}`;
   }
   if(!roleSelect) return;
   roleSelect.value = rv;
@@ -16313,7 +16793,8 @@ function getPlaneTipoDisplay(p){
 function __SETCA_isOdiLocalVuelosRole(){
   try{
     const access = window.__setcaAccess || {};
-    return !access.planning && !access.freeplay && String(access.role || '').toLowerCase() === 'odi';
+    const role = String(access.role || '').toLowerCase();
+    return !access.planning && !access.freeplay && (role === 'odi' || role === 'odico' || role === 'atc');
   }catch(_){ return false; }
 }
 function __SETCA_getOdiLocalVuelosMap(){
@@ -16427,7 +16908,7 @@ function repaintVuelos(){
     tr.innerHTML = `
       <td>
         <div class="vuelosNameCell">
-          <button class="vuelosCenterDot focusable" type="button" title="Centrar radar en este avión"></button>
+          <button class="vuelosCenterDot focusable" type="button" title="Seleccionar y centrar este avión"></button>
           <input class="ghost focusable focusAlt vuelosNameInput" type="text" value="${String(p.name||'').replace(/"/g,'&quot;')}" placeholder="Callsign">
         </div>
       </td>
@@ -16460,10 +16941,25 @@ function repaintVuelos(){
     applyVuelosRoleVisual(roleSelect, tr, roleVal, centerBtn);
 
     if(centerBtn){
-      centerBtn.addEventListener('click', ()=>{
+      centerBtn.addEventListener('click', (e)=>{
+        if(e) e.preventDefault();
+        try{ if(Array.isArray(st.sel)) st.sel = [p.id]; }catch(_){}
+        try{ if(window.__SETCA_setClipboardFocus) window.__SETCA_setClipboardFocus('aircraft'); }catch(_){}
         if(!Number.isFinite(p.x) || !Number.isFinite(p.y)) return;
         centerWorld(p.x, p.y);
         try{ __setcaPulsePlaneHalo(p.id, 2000); }catch(_){}
+        try{ repaintNav(); }catch(_){}
+      });
+      centerBtn.addEventListener('contextmenu', (e)=>{
+        e.preventDefault();
+        e.stopPropagation();
+        try{ if(Array.isArray(st.sel)) st.sel = [p.id]; }catch(_){}
+        try{ if(window.__SETCA_setClipboardFocus) window.__SETCA_setClipboardFocus('aircraft'); }catch(_){}
+        try{
+          if(typeof window.__SETCA_openAircraftContextMenuAt === 'function'){
+            window.__SETCA_openAircraftContextMenuAt(e.clientX, e.clientY, p);
+          }
+        }catch(_){}
         try{ repaintNav(); }catch(_){}
       });
     }
@@ -16873,9 +17369,14 @@ function __SETCA_setCommandHdg(p, value){
   const hdg = ((Number(value) || 0) % 360 + 360) % 360;
   const currentCommand = Number(p.tgtHdg);
   const changesHeading = !Number.isFinite(currentCommand) || Math.abs((((hdg-currentCommand)+540)%360)-180) > 0.5;
+  const activeProcedure = getPlaneFlightProcedure(p);
+  const cancelsArrival = !!(changesHeading && activeProcedure && activeProcedure.mode === 'arrival');
   try{ if(changesHeading && typeof window.__SETCA_clearPlaneCapAssignment === 'function') window.__SETCA_clearPlaneCapAssignment(p,'manual-heading'); }catch(_){ }
   try{ if(changesHeading && typeof window.__SETCA_clearPlaneArwyAssignment === 'function') window.__SETCA_clearPlaneArwyAssignment(p,'manual-heading'); }catch(_){ }
-  if(__SETCA_routeAircraftPatchToInstructor(p, {tgtHdg:hdg}, 'heading')) return hdg;
+  const patch = {tgtHdg:hdg};
+  if(cancelsArrival) patch.flightProcedure = null;
+  if(__SETCA_routeAircraftPatchToInstructor(p, patch, 'heading')) return hdg;
+  if(cancelsArrival) p.flightProcedure = null;
   p.tgtHdg = hdg;
   try{ if(window.__SETCA_markAircraftDirty) window.__SETCA_markAircraftDirty(p); }catch(_){ }
   if(__SETCA_isImmediatePlanningMode()){
@@ -17072,7 +17573,7 @@ try{
   try{
     ctx.clearRect(0,0,W,H);
     drawGrid();
-    drawPeruMap(); drawAirports(); try{ if(window.__SETCA_drawPeruAirways) window.__SETCA_drawPeruAirways(); }catch(_){ } drawGTC();
+    drawPeruMap(); drawAirports(); try{ if(window.__SETCA_drawPeruAirways) window.__SETCA_drawPeruAirways(); }catch(_){ } drawGTC(); drawFlightProcedureGuidance();
 
     // Trajectory visualization
     if(st.showTraj){
@@ -17147,7 +17648,14 @@ $('#toggleLabels').onclick = ()=>{
 };
 $('#reportBtn').onclick=()=>{ $('#report').style.display='block'; renderReport(); };
 $('#closeReport').onclick=()=>{ $('#report').style.display='none'; };
-$('#navBtn').onclick=()=>{ const m=$('#navReport'); if(m){ m.style.display='block'; try{ if(typeof __navUpdateReplayUI==='function') __navUpdateReplayUI(); }catch(_){ } if(typeof renderNavReport==='function') renderNavReport(true); } };
+$('#navBtn').onclick=()=>{
+  const m=$('#navReport');
+  if(!m) return;
+  m.style.display='block';
+  try{ if(typeof window.__SETCA_applyNavControlsPreference === 'function') window.__SETCA_applyNavControlsPreference(); }catch(_){ }
+  try{ if(typeof __navUpdateReplayUI==='function') __navUpdateReplayUI(); }catch(_){ }
+  if(typeof renderNavReport==='function') renderNavReport(true);
+};
 $('#araBtn').onclick=()=>{ if(window.__SETCA_openARA) window.__SETCA_openARA(); };
 (function(){
   const systemsBtn = $('#systemsBtn');
@@ -20048,7 +20556,7 @@ function renderDrawingScopePanel(){
     globalBtn.className = 'drawingScopeActionBtn drawingScopeGLBtn focusable isGlobal ' + ((((d && d.visibility) === 'local') ? '' : 'isActive'));
     globalBtn.textContent = 'G';
     globalBtn.title = forceLocalDrawingRole
-      ? 'ODI-CO/ODT: los gráficos de esta estación son locales'
+      ? 'ODI-CO/ATC/ODT: los gráficos de esta estación son locales'
       : (canDelete
         ? 'G = Global. Sincroniza este gráfico con todos.'
         : 'Solo el creador puede marcar este gráfico como Global');
@@ -20279,6 +20787,7 @@ function __SETCA_pasteAircraft(){
   delete copy.arwyAssignedId;
   delete copy.arwyTrackDirection;
   delete copy.arwyAssignedAt;
+  delete copy.flightProcedure;
   st.planes.push(copy);
   st.roles = st.roles && typeof st.roles === 'object' ? st.roles : {};
   const copiedRole = String(__SETCA_AIRCRAFT_CLIPBOARD.role || 'Neutral');
@@ -21061,6 +21570,7 @@ document.addEventListener('keydown', (ev)=>{
           <select id="gateRole" class="ghost focusable">
             <option value="">Seleccionar rol...</option>
             <option value="odi">ODI-CO</option>
+            <option value="atc">ATC</option>
             <option value="odt">ODT</option>
             <option value="samallocator">SAM ALOCATOR</option>
             <option value="observer">OBSERVADOR</option>
@@ -21517,12 +22027,13 @@ import { getDatabase, ref, onValue, set } from "https://www.gstatic.com/firebase
     samallocator:'SAM ALOCATOR',
     observer:'OBSERVADOR',
     odi:'ODI-CO',
+    atc:'ATC',
     odt:'ODT'
   });
   const TIERS = Object.freeze([
     { label:'1. INSTRUCTOR', roles:['default'] },
     { label:'2. SAM ALOCATOR / OBSERVADOR', roles:['samallocator','observer'] },
-    { label:'3. ODI-CO / ODT', roles:['odi','odt'] }
+    { label:'3. ODI-CO / ATC / ODT', roles:['odi','atc','odt'] }
   ]);
 
   let roomId = '';
@@ -21605,7 +22116,7 @@ import { getDatabase, ref, onValue, set } from "https://www.gstatic.com/firebase
       title.textContent = tier.label;
       section.appendChild(title);
       const grid = document.createElement('div');
-      grid.className = 'setca-brief-role-grid' + (tier.roles.length === 1 ? ' single' : '');
+      grid.className = 'setca-brief-role-grid' + (tier.roles.length === 1 ? ' single' : '') + (tier.roles.length === 3 ? ' cols-3' : '');
       tier.roles.forEach(roleKey=>{
         const members = users.filter(user=>user.role === roleKey);
         const cell = document.createElement('div');
@@ -23441,11 +23952,13 @@ document.querySelectorAll('#pCmdBody .btn').forEach(btn=>{
   }
   function isOdiBullseyeRole(){
     const r = roleRaw();
-    return r === 'odi' || r === 'odico' || r === 'odt';
+    return r === 'odi' || r === 'odico' || r === 'atc' || r === 'odt';
   }
   function localBeRoleLabel(){
     const r = roleRaw();
-    return r === 'odt' ? 'ODT' : 'ODI-CO';
+    if(r === 'odt') return 'ODT';
+    if(r === 'atc') return 'ATC';
+    return 'ODI-CO';
   }
   function odiBeLocalKey(){
     try{
@@ -23592,6 +24105,104 @@ document.querySelectorAll('#pCmdBody .btn').forEach(btn=>{
   let targetPlaneId = null;
   let odiBeMenu = null;
   let odiBeTargetPlaneId = null;
+  let arrivalSelection = null;
+
+  function isPlanningAircraftContext(){
+    try{
+      const access = window.__setcaAccess || {};
+      if(access.planning) return true;
+    }catch(_){ }
+    try{ return !!(window.__SETCA_isPlanningMode && window.__SETCA_isPlanningMode()); }catch(_){ return false; }
+  }
+  function isGroundProcedureReady(p){
+    return !!(p && Math.max(0,+p.alt || 0) <= 5 && Math.max(0,+p.spd || 0) <= 5 * KTS2KMH);
+  }
+  function procedureCue(){
+    let cue = document.getElementById('setcaArrivalPickCue');
+    if(cue) return cue;
+    cue = document.createElement('div');
+    cue.id = 'setcaArrivalPickCue';
+    cue.setAttribute('role','status');
+    cue.setAttribute('aria-live','polite');
+    document.body.appendChild(cue);
+    return cue;
+  }
+  function stopArrivalSelection(){
+    arrivalSelection = null;
+    document.body.classList.remove('setca-arrival-pick');
+    const cue = procedureCue();
+    cue.style.display = 'none';
+    cue.textContent = '';
+  }
+  function clearProcedureRouteConflicts(p){
+    if(!p) return;
+    try{ if(typeof window.__SETCA_clearPlaneCapAssignment === 'function') window.__SETCA_clearPlaneCapAssignment(p); }catch(_){ }
+    try{ if(typeof window.__SETCA_clearPlaneArwyAssignment === 'function') window.__SETCA_clearPlaneArwyAssignment(p); }catch(_){ }
+    p.routeEnabled = false;
+    p.routeManualUntil = 0;
+    p.turnBias = null;
+  }
+  function commitFlightProcedure(p, procedure, kind){
+    if(!p || !procedure) return false;
+    clearProcedureRouteConflicts(p);
+    const patch = {
+      flightProcedure:procedure,
+      routeEnabled:false,
+      routeManualUntil:0,
+      capAssignedId:'',
+      capTrackDirection:'',
+      capAssignedAt:0,
+      arwyAssignedId:'',
+      arwyTrackDirection:'',
+      arwyAssignedAt:0,
+      turnBias:''
+    };
+    if(typeof __SETCA_routeAircraftPatchToInstructor === 'function' &&
+      __SETCA_routeAircraftPatchToInstructor(p,patch,kind || 'flight-procedure')){
+      return true;
+    }
+    Object.assign(p,patch);
+    p.turnBias = null;
+    try{ if(typeof window.__SETCA_updatePlaneFlightProcedure === 'function') window.__SETCA_updatePlaneFlightProcedure(p,0); }catch(_){ }
+    try{ if(window.__SETCA_markAircraftDirty) window.__SETCA_markAircraftDirty(p); }catch(_){ }
+    try{ if(typeof __SETCA_pushInstructorCommandNow === 'function') __SETCA_pushInstructorCommandNow(); else pushSync(); }catch(_){ }
+    repaintAll();
+    return true;
+  }
+  function startDepartureProcedure(mode){
+    const p = getTargetPlane();
+    const profile = window.__SETCA_FLIGHT_PROCEDURE_PROFILES && window.__SETCA_FLIGHT_PROCEDURE_PROFILES[mode];
+    if(!p || !profile || isPlanningAircraftContext()) return false;
+    if(!isGroundProcedureReady(p)){
+      alert(`${profile.label} requiere la aeronave en tierra: ALT 0 FT y VEL 0 KTS.`);
+      return false;
+    }
+    const procedure = {
+      mode,
+      phase:'ground',
+      startedAt:Date.now(),
+      targetAltFt:profile.targetAltFt,
+      targetSpeedKts:profile.targetSpeedKts,
+      verticalRateFpm:profile.climbFpm
+    };
+    const committed = commitFlightProcedure(p,procedure,mode);
+    if(committed){
+      try{ if(typeof logEvent === 'function') logEvent(`${profile.label} INICIADO: ${p.name || p.id}`); }catch(_){ }
+      populateMenu(p);
+    }
+    return committed;
+  }
+  function startArrivalSelection(){
+    const p = getTargetPlane();
+    if(!p || isPlanningAircraftContext()) return false;
+    arrivalSelection = {planeId:String(p.id || ''), startedAt:Date.now()};
+    document.body.classList.add('setca-arrival-pick');
+    const cue = procedureCue();
+    cue.textContent = `ARR ${p.name || p.id}: seleccione el punto de aterrizaje`;
+    cue.style.display = 'flex';
+    hideMenu();
+    return true;
+  }
 
   function isFreePlayAircraftContext(){
     try{
@@ -23758,6 +24369,27 @@ document.querySelectorAll('#pCmdBody .btn').forEach(btn=>{
         #setcaPlaneBeCtx .ctxFoot{
           display:grid; grid-template-columns:minmax(0,1fr) minmax(0,1fr); gap:10px; margin-top:10px;
         }
+        #setcaPlaneBeCtx .ctxProcedureRow{
+          display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:8px; margin-top:10px;
+        }
+        #setcaPlaneBeCtx .ctxProcedureRow.ctxHidden{ display:none !important; }
+        #setcaPlaneBeCtx .ctxProcedureRow button{
+          display:flex !important; align-items:center; justify-content:center;
+          width:100%; min-width:0; min-height:32px; box-sizing:border-box;
+          border:1px solid #397452 !important; border-radius:5px !important;
+          background:#173423 !important; color:#fff !important;
+          padding:6px 8px !important; font:800 11px/1 system-ui,Segoe UI,Roboto,Arial,sans-serif !important;
+          letter-spacing:0 !important; cursor:pointer;
+        }
+        #setcaPlaneBeCtx .ctxProcedureRow button:hover{ filter:brightness(1.14); }
+        body.setca-modern-ui #setcaPlaneBeCtx .ctxProcedureRow.ctxProcedureRow.ctxProcedureRow button.is-active.is-active.is-active{
+          border-color:#ffe066 !important;
+          background:linear-gradient(180deg,#d3ad16 0%,#927000 100%) !important;
+          color:#fff !important;
+        }
+        #setcaPlaneBeCtx .ctxProcedureRow button:disabled{
+          opacity:.42 !important; cursor:not-allowed !important; filter:none !important;
+        }
         #setcaPlaneBeCtx .ctxFoot button{
           display:flex !important; align-items:center; justify-content:center;
           width:100%; min-width:0; min-height:34px; box-sizing:border-box;
@@ -23783,6 +24415,16 @@ document.querySelectorAll('#pCmdBody .btn').forEach(btn=>{
         #setcaPlaneBeCtx .ctxHint{
           margin-top:7px; color:#8fa0ad; font-size:10px; line-height:1.2; text-align:right;
         }
+        #setcaArrivalPickCue{
+          position:fixed; z-index:10045; left:50%; top:54px; transform:translateX(-50%);
+          display:none; align-items:center; justify-content:center;
+          max-width:calc(100vw - 24px); min-height:32px; box-sizing:border-box;
+          border:1px solid #ffd84d; border-radius:6px;
+          background:#171407; color:#fff; box-shadow:0 10px 28px rgba(0,0,0,.48);
+          padding:7px 12px; font:800 11px/1.2 system-ui,Segoe UI,Roboto,Arial,sans-serif;
+          pointer-events:none;
+        }
+        body.setca-arrival-pick #radar{ cursor:crosshair !important; }
         @media (max-width:440px){
           #setcaPlaneBeCtx{ width:calc(100vw - 16px); padding:8px; }
           #setcaPlaneBeCtx .ctxGrid{ gap:7px; }
@@ -23883,6 +24525,11 @@ document.querySelectorAll('#pCmdBody .btn').forEach(btn=>{
             </label>
           </div>
         </div>
+        <div class="ctxProcedureRow" id="setcaPlaneProcedureRow">
+          <button type="button" data-act="scramble" title="Despegue táctico rápido">SCRAMBLE</button>
+          <button type="button" data-act="departure" title="Salida controlada">DPT</button>
+          <button type="button" data-act="arrival" title="Seleccionar punto de llegada">ARR</button>
+        </div>
         <div class="ctxFoot">
           <button type="button" data-act="fire">LAUNCH MISSILE</button>
           <button type="button" data-act="close">CLOSE</button>
@@ -23898,6 +24545,9 @@ document.querySelectorAll('#pCmdBody .btn').forEach(btn=>{
         if(!btn) return;
         consume(e);
         const act = btn.getAttribute('data-act');
+        if(act === 'scramble'){ startDepartureProcedure('scramble'); return; }
+        if(act === 'departure'){ startDepartureProcedure('departure'); return; }
+        if(act === 'arrival'){ startArrivalSelection(); return; }
         if(act === 'delete'){ deleteTargetPlane(); return; }
         if(act === 'apply'){
           applyMenuValues();
@@ -24037,10 +24687,19 @@ document.querySelectorAll('#pCmdBody .btn').forEach(btn=>{
     const targetSel = m.querySelector('#setcaPlaneCtxTarget');
     const missileSel = m.querySelector('#setcaPlaneCtxMissile');
     const deleteBtn = m.querySelector('#setcaPlaneCtxDelete');
+    const procedureRow = m.querySelector('#setcaPlaneProcedureRow');
+    const scrambleBtn = m.querySelector('button[data-act="scramble"]');
+    const departureBtn = m.querySelector('button[data-act="departure"]');
+    const arrivalBtn = m.querySelector('button[data-act="arrival"]');
     const hint = m.querySelector('#setcaPlaneCtxHint');
     const be = p.beAssignedId ? findBullseyeById(p.beAssignedId) : null;
     const roleVal = normalizePlaneRole(String((st.roles && st.roles[p.id]) || 'Neutral'));
+    const activeProcedure = getPlaneFlightProcedure(p);
+    const procedureLabel = activeProcedure
+      ? (activeProcedure.mode === 'scramble' ? 'SCRAMBLE' : activeProcedure.mode === 'departure' ? 'DPT' : 'ARR')
+      : '';
     if(hdr) hdr.textContent = `CONTROL DE AERONAVE · ${p.name||p.id}${be ? ` · BE:${be.name||be.id}` : ''}`;
+    if(hdr && procedureLabel) hdr.textContent += ` Â· ${procedureLabel}`;
     fillBeOptions(beSel, p);
     fillTargetOptions(targetSel, p);
     if(altFormatSel){
@@ -24066,6 +24725,24 @@ document.querySelectorAll('#pCmdBody .btn').forEach(btn=>{
     if(iffIn) iffIn.value = String(getPlaneXpdr(p) || '');
     if(missileSel) missileSel.value = String(p.ctxMissileType || 'AMRAAM');
     if(deleteBtn) deleteBtn.classList.toggle('ctxHidden',!canDeletePlaneFromContext());
+    const planning = isPlanningAircraftContext();
+    const groundReady = isGroundProcedureReady(p);
+    if(procedureRow) procedureRow.classList.toggle('ctxHidden',planning);
+    if(scrambleBtn){
+      scrambleBtn.disabled = planning || (!groundReady && procedureLabel !== 'SCRAMBLE');
+      scrambleBtn.classList.toggle('is-active',procedureLabel === 'SCRAMBLE');
+      scrambleBtn.setAttribute('aria-pressed',procedureLabel === 'SCRAMBLE' ? 'true' : 'false');
+    }
+    if(departureBtn){
+      departureBtn.disabled = planning || (!groundReady && procedureLabel !== 'DPT');
+      departureBtn.classList.toggle('is-active',procedureLabel === 'DPT');
+      departureBtn.setAttribute('aria-pressed',procedureLabel === 'DPT' ? 'true' : 'false');
+    }
+    if(arrivalBtn){
+      arrivalBtn.disabled = planning;
+      arrivalBtn.classList.toggle('is-active',procedureLabel === 'ARR');
+      arrivalBtn.setAttribute('aria-pressed',procedureLabel === 'ARR' ? 'true' : 'false');
+    }
     if(hint){
       let text = isAircraftDeferredContext() ? aircraftDeferredLabel() : 'Cambios sincronizados';
       try{
@@ -24177,6 +24854,57 @@ document.querySelectorAll('#pCmdBody .btn').forEach(btn=>{
     m.style.left = x + 'px';
     m.style.top = y + 'px';
   }
+  function openAircraftContextAt(clientX, clientY, planeOrId){
+    const p = (planeOrId && typeof planeOrId === 'object')
+      ? planeOrId
+      : (st.planes || []).find(item=>String(item && item.id || '') === String(planeOrId || ''));
+    if(!p) return false;
+    try{ if(Array.isArray(st.sel)) st.sel = [p.id]; }catch(_){ }
+    try{ if(window.__SETCA_setClipboardFocus) window.__SETCA_setClipboardFocus('aircraft'); }catch(_){ }
+    if(isOdiBullseyeRole()){
+      showOdiBeMenu(clientX, clientY, p);
+      return true;
+    }
+    if(!canOpenAircraftContextMenu()) return false;
+    showMenu(clientX, clientY, p);
+    return true;
+  }
+  window.__SETCA_openAircraftContextMenuAt = openAircraftContextAt;
+
+  document.addEventListener('mousedown', (e)=>{
+    if(!arrivalSelection) return;
+    if(e.button === 2){
+      consume(e);
+      stopArrivalSelection();
+      return;
+    }
+    if(e.button !== 0 || e.target !== cvs) return;
+    consume(e);
+    const p = (st.planes || []).find(item=>item && String(item.id || '') === String(arrivalSelection.planeId || ''));
+    if(!p){
+      stopArrivalSelection();
+      return;
+    }
+    const rect = cvs.getBoundingClientRect();
+    const point = toWorld(e.clientX-rect.left,e.clientY-rect.top);
+    const procedure = {
+      mode:'arrival',
+      phase:'arrival',
+      startedAt:Date.now(),
+      target:{x:Number(point.x) || 0,y:Number(point.y) || 0},
+      verticalRateFpm:1800
+    };
+    const committed = commitFlightProcedure(p,procedure,'arrival');
+    if(committed){
+      try{ if(typeof logEvent === 'function') logEvent(`ARR INICIADO: ${p.name || p.id}`); }catch(_){ }
+    }
+    stopArrivalSelection();
+  }, true);
+  document.addEventListener('keydown', (e)=>{
+    if(!arrivalSelection || e.key !== 'Escape') return;
+    consume(e);
+    stopArrivalSelection();
+  }, true);
 
   document.addEventListener('mousedown', (e)=>{
     const odiM = ensureOdiBeMenu();
@@ -24196,18 +24924,7 @@ document.querySelectorAll('#pCmdBody .btn').forEach(btn=>{
     try{ if(window.tool && tool.tool && tool.tool !== 'none') return; }catch(_){ }
     const p = findPlaneAtClient(e.clientX, e.clientY);
     if(!p) return;
-    if(isOdiBullseyeRole()){
-      consume(e);
-      try{ if(Array.isArray(st.sel)) st.sel = [p.id]; }catch(_){ }
-      try{ if(window.__SETCA_setClipboardFocus) window.__SETCA_setClipboardFocus('aircraft'); }catch(_){ }
-      showOdiBeMenu(e.clientX, e.clientY, p);
-      return;
-    }
-    if(!canOpenAircraftContextMenu()) return;
-    consume(e);
-    try{ if(Array.isArray(st.sel)) st.sel = [p.id]; }catch(_){ }
-    try{ if(window.__SETCA_setClipboardFocus) window.__SETCA_setClipboardFocus('aircraft'); }catch(_){ }
-    showMenu(e.clientX, e.clientY, p);
+    if(openAircraftContextAt(e.clientX, e.clientY, p)) consume(e);
   }, true);
 })();
 
@@ -25749,7 +26466,7 @@ import { getAuth } from "https://www.gstatic.com/firebasejs/10.12.3/firebase-aut
   const PRESET_ROOMS = ['sala-default','alfa','bravo','charlie','delta','eco','foxtrot','golf','hotel','india','juliet'];
   const GATE_KEY = 'setca_access_gate_v3';
   const MASTER_ACCESS_KEY = 'SETCA-2026';
-  const VALID_ACCESS_ROLES = new Set(['default','odi','odt','samallocator','observer']);
+  const VALID_ACCESS_ROLES = new Set(['default','odi','atc','odt','samallocator','observer']);
   const body = document.body;
   const gate = document.getElementById('setcaAccessGate');
   const roomBadge = document.getElementById('setcaGateRoomBadge');
@@ -25810,7 +26527,7 @@ import { getAuth } from "https://www.gstatic.com/firebasejs/10.12.3/firebase-aut
     return 'neutral';
   }
   function roleToLabel(v){
-    return ({odi:'ODI-CO', odt:'ODT', samallocator:'SAM ALOCATOR', observer:'OBSERVADOR', default:'INSTRUCTOR'})[v] || 'INSTRUCTOR';
+    return ({odi:'ODI-CO', atc:'ATC', odt:'ODT', samallocator:'SAM ALOCATOR', observer:'OBSERVADOR', default:'INSTRUCTOR'})[v] || 'INSTRUCTOR';
   }
   function sideToLabel(v){
     return ({ally:'ALIADO', enemy:'ENEMIGO', neutral:'NEUTRAL'})[normalizeSide(v)] || 'NEUTRAL';
@@ -25848,9 +26565,21 @@ import { getAuth } from "https://www.gstatic.com/firebasejs/10.12.3/firebase-aut
   function baseCanSeePlane(){
     return true;
   }
+  const SETCA_AWACS_COVERAGE_CACHE_MS = 100;
+  let setcaAwacsCoverageCache = {planesRef:null, enabled:false, at:0, list:[]};
   function awacsCoveragePlanes(){
     const planes = (window.st && Array.isArray(window.st.planes)) ? window.st.planes : [];
-    return planes.filter(aw=> aw && isAwacsPlane(aw) && st.showAwacsCoverage && aw.awacsCoverage !== false);
+    const enabled = !!(window.st && st.showAwacsCoverage);
+    if(!enabled) return [];
+    const now = Date.now();
+    if(setcaAwacsCoverageCache.planesRef === planes &&
+      setcaAwacsCoverageCache.enabled === enabled &&
+      now - setcaAwacsCoverageCache.at < SETCA_AWACS_COVERAGE_CACHE_MS){
+      return setcaAwacsCoverageCache.list;
+    }
+    const list = planes.filter(aw=> aw && isAwacsPlane(aw) && aw.awacsCoverage !== false);
+    setcaAwacsCoverageCache = {planesRef:planes, enabled, at:now, list};
+    return list;
   }
   function insideAwacsCoverage(p){
     if(!p) return false;
@@ -25877,87 +26606,12 @@ import { getAuth } from "https://www.gstatic.com/firebasejs/10.12.3/firebase-aut
   }
   const SETCA_RADAR_ACQUIRE_MS = 2600;
   const SETCA_RADAR_VISUAL_CACHE_MS = 14;
-  const SETCA_GROUND_DETECTION_CACHE_MS = 120;
-  const SETCA_GROUND_DETECTION_CELL_NM = 64;
   const setcaRadarAcquisition = new Map();
-  const setcaGroundDetectionByPlane = new Map();
   let setcaRadarVisualByPlane = new WeakMap();
-  let setcaRadarAccessCache = {source:null, roleValue:null, planning:false, freeplay:false, mode:0, restricted:false};
-  let setcaGroundDetectionSnapshot = {at:0, version:0, assets:[], grid:new Map()};
   let setcaRadarAcquisitionPrunedAt = 0;
   function planeDetectionKey(p){
     const raw = p && (p.id || p.name);
     return typeof raw === 'string' ? raw : String(raw || '');
-  }
-  function radarAccessView(){
-    const source = window.__setcaAccess || {};
-    const roleValue = source.role || 'default';
-    const planning = !!source.planning;
-    const freeplay = !!source.freeplay;
-    if(setcaRadarAccessCache.source === source && setcaRadarAccessCache.roleValue === roleValue &&
-      setcaRadarAccessCache.planning === planning && setcaRadarAccessCache.freeplay === freeplay) return setcaRadarAccessCache;
-    const role = String(roleValue).toLowerCase();
-    const restricted = !planning && !freeplay && (role === 'odt' || role === 'samallocator');
-    setcaRadarAccessCache = {
-      source,
-      roleValue,
-      planning,
-      freeplay,
-      restricted,
-      mode:restricted ? (role === 'odt' ? 1 : 2) : 0
-    };
-    return setcaRadarAccessCache;
-  }
-  function groundDetectionAssets(now){
-    if(now - setcaGroundDetectionSnapshot.at < SETCA_GROUND_DETECTION_CACHE_MS) return setcaGroundDetectionSnapshot;
-    const assets = ((window.st && Array.isArray(st.gtc)) ? st.gtc : []).map(asset=>{
-      if(!asset || asset._hit) return null;
-      const x = Number(asset.x), y = Number(asset.y);
-      const rangeNm = Math.max(0, Number(asset.covR) || 0);
-      const ceilingFt = Math.max(0, Number(asset.covH) || 0);
-      if(!Number.isFinite(x) || !Number.isFinite(y) || !(rangeNm > 0) || !(ceilingFt > 0)) return null;
-      return {x, y, rangeNm, rangeSq:rangeNm * rangeNm, ceilingFt};
-    }).filter(Boolean);
-    const grid = new Map();
-    assets.forEach(asset=>{
-      const minX = Math.floor((asset.x - asset.rangeNm) / SETCA_GROUND_DETECTION_CELL_NM);
-      const maxX = Math.floor((asset.x + asset.rangeNm) / SETCA_GROUND_DETECTION_CELL_NM);
-      const minY = Math.floor((asset.y - asset.rangeNm) / SETCA_GROUND_DETECTION_CELL_NM);
-      const maxY = Math.floor((asset.y + asset.rangeNm) / SETCA_GROUND_DETECTION_CELL_NM);
-      for(let gx=minX; gx<=maxX; gx++){
-        for(let gy=minY; gy<=maxY; gy++){
-          const key = `${gx}:${gy}`;
-          const bucket = grid.get(key);
-          if(bucket) bucket.push(asset); else grid.set(key, [asset]);
-        }
-      }
-    });
-    setcaGroundDetectionSnapshot = {
-      at:now,
-      version:setcaGroundDetectionSnapshot.version + 1,
-      assets,
-      grid
-    };
-    return setcaGroundDetectionSnapshot;
-  }
-  function insideGroundDetection(p){
-    if(!p || !window.st || !Array.isArray(st.gtc)) return false;
-    const now = Date.now();
-    const px = Number(p.x), py = Number(p.y), alt = Math.max(0, Number(p.alt) || 0);
-    if(!Number.isFinite(px) || !Number.isFinite(py)) return false;
-    const snapshot = groundDetectionAssets(now);
-    const id = planeDetectionKey(p);
-    const cached = setcaGroundDetectionByPlane.get(id);
-    if(cached && cached.version === snapshot.version && now - cached.at < SETCA_GROUND_DETECTION_CACHE_MS) return cached.inside;
-    const cellKey = `${Math.floor(px / SETCA_GROUND_DETECTION_CELL_NM)}:${Math.floor(py / SETCA_GROUND_DETECTION_CELL_NM)}`;
-    const candidates = snapshot.grid.get(cellKey) || [];
-    const inside = candidates.some(asset=>{
-      if(alt > asset.ceilingFt) return false;
-      const dx = px - asset.x, dy = py - asset.y;
-      return dx*dx + dy*dy <= asset.rangeSq;
-    });
-    setcaGroundDetectionByPlane.set(id, {at:now, version:snapshot.version, x:px, y:py, alt, inside});
-    return inside;
   }
   function pruneRadarAcquisition(now){
     if(now - setcaRadarAcquisitionPrunedAt < 15000) return;
@@ -25966,20 +26620,15 @@ import { getAuth } from "https://www.gstatic.com/firebasejs/10.12.3/firebase-aut
     for(const id of setcaRadarAcquisition.keys()){
       if(!activeIds.has(id)) setcaRadarAcquisition.delete(id);
     }
-    for(const id of setcaGroundDetectionByPlane.keys()){
-      if(!activeIds.has(id)) setcaGroundDetectionByPlane.delete(id);
-    }
   }
-  window.__SETCA_isPlaneInsideGroundDetection = insideGroundDetection;
   window.__SETCA_RADAR_ACQUIRE_MS = SETCA_RADAR_ACQUIRE_MS;
   window.__SETCA_resetRadarAcquisition = function(){
     setcaRadarAcquisition.clear();
-    setcaGroundDetectionByPlane.clear();
     setcaRadarVisualByPlane = new WeakMap();
-    setcaGroundDetectionSnapshot = {at:0, version:setcaGroundDetectionSnapshot.version + 1, assets:[], grid:new Map()};
+    setcaAwacsCoverageCache = {planesRef:null, enabled:false, at:0, list:[]};
   };
-  function rememberRadarVisual(id, state, p, now, viewMode, fadeUntil, result){
-    setcaRadarVisualByPlane.set(p, {at:now, x:p.x, y:p.y, alt:p.alt, viewMode, fadeUntil, result});
+  function rememberRadarVisual(id, state, p, now, fadeUntil, result){
+    setcaRadarVisualByPlane.set(p, {at:now, fadeUntil, result});
     if(state) setcaRadarAcquisition.set(id, state);
     return result;
   }
@@ -25988,26 +26637,23 @@ import { getAuth } from "https://www.gstatic.com/firebasejs/10.12.3/firebase-aut
     const now = Date.now();
     pruneRadarAcquisition(now);
     const id = planeDetectionKey(p);
-    const accessView = radarAccessView();
-    const restricted = accessView.restricted;
     const fadeEntry = window.st && st.contingencies && st.contingencies.fadeLost && st.contingencies.fadeLost[id];
     const fadeUntil = Math.max(0, Number(fadeEntry && fadeEntry.until) || 0);
     const visualCached = setcaRadarVisualByPlane.get(p);
     if(visualCached && now - visualCached.at < SETCA_RADAR_VISUAL_CACHE_MS &&
-      visualCached.viewMode === accessView.mode && visualCached.fadeUntil === fadeUntil) return visualCached.result;
+      visualCached.fadeUntil === fadeUntil) return visualCached.result;
     let state = setcaRadarAcquisition.get(id);
-    const inCoverage = restricted ? insideGroundDetection(p) : legacyCanRenderPlane(p);
+    const inCoverage = legacyCanRenderPlane(p);
     const faded = fadeUntil > now || ((!(fadeUntil > 0)) && (typeof window.__SETCA_getActiveFadeLost === 'function') ? !!window.__SETCA_getActiveFadeLost(p) : false);
     if(!inCoverage || faded){
       if(!state) state = {hidden:true, acquiredAt:0, reason:''};
       state.hidden = true;
       state.acquiredAt = 0;
       state.reason = faded ? 'fade' : 'coverage';
-      return rememberRadarVisual(id, state, p, now, accessView.mode, fadeUntil, {visible:false, showDataBlock:false, alpha:0, scale:0, phase:state.reason});
+      return rememberRadarVisual(id, state, p, now, fadeUntil, {visible:false, showDataBlock:false, alpha:0, scale:0, phase:state.reason});
     }
     if(!state){
-      if(!restricted) return rememberRadarVisual(id, null, p, now, accessView.mode, fadeUntil, {visible:true, showDataBlock:true, alpha:1, scale:1, phase:'track'});
-      state = {hidden:false, acquiredAt:now, reason:'acquiring'};
+      return rememberRadarVisual(id, null, p, now, fadeUntil, {visible:true, showDataBlock:true, alpha:1, scale:1, phase:'track'});
     }else if(state.hidden || !(state.acquiredAt > 0)){
       state.hidden = false;
       state.acquiredAt = now;
@@ -26016,10 +26662,10 @@ import { getAuth } from "https://www.gstatic.com/firebasejs/10.12.3/firebase-aut
     const elapsed = Math.max(0, now - state.acquiredAt);
     if(elapsed >= SETCA_RADAR_ACQUIRE_MS){
       state.reason = 'track';
-      return rememberRadarVisual(id, state, p, now, accessView.mode, fadeUntil, {visible:true, showDataBlock:true, alpha:1, scale:1, phase:'track', elapsed});
+      return rememberRadarVisual(id, state, p, now, fadeUntil, {visible:true, showDataBlock:true, alpha:1, scale:1, phase:'track', elapsed});
     }
     const progress = Math.max(0, Math.min(1, elapsed / SETCA_RADAR_ACQUIRE_MS));
-    return rememberRadarVisual(id, state, p, now, accessView.mode, fadeUntil, {
+    return rememberRadarVisual(id, state, p, now, fadeUntil, {
       visible:true,
       showDataBlock:false,
       alpha:0.14 + progress * 0.76,
@@ -26276,7 +26922,7 @@ import { getAuth } from "https://www.gstatic.com/firebasejs/10.12.3/firebase-aut
   function __SETCA_refreshLocalWorkstationPanels(access){
     try{
       const role = String((access && access.role) || '').toLowerCase();
-      const localPanelSelector = (role === 'odi' || role === 'odico')
+      const localPanelSelector = (role === 'odi' || role === 'odico' || role === 'atc')
         ? '#vuelosList input,#vuelosList select,#vuelosList button,#pairA,#pairB,#doPair,#unPair,#pDraw input,#pDraw select,#pDraw button'
         : (role === 'odt'
             ? '#pGTC input,#pGTC select,#pGTC button,#pDraw input,#pDraw select,#pDraw button'
@@ -26333,7 +26979,7 @@ import { getAuth } from "https://www.gstatic.com/firebasejs/10.12.3/firebase-aut
     }
     function __setcaIsLocalDrawRole(){
       const r = __setcaLocalDrawRole();
-      return r === 'odi' || r === 'odico' || r === 'odt';
+      return r === 'odi' || r === 'odico' || r === 'atc' || r === 'odt';
     }
     window.__SETCA_refreshLocalDrawingLauncher = function(){
       const btn = document.getElementById('setcaLocalDrawLauncher');
@@ -26373,7 +27019,8 @@ import { getAuth } from "https://www.gstatic.com/firebasejs/10.12.3/firebase-aut
     const freeplay = !!(access && access.freeplay);
     body.classList.toggle('setca-planning-mode', planning);
     body.classList.toggle('setca-freeplay-mode', freeplay);
-    const mode = (planning || freeplay) ? 'default' : (access.role === 'odi' ? 'odi' : (access.role === 'odt' || access.role === 'samallocator') ? 'odt' : access.role === 'observer' ? 'observer' : 'default');
+    const accessRole = String(access.role || 'default').toLowerCase();
+    const mode = (planning || freeplay) ? 'default' : (accessRole === 'odi' || accessRole === 'odico' || accessRole === 'atc') ? 'odi' : (accessRole === 'odt' || accessRole === 'samallocator') ? 'odt' : accessRole === 'observer' ? 'observer' : 'default';
     if(typeof window.__SETCA_applyRoleMode === 'function'){
       window.__SETCA_applyRoleMode(mode);
     }
@@ -26415,8 +27062,7 @@ import { getAuth } from "https://www.gstatic.com/firebasejs/10.12.3/firebase-aut
       const showUnitMgr = isInstructor;
       unitMgr.style.display = showUnitMgr ? '' : 'none';
     }
-    const accessRole = String(access.role || 'default').toLowerCase();
-    const removePlanesPanel = freeplay || (!planning && ['default','odi','odico','odt','samallocator'].includes(accessRole));
+    const removePlanesPanel = freeplay || (!planning && ['default','odi','odico','atc','odt','samallocator'].includes(accessRole));
     const planesPanel = document.getElementById('pPlanes');
     if(removePlanesPanel){
       if(planesPanel) planesPanel.remove();
@@ -27190,7 +27836,7 @@ import { getDatabase, ref, get, set } from "https://www.gstatic.com/firebasejs/1
       .replace(/'/g, '&#39;');
   }
   function roleLabel(v){
-    return ({ default:'INSTRUCTOR', odi:'ODI-CO', odt:'ODT', samallocator:'SAM ALOCATOR', observer:'OBSERVADOR' })[String(v || 'default')] || String(v || 'INSTRUCTOR').toUpperCase();
+    return ({ default:'INSTRUCTOR', odi:'ODI-CO', atc:'ATC', odt:'ODT', samallocator:'SAM ALOCATOR', observer:'OBSERVADOR' })[String(v || 'default')] || String(v || 'INSTRUCTOR').toUpperCase();
   }
   function formatConnected(ms){
     const total = Math.max(0, Math.floor((Number(ms) || 0) / 1000));
@@ -27253,7 +27899,7 @@ import { getDatabase, ref, get, set } from "https://www.gstatic.com/firebasejs/1
       summaryBox.innerHTML = '<div class="setca-god-summary-card"><div class="setca-god-card-title">Relación global</div><div class="setca-god-empty">Sin usuarios conectados.</div></div>';
       return;
     }
-    const counts = { default:0, odi:0, odt:0, samallocator:0, observer:0, other:0 };
+    const counts = { default:0, odi:0, atc:0, odt:0, samallocator:0, observer:0, other:0 };
     users.forEach(user=>{
       const key = String(user.role || 'default');
       if(Object.prototype.hasOwnProperty.call(counts, key)) counts[key] += 1;
@@ -27263,6 +27909,7 @@ import { getDatabase, ref, get, set } from "https://www.gstatic.com/firebasejs/1
       `<span class="chip"><strong>${users.length}</strong> total</span>`,
       `<span class="chip"><strong>${counts.default}</strong> instructores</span>`,
       `<span class="chip"><strong>${counts.odi}</strong> ODI-CO</span>`,
+      `<span class="chip"><strong>${counts.atc}</strong> ATC</span>`,
       `<span class="chip"><strong>${counts.odt}</strong> ODT</span>`,
       `<span class="chip"><strong>${counts.samallocator}</strong> SAM ALOCATOR</span>`,
       `<span class="chip"><strong>${counts.observer}</strong> observadores</span>`
@@ -28213,7 +28860,7 @@ import { getDatabase, ref, get, set } from "https://www.gstatic.com/firebasejs/1
       const a = window.__setcaAccess || {};
       if(a.planning || a.freeplay) return true;
       const role = String(a.role || 'default').toLowerCase();
-      return role === 'default' || role === 'odi' || role === 'odico';
+      return role === 'default' || role === 'odi' || role === 'odico' || role === 'atc';
     }catch(_){ return false; }
   }
   function enablePairUi(){
@@ -28635,7 +29282,7 @@ import { getDatabase, ref, get, set } from "https://www.gstatic.com/firebasejs/1
     return isPlanningLike() || r === 'default';
   }
   function roleLabel(r){
-    return ({default:'INSTRUCTOR',odi:'ODI-CO',odico:'ODI-CO',odt:'ODT',samallocator:'SAM ALOCATOR',observer:'OBSERVADOR'})[String(r||'default')] || String(r||'INSTRUCTOR').toUpperCase();
+    return ({default:'INSTRUCTOR',odi:'ODI-CO',odico:'ODI-CO',atc:'ATC',odt:'ODT',samallocator:'SAM ALOCATOR',observer:'OBSERVADOR'})[String(r||'default')] || String(r||'INSTRUCTOR').toUpperCase();
   }
   function refreshAll(){
     ['repaintPlanesList','repaintNav','repaintVuelos','repaintPairs','repaintAlt','repaintGTC','paintAlerts','renderObserverStats'].forEach(fn=>{ try{ if(typeof window[fn] === 'function') window[fn](); }catch(_){ } });
@@ -28690,6 +29337,7 @@ import { getDatabase, ref, get, set } from "https://www.gstatic.com/firebasejs/1
       else if(r === 'odt') box.textContent = 'ODT: enfoque GTC, Ground Asset List, armas tierra-aire y seguimiento táctico.';
       else if(r === 'samallocator') box.textContent = 'SAM ALOCATOR: enfoque GTC, Ground Asset List, armas tierra-aire y seguimiento táctico.';
       else if(r === 'odi' || r === 'odico') box.textContent = 'ODI-CO: foco en vuelos, identificación y coordinación sin tomar autoridad total.';
+      else if(r === 'atc') box.textContent = 'ATC: configuración temporal equivalente a ODI-CO, con trabajo local y sin autoridad total.';
       else if(r === 'observer') box.textContent = 'OBSERVADOR: visualización y estadísticas, sin modificar el estado compartido.';
       else box.textContent = `${roleLabel(r)} · permisos según sala.`;
     }
@@ -30040,7 +30688,7 @@ import { getDatabase, ref, get, set } from "https://www.gstatic.com/firebasejs/1
     catch(_){ return ''; }
   }
   function isOdtLike(){ const r = role(); return r === 'odt' || r === 'samallocator' || document.body.classList.contains('mode-odt-overlay'); }
-  function isOdi(){ const r = role(); return r === 'odi' || r === 'odico' || document.body.classList.contains('mode-odi-overlay'); }
+  function isOdi(){ const r = role(); return r === 'odi' || r === 'odico' || r === 'atc' || document.body.classList.contains('mode-odi-overlay'); }
   function roomKey(){ try{ return (location.hash || '#sala-default').replace(/^#/, '') || 'sala-default'; }catch(_){ return 'sala-default'; } }
   function localTargetsKey(){ return LOCAL_TARGETS_PREFIX + roomKey(); }
   function readLocalTargets(){ try{ return JSON.parse(localStorage.getItem(localTargetsKey()) || '{}') || {}; }catch(_){ return {}; } }
@@ -30720,7 +31368,15 @@ import { getDatabase, ref, get, set } from "https://www.gstatic.com/firebasejs/1
       const color = d.color || (d.type==='arwy' ? 'rgba(56,189,248,.58)' : 'rgba(250,204,21,.52)');
       c.strokeStyle=color; c.fillStyle=color; c.lineWidth=Math.max(.8, Number(d.lw||1));
       if(typeof __applyDrawingLineStyle === 'function') __applyDrawingLineStyle(c, d);
-      if((d.type==='line'||d.type==='arwy'||d.type==='route') && Number.isFinite(+d.ex) && Number.isFinite(+d.ey)){
+      if((d.type==='route'||d.type==='arwy') && Array.isArray(d.pts) && d.pts.length>=2){
+        c.beginPath();
+        d.pts.forEach((point,index)=>{
+          const world=typeof __getDrawingWorldPoint === 'function' ? __getDrawingWorldPoint(d,point) : point;
+          const sp=ptScreen({x:+world.x||0,y:+world.y||0,alt:0,hdg:0});
+          if(index===0) c.moveTo(sp.x,sp.y); else c.lineTo(sp.x,sp.y);
+        });
+        c.stroke();
+      }else if((d.type==='line'||d.type==='arwy'||d.type==='route') && Number.isFinite(+d.ex) && Number.isFinite(+d.ey)){
         const a=ptScreen({x:+d.x||0,y:+d.y||0,alt:0,hdg:0}), b=ptScreen({x:+d.ex||0,y:+d.ey||0,alt:0,hdg:0});
         c.beginPath(); c.moveTo(a.x,a.y); c.lineTo(b.x,b.y); c.stroke();
       }else if(d.type==='circle'){
