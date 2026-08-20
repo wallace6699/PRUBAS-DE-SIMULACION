@@ -5172,6 +5172,7 @@ body.setca-modern-ui #status{padding:3px 7px}
 #setcaSpawnBanner{position:fixed;left:50%;top:68px;transform:translateX(-50%);z-index:9996;display:none;padding:9px 14px;border:1px solid rgba(250,204,21,.55);border-radius:999px;background:rgba(12,16,24,.90);color:#fff7c2;font:800 12px/1 ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;box-shadow:0 14px 36px rgba(0,0,0,.35);pointer-events:none;letter-spacing:.04em}
 body.setca-spawn-armed #setcaSpawnBanner{display:block}
 body.setca-spawn-armed #radar{cursor:copy!important}
+body.setca-spawn-heading #radar{cursor:crosshair!important}
 body.setca-modern-ui .setca-spawn-btn-armed{background:linear-gradient(180deg,rgba(250,204,21,.96),rgba(161,98,7,.96))!important;color:#111827!important;border-color:rgba(250,204,21,.75)!important;box-shadow:0 0 0 1px rgba(250,204,21,.20),0 0 22px rgba(250,204,21,.25)!important}
 /* NAV moderno: tarjeta tipo FMS compacto */
 body.setca-modern-ui #navCards{gap:7px!important;--navCtlW:58px;--navCtlH:21px;--navGap:4px}
@@ -29354,6 +29355,159 @@ import { getDatabase, ref, get, set } from "https://www.gstatic.com/firebasejs/1
     addUnknown:{label:'DESCONOCIDO', idPrefix:'UNK', tipo:'Desconocido', role:'Unknown', spd:650, spdVar:180, altMin:10000, altVar:26000, turn:2.2}
   };
   let pendingSpawn = null;
+  let spawnGuideCanvas = null;
+  let spawnGuideCtx = null;
+  let spawnGuideDpr = 1;
+  function normalizeSpawnHeading(value){
+    return ((Number(value) || 0) % 360 + 360) % 360;
+  }
+  function formatSpawnHeading(value){
+    return String(Math.round(normalizeSpawnHeading(value)) % 360).padStart(3,'0') + '°';
+  }
+  function spawnHeadingBetween(anchor, target){
+    if(!anchor || !target) return 0;
+    return normalizeSpawnHeading(Math.atan2((+target.x || 0)-(+anchor.x || 0),-((+target.y || 0)-(+anchor.y || 0)))*180/Math.PI);
+  }
+  function ensureSpawnGuideCanvas(){
+    if(spawnGuideCanvas && spawnGuideCanvas.isConnected) return spawnGuideCanvas;
+    const radar = document.getElementById('radar');
+    const center = document.getElementById('center') || (radar && radar.parentElement);
+    if(!radar || !center) return null;
+    spawnGuideCanvas = document.createElement('canvas');
+    spawnGuideCanvas.id = 'setcaSpawnHeadingGuide';
+    spawnGuideCanvas.setAttribute('aria-hidden','true');
+    spawnGuideCanvas.style.position = 'absolute';
+    spawnGuideCanvas.style.pointerEvents = 'none';
+    spawnGuideCanvas.style.left = '0px';
+    spawnGuideCanvas.style.top = '0px';
+    spawnGuideCanvas.style.width = '0px';
+    spawnGuideCanvas.style.height = '0px';
+    spawnGuideCanvas.style.zIndex = '7';
+    spawnGuideCanvas.style.background = 'transparent';
+    center.appendChild(spawnGuideCanvas);
+    spawnGuideCtx = spawnGuideCanvas.getContext('2d');
+    return spawnGuideCanvas;
+  }
+  function syncSpawnGuideCanvas(){
+    const overlay = ensureSpawnGuideCanvas();
+    const radar = document.getElementById('radar');
+    const center = document.getElementById('center') || (radar && radar.parentElement);
+    if(!overlay || !radar || !center || !spawnGuideCtx) return null;
+    const radarRect = radar.getBoundingClientRect();
+    const hostRect = center.getBoundingClientRect();
+    const cssW = Math.max(1,Math.round(radarRect.width));
+    const cssH = Math.max(1,Math.round(radarRect.height));
+    overlay.style.left = Math.round(radarRect.left-hostRect.left) + 'px';
+    overlay.style.top = Math.round(radarRect.top-hostRect.top) + 'px';
+    overlay.style.width = cssW + 'px';
+    overlay.style.height = cssH + 'px';
+    spawnGuideDpr = Math.max(1,window.devicePixelRatio || 1);
+    const pxW = Math.max(1,Math.round(cssW*spawnGuideDpr));
+    const pxH = Math.max(1,Math.round(cssH*spawnGuideDpr));
+    if(overlay.width !== pxW) overlay.width = pxW;
+    if(overlay.height !== pxH) overlay.height = pxH;
+    spawnGuideCtx.setTransform(spawnGuideDpr,0,0,spawnGuideDpr,0,0);
+    return {radarRect,cssW,cssH};
+  }
+  function clearSpawnGuide(){
+    try{
+      const metrics = syncSpawnGuideCanvas();
+      if(metrics && spawnGuideCtx) spawnGuideCtx.clearRect(0,0,metrics.cssW,metrics.cssH);
+    }catch(_){ }
+  }
+  function renderSpawnGuide(){
+    try{
+      const metrics = syncSpawnGuideCanvas();
+      if(!metrics || !spawnGuideCtx) return;
+      const c = spawnGuideCtx;
+      c.clearRect(0,0,metrics.cssW,metrics.cssH);
+      if(!pendingSpawn || !pendingSpawn.anchor || typeof toScreen !== 'function') return;
+      const start = toScreen(pendingSpawn.anchor.x,pendingSpawn.anchor.y);
+      let endX = Number.isFinite(pendingSpawn.clientX) ? pendingSpawn.clientX-metrics.radarRect.left : start.x;
+      let endY = Number.isFinite(pendingSpawn.clientY) ? pendingSpawn.clientY-metrics.radarRect.top : start.y;
+      let dx=endX-start.x, dy=endY-start.y;
+      let length=Math.hypot(dx,dy);
+      if(length < 18){
+        const rad=normalizeSpawnHeading(pendingSpawn.heading)*Math.PI/180;
+        dx=Math.sin(rad)*92;
+        dy=-Math.cos(rad)*92;
+        endX=start.x+dx;
+        endY=start.y+dy;
+        length=92;
+      }
+      const ux=dx/length, uy=dy/length;
+      const sideX=-uy, sideY=ux;
+      const headingText=formatSpawnHeading(pendingSpawn.heading);
+
+      c.save();
+      c.lineCap='round';
+      c.lineJoin='round';
+      c.strokeStyle='rgba(255,224,102,.9)';
+      c.fillStyle='rgba(255,224,102,.95)';
+      c.lineWidth=1;
+      c.setLineDash([5,5]);
+      c.beginPath();
+      c.moveTo(start.x,start.y);
+      c.lineTo(endX,endY);
+      c.stroke();
+      c.setLineDash([]);
+      c.beginPath();
+      c.moveTo(endX,endY);
+      c.lineTo(endX-ux*9+sideX*4,endY-uy*9+sideY*4);
+      c.lineTo(endX-ux*9-sideX*4,endY-uy*9-sideY*4);
+      c.closePath();
+      c.fill();
+
+      c.beginPath();
+      c.arc(start.x,start.y,2.5,0,Math.PI*2);
+      c.fill();
+
+      c.font='bold 11px ui-monospace,SFMono-Regular,Menlo,Consolas,monospace';
+      c.textAlign='center';
+      c.textBaseline='middle';
+      const tw=c.measureText(headingText).width;
+      const rawX=start.x+dx*.5+sideX*11;
+      const rawY=start.y+dy*.5+sideY*11;
+      const tx=Math.max(tw/2+5,Math.min(metrics.cssW-tw/2-5,rawX));
+      const ty=Math.max(10,Math.min(metrics.cssH-10,rawY));
+      c.fillStyle='rgba(1,9,5,.78)';
+      c.fillRect(tx-tw/2-4,ty-9,tw+8,18);
+      c.fillStyle='#ffffff';
+      c.fillText(headingText,tx,ty);
+      c.restore();
+    }catch(_){ }
+  }
+  function updateSpawnBanner(){
+    const banner = $('#setcaSpawnBanner');
+    if(!banner || !pendingSpawn) return;
+    banner.textContent = pendingSpawn.anchor
+      ? `${pendingSpawn.tpl.label} · RUMBO ${formatSpawnHeading(pendingSpawn.heading)} · SEGUNDO CLICK CONFIRMA · ESC CANCELA`
+      : `${pendingSpawn.tpl.label} ARMADO · PRIMER CLICK FIJA POSICION · ESC CANCELA`;
+  }
+  function setSpawnAnchor(world, clientX, clientY){
+    if(!pendingSpawn || !world) return false;
+    pendingSpawn.anchor={x:+world.x || 0,y:+world.y || 0};
+    pendingSpawn.clientX=clientX;
+    pendingSpawn.clientY=clientY;
+    pendingSpawn.heading=0;
+    document.body.classList.add('setca-spawn-heading');
+    updateSpawnBanner();
+    renderSpawnGuide();
+    return true;
+  }
+  function updateSpawnHeading(clientX, clientY){
+    if(!pendingSpawn || !pendingSpawn.anchor) return false;
+    const canvas=document.getElementById('radar');
+    if(!canvas || typeof toWorld !== 'function') return false;
+    const rect=canvas.getBoundingClientRect();
+    const world=toWorld(clientX-rect.left,clientY-rect.top);
+    pendingSpawn.clientX=clientX;
+    pendingSpawn.clientY=clientY;
+    pendingSpawn.heading=spawnHeadingBetween(pendingSpawn.anchor,world);
+    updateSpawnBanner();
+    renderSpawnGuide();
+    return true;
+  }
   function uniqueId(prefix){
     const arr = (window.st && Array.isArray(st.planes)) ? st.planes : [];
     let n = arr.length + 1;
@@ -29374,28 +29528,32 @@ import { getDatabase, ref, get, set } from "https://www.gstatic.com/firebasejs/1
       alert('Este rol no tiene permiso para agregar aeronaves.');
       return false;
     }
-    pendingSpawn = { key, tpl:SPAWN_TPL[key], armedAt:now() };
+    clearSpawnGuide();
+    pendingSpawn = { key, tpl:SPAWN_TPL[key], armedAt:now(), anchor:null, heading:0, clientX:null, clientY:null };
     document.body.classList.add('setca-spawn-armed');
+    document.body.classList.remove('setca-spawn-heading');
     $$('#pUnitMgr button').forEach(b=>b.classList.remove('setca-spawn-btn-armed'));
     const btn = document.getElementById(key);
     if(btn) btn.classList.add('setca-spawn-btn-armed');
-    const banner = $('#setcaSpawnBanner');
-    if(banner) banner.textContent = `${pendingSpawn.tpl.label} ARMADO · CLICK EN RADAR PARA COLOCAR · ESC CANCELA`;
+    updateSpawnBanner();
     return true;
   }
   function cancelSpawn(){
     pendingSpawn = null;
     document.body.classList.remove('setca-spawn-armed');
+    document.body.classList.remove('setca-spawn-heading');
     $$('#pUnitMgr button').forEach(b=>b.classList.remove('setca-spawn-btn-armed'));
+    clearSpawnGuide();
   }
-  function spawnAt(tpl, x, y){
+  function spawnAt(tpl, x, y, heading){
     if(!tpl || !canManageAircraft() || !window.st || !Array.isArray(st.planes)) return null;
     const id = uniqueId(tpl.idPrefix || 'R');
     const spd0 = Math.max(0, (Number(tpl.spd)||450) + ((Math.random()*2-1) * (Number(tpl.spdVar)||0)));
     const alt0 = Math.max(0, (Number(tpl.altMin)||10000) + (Math.random() * (Number(tpl.altVar)||0)) | 0);
+    const initialHeading=normalizeSpawnHeading(heading);
     const p = {
       name: nextName(), id, x:+x||0, y:+y||0,
-      hdg:Math.random()*360, tgtHdg:Math.random()*360,
+      hdg:initialHeading, tgtHdg:initialHeading,
       spd:spd0, tgtSpd:spd0, alt:alt0, tgtAlt:alt0,
       turn:Number(tpl.turn)||2, turnBias:null,
       ghosts:[], lastDet:0,
@@ -29410,7 +29568,7 @@ import { getDatabase, ref, get, set } from "https://www.gstatic.com/firebasejs/1
     if(Array.isArray(st.sel) && !st.sel.includes(id)) st.sel.push(id);
     try{ if(typeof window.__setcaMarkSyncStaged === 'function') window.__setcaMarkSyncStaged(p, (window.__SETCA_SYNC_STAGING && window.__SETCA_SYNC_STAGING.planeAddMs) || 1000); }catch(_){ }
     markDirty(p);
-    log(`ALTA: ${p.name}/${p.tipo} colocado por click en radar`);
+    log(`ALTA: ${p.name}/${p.tipo} colocado por click en radar · RUMBO ${formatSpawnHeading(initialHeading)}`);
     refreshAll();
     scheduleShared(1060);
     return p;
@@ -29426,7 +29584,7 @@ import { getDatabase, ref, get, set } from "https://www.gstatic.com/firebasejs/1
         try{ if(typeof flash === 'function') flash(btn); }catch(_){ }
         return false;
       };
-      btn.title = 'Click aquí y luego click en el radar para colocar la aeronave';
+      btn.title = 'Selecciona el tipo, fija la posicion y confirma el rumbo con un segundo click';
       btn.__setcaClickSpawnBound = true;
     });
     const canvas = document.getElementById('radar');
@@ -29438,15 +29596,26 @@ import { getDatabase, ref, get, set } from "https://www.gstatic.com/firebasejs/1
         try{
           const r = canvas.getBoundingClientRect();
           const w = (typeof window.toWorld === 'function') ? window.toWorld(ev.clientX-r.left, ev.clientY-r.top) : toWorld(ev.clientX-r.left, ev.clientY-r.top);
-          spawnAt(pendingSpawn.tpl, w.x, w.y);
+          if(!pendingSpawn.anchor){
+            setSpawnAnchor(w,ev.clientX,ev.clientY);
+          }else{
+            updateSpawnHeading(ev.clientX,ev.clientY);
+            const request=pendingSpawn;
+            spawnAt(request.tpl,request.anchor.x,request.anchor.y,request.heading);
+            cancelSpawn();
+          }
         }catch(e){ console.warn(PATCH_VERSION, 'spawn failed', e); }
-        cancelSpawn();
         ev.preventDefault();
         if(ev.stopImmediatePropagation) ev.stopImmediatePropagation(); else ev.stopPropagation();
+      }, true);
+      canvas.addEventListener('mousemove', function(ev){
+        if(!pendingSpawn || !pendingSpawn.anchor) return;
+        updateSpawnHeading(ev.clientX,ev.clientY);
       }, true);
       canvas.__setcaClickSpawnRadarBound = true;
     }
     document.addEventListener('keydown', (ev)=>{ if(ev.key === 'Escape' && pendingSpawn) cancelSpawn(); }, true);
+    addEventListener('resize', ()=>{ if(pendingSpawn && pendingSpawn.anchor) renderSpawnGuide(); }, true);
   }
 
   /* === Capa de aerovías / corredores principales de Perú (simulada editable) === */
