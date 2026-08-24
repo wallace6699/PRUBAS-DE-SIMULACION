@@ -77,6 +77,7 @@
   const aircraftAddsRef = ref(db, `rooms/${ROOM_ID}/aircraftAdds`);
   const __setcaGtcClientId = 'gtc_client_' + Date.now().toString(36) + '_' + Math.random().toString(36).slice(2, 9);
   let __setcaServerTimeOffsetMs = 0;
+  let __setcaServerMaintenanceActive = false;
   const __planningMode = !!(window.__SETCA_PLANNING_BOOT || (window.__SETCA_isPlanningMode && window.__SETCA_isPlanningMode()));
   const __freePlayMode = !!(window.__SETCA_FREEPLAY_BOOT || (window.__SETCA_isFreePlayMode && window.__SETCA_isFreePlayMode()));
   const __localOnlyMode = !!(window.__SETCA_LOCALONLY_BOOT || (window.__SETCA_isLocalOnlyMode && window.__SETCA_isLocalOnlyMode()));
@@ -105,14 +106,14 @@
     return String((access && access.role) || '').toLowerCase() === 'default';
   }
   function __SETCA_canLaunchGtcMissile(){
-    if(__localOnlyMode) return false;
+    if(__localOnlyMode || __setcaServerMaintenanceActive) return false;
     const access = __SETCA_getAccessForSync();
     if(access && (access.planning || access.freeplay)) return false;
     const role = String((access && access.role) || '').toLowerCase();
     return role === 'default' || role === 'odt' || role === 'samallocator';
   }
   function __SETCA_canWriteSharedState(){
-    if(__localOnlyMode) return false;
+    if(__localOnlyMode || __setcaServerMaintenanceActive) return false;
     const access = __SETCA_getAccessForSync();
     if(access && (access.planning || access.freeplay)) return false;
     return __SETCA_isAuthoritativeWriterRole((access && access.role) || '');
@@ -489,7 +490,7 @@
 
   async function __SETCA_publishAircraftAdded(plane){
     try{
-      if(__localOnlyMode || !plane || !plane.id || !__SETCA_isInstructorAuthority()) return false;
+      if(__localOnlyMode || __setcaServerMaintenanceActive || !plane || !plane.id || !__SETCA_isInstructorAuthority()) return false;
       const planeId = String(plane.id || '').trim();
       if(!planeId) return false;
       const compact = __SETCA_cleanAircraftForIncrementalSync(plane);
@@ -815,7 +816,7 @@
   }
   async function __SETCA_publishAuthoritativeGtcOutcome(impact, result){
     try{
-      if(!impact || !impact.missileId || !__SETCA_isInstructorAuthority()) return false;
+      if(__setcaServerMaintenanceActive || !impact || !impact.missileId || !__SETCA_isInstructorAuthority()) return false;
       const id = String(impact.missileId).replace(/[^a-z0-9_-]/gi, '_').slice(0, 110);
       const now = Date.now();
       const payload = {
@@ -1034,7 +1035,7 @@
 
   async function __SETCA_publishGtcValidationPatch(assetId, samDual){
     try{
-      if(__localOnlyMode) return false;
+      if(__localOnlyMode || __setcaServerMaintenanceActive) return false;
       const role = __SETCA_getSharedWriteRole() || '';
       if(!['default','odt','samallocator'].includes(String(role).toLowerCase())) return false;
       const id = String(assetId || ''); if(!id) return false;
@@ -1084,7 +1085,7 @@
 
   async function __SETCA_publishGtcGlobalState(local){
     try{
-      if(__localOnlyMode) return false;
+      if(__localOnlyMode || __setcaServerMaintenanceActive) return false;
       const role = __SETCA_getSharedWriteRole() || '';
       if(!__SETCA_isGtcGlobalWriterRole(role)) return false;
       const snap = (local && typeof local === 'object') ? local : (window.st || {});
@@ -1737,6 +1738,12 @@ let __setcaLastAppliedRemoteTs = 0;
       const value = Number(snapshot.val());
       if(Number.isFinite(value)) __setcaServerTimeOffsetMs = value;
     });
+    onValue(ref(db, 'setca_admin/serverMaintenance'), snapshot=>{
+      const value = snapshot.val() || {};
+      const expiresAt = Number(value.expiresAt || 0);
+      __setcaServerMaintenanceActive = !!(value.active && (!expiresAt || expiresAt > Date.now() + __setcaServerTimeOffsetMs));
+      try{ window.__SETCA_SERVER_MAINTENANCE_ACTIVE = __setcaServerMaintenanceActive; }catch(_){ }
+    });
     onChildAdded(gtcLaunchesRef, snapshot=>{
       const event = snapshot.val();
       if(!event) return;
@@ -2063,7 +2070,31 @@ function __normalizeMissileStats(src){
   }
   #offBtn{border-color:#b33;background:#3a1111;color:#fff;}
   #exitBtn{border-color:#2f6bb3;background:#0f2238;color:#fff;}
-  #configBtn{border-color:#4d6178;background:#14202d;color:#fff;}
+  #configBtn{
+    display:inline-flex;
+    align-items:center;
+    justify-content:center;
+    width:32px;
+    min-width:32px;
+    max-width:32px;
+    height:32px;
+    min-height:32px;
+    padding:0;
+    border:1px solid rgba(89,207,130,.38);
+    border-radius:7px;
+    background:#0b1c13;
+    color:#fff !important;
+    box-shadow:inset 0 1px 0 rgba(255,255,255,.06),0 2px 8px rgba(0,0,0,.24);
+    font:700 16px/1 ui-sans-serif,system-ui,sans-serif;
+    transition:background .14s ease,border-color .14s ease,box-shadow .14s ease;
+  }
+  #configBtn:hover{background:#10281b;border-color:rgba(85,255,160,.62);}
+  body.setca-modern-ui #configBtn.is-open{
+    background:linear-gradient(180deg,#d3ad16 0%,#927000 100%) !important;
+    color:#fff !important;
+    box-shadow:inset 0 1px 0 rgba(255,255,255,.12),0 0 0 1px rgba(242,201,76,.14);
+  }
+  #configBtn:focus-visible{outline:2px solid #f2c94c;outline-offset:2px;}
 #spiderWebPanel{inset:74px 14px auto auto;width:min(390px,calc(100vw - 28px));max-height:72vh;padding:0;background:#07100a;color:#eaffea;border:1px solid #2a8b55;border-radius:10px;box-shadow:0 12px 30px rgba(0,0,0,.65);overflow:hidden;z-index:1650}
   #spiderWebPanel .close{color:#ff6b6b;top:7px;right:10px}
   #spiderWebContent{display:flex;flex-direction:column;gap:8px;padding:11px;max-height:72vh;box-sizing:border-box}
@@ -3478,23 +3509,28 @@ body[data-setca-role="default"] #pNav{
   width:min(300px, calc(100vw - 24px));
   display:none;
   z-index:9500;
-  border:1px solid rgba(148,178,207,.18);
+  border:1px solid #9aa8b5;
   border-radius:11px;
-  background:rgba(10,16,24,.96);
-  box-shadow:0 12px 30px rgba(0,0,0,.34);
-  backdrop-filter:blur(8px);
-  color:#eaf3ff;
+  background:#d9e0e7;
+  box-shadow:0 16px 36px rgba(0,0,0,.32),inset 0 1px 0 rgba(255,255,255,.82);
+  color:#182433;
   overflow:hidden;
 }
 .config-pop.open{display:block;}
-.config-pop-head{display:flex;align-items:center;justify-content:space-between;padding:8px 10px;border-bottom:1px solid rgba(148,178,207,.14);font-weight:700;letter-spacing:.15px;font-size:12px;}
+.config-pop-head{display:flex;align-items:center;justify-content:space-between;padding:8px 10px;border-bottom:1px solid #aeb9c4;background:#eef2f6;color:#172033;font-weight:800;letter-spacing:.15px;font-size:12px;}
 .config-pop-head button{min-width:26px;height:26px;padding:0;border-radius:7px;}
 .config-pop-body{padding:8px;display:flex;flex-direction:column;gap:6px;}
 .config-pop .btn.mini{min-height:26px;height:26px;padding:0 8px;font-size:11px;border-radius:7px;}
-.config-card{border:1px solid rgba(148,178,207,.10);border-radius:9px;padding:8px;background:rgba(255,255,255,.025);display:flex;flex-direction:column;gap:6px;}
-.config-card-title{font-size:11px;font-weight:800;color:#cddcf0;letter-spacing:.2px;text-transform:uppercase;line-height:1;}
+.config-card{border:1px solid #b7c1cb;border-radius:9px;padding:8px;background:#f5f7f9;display:flex;flex-direction:column;gap:6px;box-shadow:inset 0 1px 0 #fff;}
+.config-card-title{font-size:11px;font-weight:850;color:#243244;letter-spacing:.2px;text-transform:uppercase;line-height:1;}
 .config-card .cmd-row-2{justify-content:flex-start;gap:6px;flex-wrap:wrap;}
 .config-card .pred-inline{justify-content:flex-start;flex:0 1 auto;gap:6px;}
+#configPanel :is(.chip,.pill){
+  border-color:#9caaba !important;
+  background:#fff !important;
+  color:#1f2937 !important;
+  box-shadow:inset 0 1px 1px rgba(15,23,42,.05);
+}
 .config-pop [data-label-field].label-on{
   background:linear-gradient(180deg, rgba(255,223,92,.98), rgba(245,194,43,.96));
   color:#ffffff !important;
@@ -5690,7 +5726,9 @@ body.setca-gal-final-collapsed:is([data-setca-role="odt"],[data-setca-role="sama
   body.observer-mode header #observerBtn,
   body.observer-mode header #exitBtn,
   body.observer-mode header #configBtn{
-    display:inline-block !important;
+    display:inline-flex !important;
+    align-items:center;
+    justify-content:center;
   }
 
   body.mode-odi-overlay #left,
@@ -6054,8 +6092,20 @@ body.setca-gal-final-collapsed:is([data-setca-role="odt"],[data-setca-role="sama
 .setca-god-form input{width:100%;box-sizing:border-box;background:#0d1510;border:1px solid rgba(255,255,255,.13);border-radius:8px;color:#eef5ef;padding:7px 8px;outline:none}
 .setca-god-form input:focus{border-color:rgba(255,224,102,.45)}
 .setca-god-actions,.setca-god-user-actions{display:flex;flex-wrap:wrap;gap:6px}
+.setca-god-groups{display:flex;flex-direction:column;gap:6px;max-height:180px;overflow:auto;padding-right:2px}
+.setca-god-group-item{display:flex;align-items:center;justify-content:space-between;gap:8px;padding:7px 8px;border:1px solid rgba(255,255,255,.09);border-radius:8px;background:rgba(255,255,255,.025)}
+.setca-god-group-main{min-width:0;display:flex;flex-direction:column;gap:2px}
+.setca-god-group-main strong{font-size:12px;color:#fff;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.setca-god-group-main small{font-size:10px;color:#b9c0bb;line-height:1.25}
+.setca-god-group-delete{flex:0 0 auto;border-color:rgba(248,113,113,.38)!important;color:#fecaca!important}
+.setca-god-server-maintenance{margin-top:10px;border-color:rgba(248,113,113,.22);display:flex;align-items:center;justify-content:space-between;gap:12px}
+.setca-god-server-copy{min-width:0}
+.setca-god-server-copy .setca-god-card-title{margin-bottom:3px}
+.setca-god-server-copy small{display:block;color:#b9c0bb;font-size:11px;line-height:1.35}
+#setcaGodClearServer{flex:0 0 auto;border-color:#b91c1c!important;background:#541414!important;color:#fff!important;min-width:150px}
+#setcaGodClearServer:hover{background:#7f1d1d!important}
 .setca-god-empty{opacity:.72;font-size:12px;padding:8px 4px}
-@media (max-width:760px){.setca-god-grid{grid-template-columns:1fr}}
+@media (max-width:760px){.setca-god-grid{grid-template-columns:1fr}.setca-god-server-maintenance{align-items:stretch;flex-direction:column}#setcaGodClearServer{width:100%}}
 
 /* === Acceso inicial obligatorio === */
 body.setca-access-locked .app{
@@ -8459,6 +8509,20 @@ body.setca-modern-ui #gtcAssetListBtn{
   box-shadow:var(--setca-local-button-shadow) !important;
   text-shadow:var(--setca-local-button-text-shadow) !important;
 }
+/* Configuración clara: los controles inactivos usan azul; los activos conservan el amarillo global. */
+body.setca-modern-ui #configPanel.config-pop button:not(:is(.active,.hi,.is-on,.label-on,[aria-pressed="true"])){
+  --setca-local-button-state:off;
+  --setca-local-button-bg:linear-gradient(180deg,#2563eb 0%,#1d4ed8 100%);
+  --setca-local-button-border:#60a5fa;
+  --setca-local-button-color:#ffffff;
+  --setca-local-button-shadow:inset 0 1px 0 rgba(255,255,255,.24),0 2px 6px rgba(30,64,175,.24);
+  --setca-local-button-text-shadow:0 1px 1px rgba(15,23,42,.48);
+  background:var(--setca-local-button-bg) !important;
+  border-color:var(--setca-local-button-border) !important;
+  color:var(--setca-local-button-color) !important;
+  box-shadow:var(--setca-local-button-shadow) !important;
+  text-shadow:var(--setca-local-button-text-shadow) !important;
+}
 body.setca-modern-ui :is(
   #systemsBtn,
   #alumnoBtn,
@@ -8585,7 +8649,7 @@ body.setca-modern-ui :is(
   <button id="salasBtn" class="btn focusable" type="button">📡 Salas</button>
   <button id="offBtn" class="btn focusable" type="button" title="Salir de SETCA">⏻ OFF</button>
   <button id="exitBtn" class="btn focusable" type="button" title="Volver a la pantalla principal">↩ Salir</button>
-  <button id="configBtn" class="btn focusable" type="button" title="Configuración local">⚙ Config</button>
+  <button id="configBtn" class="btn focusable" type="button" title="Configuración local" aria-label="Configuración local" aria-haspopup="true" aria-controls="configPanel" aria-expanded="false"><span aria-hidden="true">⚙</span></button>
 </header>
   
   <aside id="left">
@@ -12383,6 +12447,8 @@ function getPlaneConfiguredVerticalRateFpm(p){
 }
 function getPlaneActiveVerticalRateFpm(p){
   const fp = getPlaneFlightProcedure(p);
+  const manualProcedureRate = Number(fp && fp.manualVerticalRateFpm);
+  if(Number.isFinite(manualProcedureRate) && manualProcedureRate > 0) return manualProcedureRate;
   const procedureRate = Number(fp && fp.verticalRateFpm);
   if(Number.isFinite(procedureRate) && procedureRate > 0) return procedureRate;
   return getPlaneConfiguredVerticalRateFpm(p);
@@ -12506,12 +12572,13 @@ function updatePlaneFlightProcedure(p){
   if(String(fp.phase || '') === 'rollout'){
     p.x = tx;
     p.y = ty;
-    p.alt = 0;
     p.tgtAlt = 0;
     p.tgtSpd = 0;
-    fp.verticalRateFpm = 700;
-    if((+p.spd || 0) <= 1){
+    fp.verticalRateFpm = 500;
+    if((+p.alt || 0) <= 1 && (+p.spd || 0) <= 1){
+      p.alt = 0;
       p.spd = 0;
+      p.vsFpm = 0;
       p.speedRateKmhps = 0;
       p.flightProcedure = null;
       try{ if(typeof logEvent === 'function') logEvent(`ARR COMPLETADO: ${p.name || p.id}`); }catch(_){ }
@@ -12526,27 +12593,34 @@ function updatePlaneFlightProcedure(p){
   const glideAltFt = Math.max(0,distanceNm * 300);
   const currentAltFt = Math.max(0,+p.alt || 0);
   const desiredAltFt = Math.min(currentAltFt,glideAltFt);
+  const defaultSpeedKmh = (distanceNm > 20 ? 250 : distanceNm > 10 ? 210 : distanceNm > 3 ? 170 : distanceNm > 0.7 ? 145 : 130) * KTS2KMH;
+  const manualAltFt = Number(fp.manualAltFt);
+  const manualSpeedKmh = Number(fp.manualSpeedKmh);
+  const commandedAltFt = Number.isFinite(manualAltFt) ? Math.max(0,manualAltFt) : desiredAltFt;
+  const commandedSpeedKmh = Number.isFinite(manualSpeedKmh) ? Math.max(0,manualSpeedKmh) : defaultSpeedKmh;
   const minutesToTarget = Math.max(0.35,distanceNm / Math.max(120,speedKts) * 60);
-  const requiredFpm = Math.max(500,Math.min(6000,(currentAltFt-desiredAltFt) / minutesToTarget));
+  const altitudeToResolveFt = Number.isFinite(manualAltFt)
+    ? Math.abs(currentAltFt-commandedAltFt)
+    : currentAltFt;
+  const requiredFpm = Math.max(500,Math.min(6000,altitudeToResolveFt / minutesToTarget));
 
   fp.phase = distanceNm > 20 ? 'arrival' : distanceNm > 3 ? 'approach' : 'final';
   fp.distanceNm = distanceNm;
-  fp.verticalRateFpm = desiredAltFt <= 1000
+  fp.verticalRateFpm = commandedAltFt <= 1000
     ? Math.max(500,Math.min(1000,requiredFpm))
     : Math.max(900,requiredFpm);
   p.routeEnabled = false;
   p.routeManualUntil = 0;
   p.turnBias = null;
   p.tgtHdg = setcaProcedureBearing(p,target);
-  p.tgtAlt = desiredAltFt;
-  p.tgtSpd = (distanceNm > 20 ? 250 : distanceNm > 10 ? 210 : distanceNm > 3 ? 170 : distanceNm > 0.7 ? 145 : 130) * KTS2KMH;
+  p.tgtAlt = commandedAltFt;
+  p.tgtSpd = commandedSpeedKmh;
 
-  if(distanceNm <= 0.16 && currentAltFt <= 90){
+  if(distanceNm <= 0.10 && currentAltFt <= 100){
     fp.phase = 'rollout';
     fp.touchdownAt = Date.now();
     p.x = tx;
     p.y = ty;
-    p.alt = 0;
     p.tgtAlt = 0;
     p.tgtSpd = 0;
     return true;
@@ -13802,6 +13876,16 @@ function drawPeruMap(){
 }
 
 function drawFlightProcedureGuidance(){
+  let instructorOnly = false;
+  try{
+    const access = window.__setcaAccess || {};
+    if(!access.planning && !access.freeplay){
+      instructorOnly = typeof window.__SETCA_isInstructorAuthority === 'function'
+        ? !!window.__SETCA_isInstructorAuthority()
+        : String(access.role || document.body.getAttribute('data-setca-role') || '').toLowerCase() === 'default';
+    }
+  }catch(_){ instructorOnly = false; }
+  if(!instructorOnly) return;
   if(!window.st || !Array.isArray(st.planes)) return;
   ctx.save();
   for(const p of st.planes){
@@ -17390,6 +17474,11 @@ function __SETCA_setCommandSpd(p, value){
   if(!p) return 0;
   const spd = Math.max(0, Number(value) || 0);
   if(__SETCA_routeAircraftPatchToInstructor(p, {tgtSpd:spd}, 'speed')) return spd;
+  const activeProcedure = getPlaneFlightProcedure(p);
+  if(activeProcedure && activeProcedure.mode === 'arrival'){
+    activeProcedure.manualSpeedKmh = spd;
+    activeProcedure.manualSpeedAt = Date.now();
+  }
   p.tgtSpd = spd;
   try{ if(window.__SETCA_markAircraftDirty) window.__SETCA_markAircraftDirty(p); }catch(_){ }
   if(__SETCA_isImmediatePlanningMode()){
@@ -17404,6 +17493,11 @@ function __SETCA_setCommandAlt(p, value){
   if(!p) return 0;
   const alt = Math.max(0, Number(value) || 0);
   if(__SETCA_routeAircraftPatchToInstructor(p, {tgtAlt:alt}, 'altitude')) return alt;
+  const activeProcedure = getPlaneFlightProcedure(p);
+  if(activeProcedure && activeProcedure.mode === 'arrival'){
+    activeProcedure.manualAltFt = alt;
+    activeProcedure.manualAltAt = Date.now();
+  }
   p.tgtAlt = alt;
   try{ if(window.__SETCA_markAircraftDirty) window.__SETCA_markAircraftDirty(p); }catch(_){ }
   if(__SETCA_isImmediatePlanningMode()){
@@ -19003,10 +19097,25 @@ requestAnimationFrame(()=>{ repaintPlanesList(); repaintNav(); repaintStudent();
     if(!configBtn){
       configBtn = document.createElement('button');
       configBtn.id = 'configBtn';
-      configBtn.textContent = '⚙ Config';
-      configBtn.title = 'Configuración local';
             try{ exitBtn.insertAdjacentElement('afterend', configBtn); }
       catch(_){ hdr.appendChild(configBtn); }
+    }
+    configBtn.classList.add('btn','focusable');
+    configBtn.type = 'button';
+    configBtn.title = 'Configuración local';
+    configBtn.setAttribute('aria-label','Configuración local');
+    configBtn.setAttribute('aria-haspopup','true');
+    configBtn.setAttribute('aria-controls','configPanel');
+    configBtn.setAttribute('aria-expanded','false');
+    configBtn.innerHTML = '<span aria-hidden="true">⚙</span>';
+    function setConfigPanelOpen(panel, open){
+      if(!panel) return;
+      const next = !!open;
+      panel.classList.toggle('open',next);
+      configBtn.classList.toggle('is-open',next);
+      configBtn.setAttribute('aria-expanded',next ? 'true' : 'false');
+      if(next) configBtn.style.setProperty('border-color','#f2c94c','important');
+      else configBtn.style.removeProperty('border-color');
     }
     function ensureConfigPanel(){
       let panel = document.getElementById('configPanel');
@@ -19017,7 +19126,7 @@ requestAnimationFrame(()=>{ repaintPlanesList(); repaintNav(); repaintStudent();
       panel.innerHTML = `
         <div class="config-pop-head">
           <span>Configuración</span>
-          <button type="button" id="configCloseBtn" class="btn mini focusable">×</button>
+          <button type="button" id="configCloseBtn" class="btn mini focusable" aria-label="Cerrar configuración" title="Cerrar configuración">×</button>
         </div>
         <div class="config-pop-body"></div>`;
       document.body.appendChild(panel);
@@ -19127,17 +19236,17 @@ requestAnimationFrame(()=>{ repaintPlanesList(); repaintNav(); repaintStudent();
       const closeBtn = panel.querySelector('#configCloseBtn');
       if(closeBtn && !closeBtn.__setcaWired){
         closeBtn.__setcaWired = true;
-        closeBtn.addEventListener('click', ()=> panel.classList.remove('open'));
+        closeBtn.addEventListener('click', ()=> setConfigPanelOpen(panel,false));
       }
       if(!panel.__setcaOutsideWired){
         panel.__setcaOutsideWired = true;
         document.addEventListener('mousedown', (ev)=>{
           if(!panel.classList.contains('open')) return;
           if(panel.contains(ev.target) || configBtn.contains(ev.target)) return;
-          panel.classList.remove('open');
+          setConfigPanelOpen(panel,false);
         });
         document.addEventListener('keydown', (ev)=>{
-          if(ev.key === 'Escape') panel.classList.remove('open');
+          if(ev.key === 'Escape') setConfigPanelOpen(panel,false);
         });
       }
       try{ if(typeof window.__updateLocalUI === 'function') window.__updateLocalUI(); }catch(_){ }
@@ -19148,7 +19257,7 @@ requestAnimationFrame(()=>{ repaintPlanesList(); repaintNav(); repaintStudent();
       configBtn.__setcaWired = true;
       configBtn.addEventListener('click', ()=>{
         const panel = ensureConfigPanel();
-        panel.classList.toggle('open');
+        setConfigPanelOpen(panel,!panel.classList.contains('open'));
         try{ if(typeof window.__updateLocalUI === 'function') window.__updateLocalUI(); }catch(_){ }
       });
     }
@@ -19861,6 +19970,7 @@ requestAnimationFrame(()=>{ repaintPlanesList(); repaintNav(); repaintStudent();
   const canPublishDynamic = ()=>{
     try{
       if(window.__SETCA_isLocalOnlyMode && window.__SETCA_isLocalOnlyMode()) return false;
+      if(window.__SETCA_SERVER_MAINTENANCE_ACTIVE) return false;
       if(window.__SETCA_isInstructorAuthority) return !!window.__SETCA_isInstructorAuthority();
       return String((window.__setcaAccess && window.__setcaAccess.role) || '').toLowerCase() === 'default';
     }catch(_){ return false; }
@@ -19872,6 +19982,7 @@ requestAnimationFrame(()=>{ repaintPlanesList(); repaintNav(); repaintStudent();
     window.launch = function(launcherId,targetId,type){
       const result = origLaunch.apply(this, arguments);
       try{
+        if(!canPublishDynamic()) return result;
         const L = (window.st.planes||[]).find(p=>p.id===launcherId);
         const T = (window.st.planes||[]).find(p=>p.id===targetId);
         const missile = (window.st.missiles||[]).slice(-1)[0]; // last missile
@@ -21555,7 +21666,7 @@ document.addEventListener('keydown', (ev)=>{
   <div class="setca-gate-dialog">
     <div class="setca-gate-head">
       <div>
-        <div class="setca-gate-kicker-row"><button type="button" id="setcaGodDot" class="setca-god-dot" aria-label="Abrir Modo Dios" title="Modo Dios">D</button><div class="setca-gate-kicker">Acceso inicial obligatorio</div></div>
+        <div class="setca-gate-kicker-row"><button type="button" id="setcaGodDot" class="setca-god-dot" aria-label="Abrir ADMINISTRATOR" title="ADMINISTRATOR">A</button><div class="setca-gate-kicker">Acceso inicial obligatorio</div></div>
         <h2>Ingreso a SETCA</h2>
         <p>Completa los 3 pasos en orden antes de entrar a la plataforma.</p>
       </div>
@@ -21682,8 +21793,8 @@ document.addEventListener('keydown', (ev)=>{
   <div class="setca-god-dialog">
     <div class="setca-god-head">
       <div>
-        <div class="setca-god-kicker">Modo Dios</div>
-        <h3>Control total</h3>
+        <div class="setca-god-kicker">Administración del sistema</div>
+        <h3>ADMINISTRATOR</h3>
       </div>
       <div class="setca-god-head-actions">
         <button type="button" id="setcaGodRefresh" class="btn mini">⟳</button>
@@ -21713,8 +21824,17 @@ document.addEventListener('keydown', (ev)=>{
         </div>
         <div class="setca-god-card-title" style="margin-top:10px;">Conectados</div>
         <div id="setcaGodUsers" class="setca-god-users"></div>
+        <div class="setca-god-card-title" style="margin-top:10px;">Grupos de la sala</div>
+        <div id="setcaGodGroups" class="setca-god-groups"><div class="setca-god-empty">Cargando grupos...</div></div>
       </section>
     </div>
+    <section class="setca-god-card setca-god-server-maintenance">
+      <div class="setca-god-server-copy">
+        <div class="setca-god-card-title">Mantenimiento global</div>
+        <small>Expulsa las sesiones y limpia los datos operativos de todas las salas. Conserva nombres, claves y límites.</small>
+      </div>
+      <button type="button" id="setcaGodClearServer" class="btn mini">LIMPIAR SERVIDOR</button>
+    </section>
   </div>
 </div>
 
@@ -24809,7 +24929,14 @@ document.querySelectorAll('#pCmdBody .btn').forEach(btn=>{
       return true;
     }
 
-    if(Number.isFinite(verticalRateVal) && verticalRateVal > 0) p.verticalRateFpm = verticalRateVal;
+    if(Number.isFinite(verticalRateVal) && verticalRateVal > 0){
+      p.verticalRateFpm = verticalRateVal;
+      const activeProcedure = getPlaneFlightProcedure(p);
+      if(activeProcedure && activeProcedure.mode === 'arrival'){
+        activeProcedure.manualVerticalRateFpm = verticalRateVal;
+        activeProcedure.manualVerticalRateAt = Date.now();
+      }
+    }
     if(Number.isFinite(altVal)) __SETCA_setCommandAlt(p, altFromUi(altVal));
     if(Number.isFinite(speedCommandKmh)) __SETCA_setCommandSpd(p, speedCommandKmh);
     if(headingEdited) __SETCA_setCommandHdg(p, hdgVal);
@@ -26750,7 +26877,7 @@ import { getAuth } from "https://www.gstatic.com/firebasejs/10.12.3/firebase-aut
       const lock = __roomInstructorLocks[String(roomId || 'sala-default')];
       if(!lock || typeof lock !== 'object') return null;
       const cs = String(lock.callsign || '').trim();
-      const active = !!(cs && Number(lock.expiresAt || 0) > Date.now());
+      const active = !!(cs && Number(lock.expiresAt || 0) > __instructorNow());
       return active ? cs : null;
     }catch(_){ return null; }
   }
@@ -26762,6 +26889,7 @@ import { getAuth } from "https://www.gstatic.com/firebasejs/10.12.3/firebase-aut
         __roomInstructorUnsubs[id] = onValue(ref(db, __roomInstructorLockPath(id)), snap=>{
           __roomInstructorLocks[id] = snap.exists() ? (snap.val() || null) : null;
           renderRooms();
+          updateGateUI();
         });
       });
       if(!__roomInstructorRenderTick){
@@ -26786,7 +26914,9 @@ import { getAuth } from "https://www.gstatic.com/firebasejs/10.12.3/firebase-aut
   function updateGateUI(){
     const roleReady = !!gateState.role;
     const callsignReady = roleReady && gateState.callsign.trim().length >= 2;
-    const roomReady = roomModeValid();
+    const selectedInstructor = gateMode === 'join' && gateState.room ? __activeInstructorForRoom(gateState.room) : null;
+    const instructorOccupied = String(gateState.role || '').toLowerCase() === 'default' && !!selectedInstructor;
+    const roomReady = roomModeValid() && !instructorOccupied;
 
     setStepState(stepEls.role, roleReady ? 'done' : 'active');
     setStepState(stepEls.callsign, !roleReady ? '' : (callsignReady ? 'done' : 'active'));
@@ -26813,7 +26943,11 @@ import { getAuth } from "https://www.gstatic.com/firebasejs/10.12.3/firebase-aut
 
     hints.role.textContent = roleReady ? ('Rol elegido: ' + roleToLabel(gateState.role)) : 'Selecciona un rol para continuar.';
     hints.callsign.textContent = roleReady ? (callsignReady ? ('Callsign listo: ' + gateState.callsign.trim()) : 'Ingresa un callsign de al menos 2 caracteres.') : 'Primero elige el rol.';
-    hints.join.textContent = callsignReady ? (gateState.room ? ('Sala elegida: ' + roomLabel(gateState.room)) : 'Selecciona una sala existente.') : 'Primero define callsign.';
+    hints.join.textContent = callsignReady
+      ? (instructorOccupied
+          ? ('Sala ocupada por el instructor ' + selectedInstructor + '. Elige otra sala o un rol diferente.')
+          : (gateState.room ? ('Sala elegida: ' + roomLabel(gateState.room)) : 'Selecciona una sala existente.'))
+      : 'Primero define callsign.';
     hints.create.textContent = callsignReady ? 'Escribe nombre de sala y una clave obligatoria.' : 'Primero define callsign.';
 
     joinTab.classList.toggle('active', gateMode === 'join');
@@ -27321,6 +27455,7 @@ import { getAuth } from "https://www.gstatic.com/firebasejs/10.12.3/firebase-aut
 
   const __INSTRUCTOR_LOCK_TTL_MS = 16000;
   const __INSTRUCTOR_LOCK_HEARTBEAT_MS = 5000;
+  let __instructorServerTimeOffsetMs = 0;
   let __instructorLockTimer = null;
   let __instructorLockRoom = '';
   let __instructorLockUid = '';
@@ -27329,34 +27464,45 @@ import { getAuth } from "https://www.gstatic.com/firebasejs/10.12.3/firebase-aut
   let __instructorBannerLast = null;
   let __instructorBannerTick = null;
 
+  try{
+    onValue(ref(db, '.info/serverTimeOffset'), snap=>{
+      const value = Number(snap.val() || 0);
+      if(Number.isFinite(value)) __instructorServerTimeOffsetMs = value;
+    });
+  }catch(_){ }
+
+  function __instructorNow(){
+    return Date.now() + (Number(__instructorServerTimeOffsetMs) || 0);
+  }
+
   function __isInstructorAccess(access){
     return !!(access && !access.planning && !access.freeplay && String(access.role || '').toLowerCase() === 'default');
   }
   function __getClientUid(){
     try{
-      const locked = sessionStorage.getItem('setca_instructor_lock_uid_v1');
+      const locked = sessionStorage.getItem('setca_instructor_lock_uid_v2');
       if(locked) return String(locked);
+      const legacy = sessionStorage.getItem('setca_instructor_lock_uid_v1');
+      if(legacy){
+        sessionStorage.setItem('setca_instructor_lock_uid_v2', String(legacy));
+        return String(legacy);
+      }
     }catch(_){ }
+    let authUid = '';
     try{
       if(auth && auth.currentUser && auth.currentUser.uid){
-        const v = String(auth.currentUser.uid);
-        try{ sessionStorage.setItem('setca_instructor_lock_uid_v1', v); }catch(_){ }
-        return v;
+        authUid = String(auth.currentUser.uid);
       }
     }catch(_){ }
+    if(!authUid){ try{ authUid = String(window.currentUID || ''); }catch(_){ } }
     try{
-      if(window.currentUID){
-        const v = String(window.currentUID);
-        try{ sessionStorage.setItem('setca_instructor_lock_uid_v1', v); }catch(_){ }
-        return v;
-      }
-    }catch(_){ }
-    try{
-      let sid = sessionStorage.getItem('setca_gate_client_uid_v1');
-      if(!sid){ sid = 'tab-' + Math.random().toString(36).slice(2) + '-' + Date.now().toString(36); sessionStorage.setItem('setca_gate_client_uid_v1', sid); }
-      try{ sessionStorage.setItem('setca_instructor_lock_uid_v1', sid); }catch(_){ }
+      const nonce = (window.crypto && typeof window.crypto.randomUUID === 'function')
+        ? window.crypto.randomUUID()
+        : (Math.random().toString(36).slice(2) + '-' + Date.now().toString(36));
+      const sid = (authUid || 'anon') + ':tab:' + nonce;
+      sessionStorage.setItem('setca_instructor_lock_uid_v2', sid);
       return sid;
-    }catch(_){ return 'tab-' + Date.now().toString(36) + Math.random().toString(36).slice(2); }
+    }catch(_){ return (authUid || 'anon') + ':tab:' + Date.now().toString(36) + Math.random().toString(36).slice(2); }
   }
   function __roomInstructorLockPath(roomId){
     return `rooms/${String(roomId || 'sala-default')}/instructorLock`;
@@ -27365,16 +27511,13 @@ import { getAuth } from "https://www.gstatic.com/firebasejs/10.12.3/firebase-aut
     const room = String(roomId || currentHashRoom() || 'sala-default');
     const uid = __getClientUid();
     const cs = String(callsign || 'INSTRUCTOR').trim() || 'INSTRUCTOR';
-    const now = Date.now();
+    const now = __instructorNow();
     const lockRef = ref(db, __roomInstructorLockPath(room));
     const result = await runTransaction(lockRef, (current)=>{
       const cur = (current && typeof current === 'object') ? current : null;
       const owner = cur ? String(cur.uid || '') : '';
       const expiresAt = cur ? Number(cur.expiresAt || 0) : 0;
-      // SETCA v43.1: el bloqueo de instructor queda como semaforo informativo.
-      // Antes, una sesion anterior podia dejar la sala bloqueada e impedir entrar como INSTRUCTOR.
-      // Ahora el instructor autenticado puede tomar autoridad de una sala normal; el ultimo ingreso conserva el heartbeat.
-      if(!owner || owner === uid || expiresAt <= now || true){
+      if(!owner || owner === uid || expiresAt <= now){
         return {
           uid,
           callsign: cs,
@@ -27382,17 +27525,16 @@ import { getAuth } from "https://www.gstatic.com/firebasejs/10.12.3/firebase-aut
           room,
           since: (owner === uid && cur && Number(cur.since || 0)) ? Number(cur.since || 0) : now,
           updatedAt: now,
-          expiresAt: now + __INSTRUCTOR_LOCK_TTL_MS,
-          advisory:true
+          expiresAt: now + __INSTRUCTOR_LOCK_TTL_MS
         };
       }
       return;
     });
     const val = result && result.snapshot && result.snapshot.val ? (result.snapshot.val() || null) : null;
-    if(result && result.committed){
+    if(result && result.committed && val && String(val.uid || '') === uid){
       __instructorLockRoom = room;
       __instructorLockUid = uid;
-      try{ sessionStorage.setItem('setca_instructor_lock_uid_v1', uid); }catch(_){ }
+      try{ sessionStorage.setItem('setca_instructor_lock_uid_v2', uid); }catch(_){ }
       return { ok:true, lock: val };
     }
     return { ok:false, lock: val };
@@ -27413,6 +27555,7 @@ import { getAuth } from "https://www.gstatic.com/firebasejs/10.12.3/firebase-aut
         if(cur && String(cur.uid || '') === uid) return null;
         return current;
       });
+      try{ sessionStorage.removeItem('setca_instructor_lock_uid_v2'); }catch(_){ }
       try{ sessionStorage.removeItem('setca_instructor_lock_uid_v1'); }catch(_){ }
     }catch(err){ console.warn('No se pudo liberar instructorLock', err); }
   }
@@ -27437,7 +27580,7 @@ import { getAuth } from "https://www.gstatic.com/firebasejs/10.12.3/firebase-aut
     const beat = async ()=>{
       try{
         const res = await __reserveInstructorLock(room, callsign);
-        if(!res.ok){ console.warn('Instructor lock advisory: no bloquea ingreso', res.lock); }
+        if(!res.ok) __handleInstructorLockLost(res.lock);
       }catch(err){ console.warn('Instructor lock heartbeat error', err); }
     };
     beat();
@@ -27501,6 +27644,25 @@ import { getAuth } from "https://www.gstatic.com/firebasejs/10.12.3/firebase-aut
     if(!meta.private) return { ok:true, private:false };
     if(String(meta.password || '') === String(password || '')) return { ok:true, private:true };
     return { ok:false, message:'Clave incorrecta para la sala seleccionada.' };
+  }
+
+  async function __SETCA_serverMaintenanceStatus(){
+    try{
+      const maintenanceRef = ref(db, 'setca_admin/serverMaintenance');
+      const snap = await get(maintenanceRef);
+      if(!snap.exists()) return { blocked:false };
+      const value = snap.val() || {};
+      const active = !!value.active;
+      const expiresAt = Number(value.expiresAt || 0);
+      if(!active || (expiresAt && expiresAt <= __instructorNow())){
+        try{ await set(maintenanceRef, null); }catch(_){ }
+        return { blocked:false };
+      }
+      return { blocked:true, message:'El servidor está en mantenimiento. Espera unos segundos antes de ingresar.' };
+    }catch(err){
+      console.warn('SETCA maintenance status check failed', err);
+      return { blocked:false };
+    }
   }
 
   async function createPrivateRoom(roomId, password){
@@ -27587,6 +27749,8 @@ import { getAuth } from "https://www.gstatic.com/firebasejs/10.12.3/firebase-aut
     if(!gateState.role){ setError('Debes elegir un rol.'); return; }
     if(gateState.callsign.trim().length < 2){ setError('Debes ingresar un callsign válido.'); return; }
     if(!requireMasterAccessKey()) return;
+    const maintenance = await __SETCA_serverMaintenanceStatus();
+    if(maintenance.blocked){ setError(maintenance.message); return; }
 
     let chosenRoom = '';
     if(gateMode === 'join'){
@@ -27699,7 +27863,7 @@ import { getAuth } from "https://www.gstatic.com/firebasejs/10.12.3/firebase-aut
       if(__isInstructorAccess(saved)){
         try{
           const reserved = await __reserveInstructorLock(saved.room || currentHashRoom(), saved.callsign || 'INSTRUCTOR');
-          if(!reserved.ok){ console.warn('Instructor lock advisory restore: no bloquea ingreso', reserved.lock); }
+          if(!reserved.ok){ __openAccessGateFresh(__formatInstructorLockError(reserved.lock)); return; }
         }catch(err){ console.warn('Instructor lock restore error', err); __openAccessGateFresh('No se pudo validar el instructor de la sala.'); return; }
       }
       unlockWithAccess(saved);
@@ -27752,7 +27916,7 @@ import { getAuth } from "https://www.gstatic.com/firebasejs/10.12.3/firebase-aut
 </script>
 
 <script type="module">
-import { getDatabase, ref, get, set } from "https://www.gstatic.com/firebasejs/10.12.3/firebase-database.js";
+import { getDatabase, ref, get, set, runTransaction } from "https://www.gstatic.com/firebasejs/10.12.3/firebase-database.js";
 
 (function(){
   const db = getDatabase();
@@ -27762,6 +27926,7 @@ import { getDatabase, ref, get, set } from "https://www.gstatic.com/firebasejs/1
   const ADMIN_KEY = 'setca_dios_mode_v1';
   const KICK_TTL_MS = 30000;
   const KICK_DELIVERY_MS = 3500;
+  const SERVER_CLEAR_KICK_TTL_MS = 120000;
   const dot = document.getElementById('setcaGodDot');
   const modal = document.getElementById('setcaGodModal');
   const closeBtn = document.getElementById('setcaGodClose');
@@ -27770,12 +27935,14 @@ import { getDatabase, ref, get, set } from "https://www.gstatic.com/firebasejs/1
   const summaryBox = document.getElementById('setcaGodRosterSummary');
   const roomsBox = document.getElementById('setcaGodRooms');
   const usersBox = document.getElementById('setcaGodUsers');
+  const groupsBox = document.getElementById('setcaGodGroups');
   const roomInfo = document.getElementById('setcaGodRoomInfo');
   const roomNameInput = document.getElementById('setcaGodRoomName');
   const roomLimitInput = document.getElementById('setcaGodRoomLimit');
   const saveBtn = document.getElementById('setcaGodSaveRoom');
   const resetBtn = document.getElementById('setcaGodResetRoom');
   const deleteBtn = document.getElementById('setcaGodDeleteRoom');
+  const clearServerBtn = document.getElementById('setcaGodClearServer');
 
   if(!dot || !modal || !roomsBox || !usersBox) return;
 
@@ -27783,6 +27950,7 @@ import { getDatabase, ref, get, set } from "https://www.gstatic.com/firebasejs/1
   let clickTimer = null;
   let selectedRoom = String((location.hash || '').replace(/^#/, '').trim() || 'sala-default');
   let cache = { rooms:[], meta:{}, rawRooms:{} };
+  let adminBusy = false;
 
   function delay(ms){ return new Promise(resolve=>setTimeout(resolve, Math.max(0, Number(ms) || 0))); }
 
@@ -27868,6 +28036,25 @@ import { getDatabase, ref, get, set } from "https://www.gstatic.com/firebasejs/1
       getRoomUsers(roomId).forEach(user=> all.push({ ...user, room: String(user.room || roomId || 'sala-default') }));
     });
     return all;
+  }
+  function asStateList(value){
+    if(Array.isArray(value)) return value.filter(Boolean);
+    if(value && typeof value === 'object') return Object.values(value).filter(Boolean);
+    return [];
+  }
+  function getRoomGroups(roomId){
+    const raw = cache.rawRooms && cache.rawRooms[roomId] ? cache.rawRooms[roomId] : {};
+    const state = raw && raw.state && typeof raw.state === 'object' ? raw.state : {};
+    const groups = [];
+    [['gtc','GTC / GROUND ASSET',state.gtc],['drawing','GRÁFICOS',state.drawings]].forEach(([kind,label,source])=>{
+      const counts = new Map();
+      asStateList(source).forEach(item=>{
+        const name = String(item && item.groupName || '').trim();
+        if(name) counts.set(name, (counts.get(name) || 0) + 1);
+      });
+      counts.forEach((count,name)=> groups.push({ kind, label, name, count }));
+    });
+    return groups.sort((a,b)=> a.label.localeCompare(b.label, 'es') || a.name.localeCompare(b.name, 'es', {numeric:true,sensitivity:'base'}));
   }
   function getRoomMeta(roomId){
     return (cache.meta && cache.meta[roomId] && typeof cache.meta[roomId] === 'object') ? cache.meta[roomId] : {};
@@ -27994,6 +28181,35 @@ import { getDatabase, ref, get, set } from "https://www.gstatic.com/firebasejs/1
       usersBox.appendChild(row);
     });
   }
+  function renderGroups(){
+    if(!groupsBox) return;
+    const groups = getRoomGroups(selectedRoom);
+    if(!groups.length){
+      groupsBox.innerHTML = '<div class="setca-god-empty">Sin grupos persistentes.</div>';
+      return;
+    }
+    groupsBox.innerHTML = '';
+    groups.forEach(group=>{
+      const row = document.createElement('div');
+      row.className = 'setca-god-group-item';
+      row.innerHTML = `
+        <div class="setca-god-group-main">
+          <strong>${escapeHtml(group.name)}</strong>
+          <small>${escapeHtml(group.label)} · ${group.count} elemento(s)</small>
+        </div>
+        <button type="button" class="btn mini ghost setca-god-group-delete">ELIMINAR</button>
+      `;
+      const button = row.querySelector('button');
+      button.disabled = adminBusy;
+      button.addEventListener('click', ()=>{
+        deleteRoomGroup(group.kind, group.name, button).catch(err=>{
+          console.error('ADMINISTRATOR group delete error', err);
+          alert('No se pudo eliminar el grupo.');
+        });
+      });
+      groupsBox.appendChild(row);
+    });
+  }
   function renderRoomEditor(){
     const meta = getRoomMeta(selectedRoom);
     const users = getRoomUsers(selectedRoom);
@@ -28010,6 +28226,7 @@ import { getDatabase, ref, get, set } from "https://www.gstatic.com/firebasejs/1
     renderRooms();
     renderRoomEditor();
     renderUsers();
+    renderGroups();
   }
   async function pruneStaleKicks(rawRooms){
     const now = Date.now();
@@ -28063,24 +28280,35 @@ import { getDatabase, ref, get, set } from "https://www.gstatic.com/firebasejs/1
       renderAll();
       try{ if(typeof window.fetchRooms === 'function') window.fetchRooms(); }catch(_){ }
     }catch(err){
-      console.error('Modo Dios refresh error', err);
+      console.error('ADMINISTRATOR refresh error', err);
       statsBox.innerHTML = '<span class="chip">No se pudo cargar</span>';
     }
   }
+  function setAdminBusy(value){
+    adminBusy = !!value;
+    [refreshBtn,saveBtn,resetBtn,deleteBtn,clearServerBtn].forEach(btn=>{ if(btn) btn.disabled = adminBusy; });
+    modal.querySelectorAll('.setca-god-group-delete,.setca-god-user-actions button').forEach(btn=>{ btn.disabled = adminBusy; });
+  }
   async function saveRoom(){
+    if(adminBusy) return;
+    setAdminBusy(true);
     const roomId = selectedRoom;
-    const current = getRoomMeta(roomId);
-    const name = String(roomNameInput.value || roomId).trim().slice(0,32) || roomId;
-    const maxUsers = Math.max(0, Number(roomLimitInput.value || 0) || 0);
-    await set(ref(db, `rooms_meta/${roomId}`), {
-      ...current,
-      name,
-      private: !!current.private,
-      password: String(current.password || ''),
-      createdAt: Number(current.createdAt || Date.now()),
-      maxUsers
-    });
-    refreshData();
+    try{
+      const current = getRoomMeta(roomId);
+      const name = String(roomNameInput.value || roomId).trim().slice(0,32) || roomId;
+      const maxUsers = Math.max(0, Number(roomLimitInput.value || 0) || 0);
+      await set(ref(db, `rooms_meta/${roomId}`), {
+        ...current,
+        name,
+        private: !!current.private,
+        password: String(current.password || ''),
+        createdAt: Number(current.createdAt || Date.now()),
+        maxUsers
+      });
+      await refreshData();
+    }finally{
+      setAdminBusy(false);
+    }
   }
   async function kickAllInRoom(roomId){
     const users = getRoomUsers(roomId);
@@ -28097,22 +28325,133 @@ import { getDatabase, ref, get, set } from "https://www.gstatic.com/firebasejs/1
     if(kicked > 0) await delay(KICK_DELIVERY_MS);
     await set(ref(db, `rooms/${roomId}`), null);
   }
+  async function deleteRoomGroup(kind, groupName, sourceButton){
+    if(adminBusy) return;
+    const roomId = selectedRoom;
+    const cleanName = String(groupName || '').trim();
+    const collection = kind === 'gtc' ? 'gtc' : 'drawings';
+    const label = kind === 'gtc' ? 'GTC / GROUND ASSET' : 'GRÁFICOS';
+    if(!cleanName) return;
+    if(!confirm(`Eliminar el grupo "${cleanName}" de ${label} en ${roomId}? Se eliminarán todos sus elementos.`)) return;
+    const oldLabel = sourceButton ? sourceButton.textContent : '';
+    let removedIds = [];
+    let removedCount = 0;
+    setAdminBusy(true);
+    try{
+      if(sourceButton) sourceButton.textContent = 'ELIMINANDO...';
+      const result = await runTransaction(ref(db, `rooms/${roomId}/state`), current=>{
+        if(!current || typeof current !== 'object') return;
+        const next = { ...current };
+        const source = asStateList(next[collection]);
+        const removed = source.filter(item=> String(item && item.groupName || '').trim() === cleanName);
+        if(!removed.length) return;
+        removedIds = removed.map(item=>String(item && item.id || '')).filter(Boolean);
+        removedCount = removed.length;
+        next[collection] = source.filter(item=> String(item && item.groupName || '').trim() !== cleanName);
+        if(kind === 'gtc' && removedIds.length && Array.isArray(next.missiles)){
+          const removedSet = new Set(removedIds);
+          next.missiles = next.missiles.filter(m=> !removedSet.has(String(m && (m.launcher || m.launcherId) || '')));
+        }
+        next.lastWriteBy = AUTH_USER;
+        next.lastWriteRole = 'administrator';
+        next.instructorAuthority = true;
+        next.lastUpdate = Date.now();
+        return next;
+      });
+      if(!result || !result.committed){
+        alert('El grupo ya no existe o fue eliminado desde otra sesión.');
+        await refreshData();
+        return;
+      }
+      if(kind === 'gtc' && removedIds.length){
+        await Promise.all(removedIds.flatMap(id=>[
+          set(ref(db, `rooms/${roomId}/gtcRuntime/${id}`), null),
+          set(ref(db, `rooms/${roomId}/gtcValidation/${id}`), null)
+        ]));
+        await runTransaction(ref(db, `rooms/${roomId}/gtcLaunches`), current=>{
+          if(!current || typeof current !== 'object') return current;
+          const removedSet = new Set(removedIds);
+          const next = {};
+          Object.entries(current).forEach(([id,event])=>{
+            const launcher = String(event && (event.launcherId || (event.missile && (event.missile.launcher || event.missile.launcherId))) || '');
+            if(!removedSet.has(launcher)) next[id] = event;
+          });
+          return Object.keys(next).length ? next : null;
+        });
+      }
+      await refreshData();
+      alert(`Grupo "${cleanName}" eliminado: ${removedCount} elemento(s).`);
+    }finally{
+      if(sourceButton && sourceButton.isConnected) sourceButton.textContent = oldLabel || 'ELIMINAR';
+      setAdminBusy(false);
+    }
+  }
+  async function clearServer(){
+    if(adminBusy) return;
+    if(!confirm('¿LIMPIAR TODO EL SERVIDOR? Se expulsará a los usuarios y se borrarán los datos operativos de TODAS las salas. Las salas y sus configuraciones se conservarán.')) return;
+    const oldLabel = clearServerBtn ? clearServerBtn.textContent : '';
+    const maintenanceRef = ref(db, 'setca_admin/serverMaintenance');
+    setAdminBusy(true);
+    try{
+      if(clearServerBtn) clearServerBtn.textContent = 'LIMPIANDO...';
+      const startedAt = Date.now();
+      await set(maintenanceRef, { active:true, by:AUTH_USER, startedAt, expiresAt:startedAt + 30000 });
+      await loadData();
+      const roomIds = Array.from(new Set([
+        ...PRESET_ROOMS,
+        ...Object.keys(cache.meta || {}),
+        ...Object.keys(cache.rawRooms || {})
+      ])).filter(Boolean);
+      let kicked = 0;
+      const roomKickPayloads = new Map();
+      await Promise.all(roomIds.map(async roomId=>{
+        const users = getRoomUsers(roomId);
+        kicked += users.length;
+        const ts = Date.now();
+        const kicks = {};
+        users.forEach(user=>{ kicks[user.uid] = { ts, expiresAt:ts + SERVER_CLEAR_KICK_TTL_MS, by:AUTH_USER, room:roomId }; });
+        roomKickPayloads.set(roomId, kicks);
+        await Promise.all([
+          users.length ? set(ref(db, `rooms/${roomId}/kicks`), kicks) : Promise.resolve(),
+          set(ref(db, `rooms/${roomId}/users`), null),
+          set(ref(db, `rooms/${roomId}/presence`), null)
+        ]);
+      }));
+      if(kicked > 0) await delay(KICK_DELIVERY_MS);
+      await Promise.all(roomIds.map(roomId=>{
+        const kicks = roomKickPayloads.get(roomId) || {};
+        return set(ref(db, `rooms/${roomId}`), Object.keys(kicks).length ? { kicks } : null);
+      }));
+      selectedRoom = PRESET_ROOMS.includes(selectedRoom) ? selectedRoom : 'sala-default';
+      await refreshData();
+      alert(`Servidor limpio: ${roomIds.length} sala(s) procesada(s) y ${kicked} usuario(s) desconectado(s).`);
+    }finally{
+      try{ await set(maintenanceRef, null); }catch(_){ }
+      if(clearServerBtn) clearServerBtn.textContent = oldLabel || 'LIMPIAR SERVIDOR';
+      setAdminBusy(false);
+    }
+  }
   async function resetRoom(){
+    if(adminBusy) return;
     const roomId = selectedRoom;
     if(!confirm(`Limpiar completamente ${roomId}?`)) return;
     const oldLabel = resetBtn ? resetBtn.textContent : '';
+    setAdminBusy(true);
     try{
       if(resetBtn){ resetBtn.disabled = true; resetBtn.textContent = 'Limpiando...'; }
       await clearRoomRuntimeData(roomId);
       await refreshData();
     }finally{
       if(resetBtn){ resetBtn.disabled = false; resetBtn.textContent = oldLabel || 'Limpiar sala'; }
+      setAdminBusy(false);
     }
   }
   async function deleteRoom(){
+    if(adminBusy) return;
     const roomId = selectedRoom;
     if(!confirm(`${isPresetRoom(roomId) ? 'Resetear' : 'Eliminar'} ${roomId}?`)) return;
     const oldLabel = deleteBtn ? deleteBtn.textContent : '';
+    setAdminBusy(true);
     try{
       if(deleteBtn){ deleteBtn.disabled = true; deleteBtn.textContent = 'Procesando...'; }
       await clearRoomRuntimeData(roomId);
@@ -28121,6 +28460,7 @@ import { getDatabase, ref, get, set } from "https://www.gstatic.com/firebasejs/1
       await refreshData();
     }finally{
       if(deleteBtn){ deleteBtn.disabled = false; deleteBtn.textContent = oldLabel || 'Eliminar'; }
+      setAdminBusy(false);
     }
   }
 
@@ -28130,6 +28470,10 @@ import { getDatabase, ref, get, set } from "https://www.gstatic.com/firebasejs/1
   saveBtn && saveBtn.addEventListener('click', ()=>{ saveRoom().catch(err=>console.error(err)); });
   resetBtn && resetBtn.addEventListener('click', ()=>{ resetRoom().catch(err=>console.error(err)); });
   deleteBtn && deleteBtn.addEventListener('click', ()=>{ deleteRoom().catch(err=>console.error(err)); });
+  clearServerBtn && clearServerBtn.addEventListener('click', ()=>{ clearServer().catch(err=>{
+    console.error('ADMINISTRATOR server cleanup error', err);
+    alert('No se pudo completar la limpieza del servidor.');
+  }); });
   modal.addEventListener('click', (e)=>{
     if(e.target === modal || (e.target && e.target.classList && e.target.classList.contains('setca-god-backdrop'))) closeModal();
   });
@@ -28137,7 +28481,7 @@ import { getDatabase, ref, get, set } from "https://www.gstatic.com/firebasejs/1
     if(e.key === 'Escape' && modal.classList.contains('setca-god-open')) closeModal();
   }, true);
   setInterval(()=>{
-    if(modal.classList.contains('setca-god-open')) refreshData();
+    if(modal.classList.contains('setca-god-open') && !adminBusy) refreshData();
   }, 3000);
 })();
 </script>
@@ -28174,7 +28518,7 @@ import { getDatabase, ref, get, set } from "https://www.gstatic.com/firebasejs/1
       try{ await set(ref(db, kickPath), null); }catch(_){ }
       try{ sessionStorage.removeItem('setca_access_gate_v3'); }catch(_){ }
       try{ sessionStorage.removeItem('setca_access_gate_v2'); }catch(_){ }
-      alert('Has sido expulsado de la sala por Modo Dios.');
+      alert('Has sido expulsado de la sala por ADMINISTRATOR.');
       const cleanUrl = String(location.pathname || '') + String(location.search || '');
       location.href = cleanUrl || location.href.split('#')[0];
     }catch(err){
@@ -32330,5 +32674,6 @@ import { getDatabase, ref, get, set } from "https://www.gstatic.com/firebasejs/1
   setInterval(bind, 2000);
 })();
 </script>
+
 </body>
 </html>
