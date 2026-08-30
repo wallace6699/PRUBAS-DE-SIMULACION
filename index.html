@@ -6052,7 +6052,7 @@ body.setca-gal-final-collapsed:is([data-setca-role="odt"],[data-setca-role="sama
 
 
 
-.setca-gate-badge-wrap{display:flex;align-items:center;gap:8px}
+.setca-gate-badge-wrap{display:flex;align-items:center;gap:8px;margin-right:40px}
 .setca-gate-kicker-row{display:flex;align-items:center;gap:7px;margin-bottom:3px}
 .setca-gate-kicker-row .setca-gate-kicker{margin-bottom:0}
 .setca-god-dot{display:inline-flex;align-items:center;justify-content:center;width:22px;height:22px;border-radius:5px;border:1px solid rgba(255,224,102,.52);background:rgba(255,224,102,.12);color:#ffe066;box-shadow:0 0 0 1px rgba(0,0,0,.3) inset;cursor:pointer;opacity:.95;padding:0;flex:0 0 auto;font:900 11px/1 ui-monospace,SFMono-Regular,Consolas,monospace}
@@ -10796,7 +10796,9 @@ function __navCollectRenderData(){
   const currentState = replayActive ? null : ((st && st.localPause && st.pauseSnapshot) ? st.pauseSnapshot : st);
   const planeMap = new Map((Array.isArray(currentState && currentState.planes) ? currentState.planes : []).map(p=>[String(p && p.id || ''), p]));
   const missileMap = new Map((Array.isArray(currentState && currentState.missiles) ? currentState.missiles : []).map(m=>[String(m && m.id || ''), m]));
-  const tracks = Object.values(__NAV_STORE.tracks || {}).map(track=>{
+  const visibleIds = new Set((Array.isArray(st.planes) ? st.planes : []).filter(isPlaneVisibleToCurrentRole).map(p=>String(p.id || '')));
+  const showAllTracks = !!(window.__SETCA_hasFullAircraftVisibility && window.__SETCA_hasFullAircraftVisibility());
+  const tracks = Object.values(__NAV_STORE.tracks || {}).filter(track=>showAllTracks || visibleIds.has(String(track.id || ''))).map(track=>{
     const pts = (Array.isArray(track.pts) ? track.pts : []).filter(pt=>!Number.isFinite(cutoff) || pt.t <= cutoff);
     const plane = replayActive ? null : planeMap.get(String(track.id || ''));
     const replayPoint = replayActive ? __navPointAtCutoff(track.pts, cutoff) : null;
@@ -12289,7 +12291,7 @@ function bearingDeg(dx,dy){
 function sweepDetect(dt){
   if(!window.st || !Array.isArray(st.planes) || !st.planes.length) return;
   const now = performance.now();
-  const awacsList = st.planes.filter(p=> p && isAwacsPlane(p) && st.showAwacsCoverage && p.awacsCoverage !== false);
+  const awacsList = st.planes.filter(p=> p && !p._hit && isAwacsPlane(p) && p.awacsCoverage !== false && !isPlaneKillConfirmed(p));
   if(!awacsList.length) return;
   awacsList.forEach(aw=>{
     const nextAng = normDeg((Number.isFinite(aw.awacsSweepAng) ? aw.awacsSweepAng : (aw.hdg || 0)) + AWACS_BEAM_ROT_DEG_PER_SEC * dt);
@@ -12309,6 +12311,9 @@ function sweepDetect(dt){
 }
 
 /* ===== Aviones ===== */
+function isPlaneVisibleToCurrentRole(p){
+  return !!(p && typeof window.__SETCA_canRenderPlane === 'function' && window.__SETCA_canRenderPlane(p));
+}
 const EMERGENCY_XPDR_CODES = new Set(['7500','7600','7700']);
 function sanitizeXpdr(v){
   return String(v ?? '').replace(/\D/g,'').slice(0,4);
@@ -12672,6 +12677,7 @@ if (Math.min(diffCW, diffCCW) > 0.1) {
   p._gt=(p._gt||0)+dt*1000;if(p._gt>1800){p.ghosts.push({x:p.x,y:p.y});if(p.ghosts.length>40)p.ghosts.shift();p._gt=0;}
 }
 function drawPlane(p){
+  if(!isPlaneVisibleToCurrentRole(p)) return;
   const __livePlaneRef = p;
   const __fadeLost = (typeof window.__SETCA_getActiveFadeLost === 'function') ? window.__SETCA_getActiveFadeLost(p) : null;
   if(__fadeLost) return;
@@ -12756,7 +12762,9 @@ function drawPlane(p){
 
   // Modo 3: radar analógico (solo puntos naranjas de contactos detectados por el radar)
   if(st.labelMode===3){
-    const age=performance.now()-p.lastDet;
+    const fullVisibility = !!(window.__SETCA_hasFullAircraftVisibility && window.__SETCA_hasFullAircraftVisibility());
+    const groundContact = !!(window.__SETCA_isPlaneInGroundCoverage && window.__SETCA_isPlaneInGroundCoverage(__livePlaneRef));
+    const age = (fullVisibility || groundContact) ? 0 : performance.now()-p.lastDet;
     if(age<CONTACT_PERSIST_MS){ // 5 s
       const fade=1-Math.min(1,age/CONTACT_PERSIST_MS);
       ctx.fillStyle=`rgba(255,153,0,${0.2+0.8*fade})`;
@@ -13945,7 +13953,7 @@ function drawGTC(){
     if(__pid){
       const __planes = (window.st && Array.isArray(st.planes)) ? st.planes : [];
       const __p = __planes.find(pp=>pp && !pp._hit && String(pp.id||'')===__pid);
-      if(__p){
+      if(isPlaneVisibleToCurrentRole(__p)){
         const __t = toScreen(__p.x, __p.y);
         ctx.save();
         ctx.strokeStyle = canLaunch ? 'rgba(255,255,255,0.55)' : 'rgba(150,225,255,0.48)';
@@ -15924,7 +15932,7 @@ function showWPal(clientX, clientY){
       const z = typeof zoom === 'number' && Number.isFinite(zoom) && zoom > 0 ? zoom : 1;
       const tolerance = Math.max(8,Math.min(16,11/Math.sqrt(z)));
       return st.planes.some(p=>{
-        if(!p) return false;
+        if(!isPlaneVisibleToCurrentRole(p)) return false;
         const s = toScreen(+p.x || 0,+p.y || 0);
         return Math.hypot(px-s.x,py-s.y) <= tolerance;
       });
@@ -16041,6 +16049,7 @@ cvs.addEventListener('mousedown',e=>{
   const w=toWorld(e.clientX-r.left,e.clientY-r.top);
   let best=null,bd=1e9;
   (st.planes||[]).forEach(p=>{
+    if(!isPlaneVisibleToCurrentRole(p)) return;
     const d=Math.hypot(w.x-(p&&p.x||0),w.y-(p&&p.y||0));
     if(d<15/zoom && d<bd){ bd=d; best=p; }
   });
@@ -16085,6 +16094,7 @@ cvs.addEventListener('mousedown',e=>{
   const r=cvs.getBoundingClientRect();const wx=toWorld(e.clientX-r.left,e.clientY-r.top).x;const wy=toWorld(e.clientX-r.left,e.clientY-r.top).y;
   const hit=null; // ALT: solo mover aeronaves, no dibujos if(hit){st.selectedDrawing=hit;draggingDrawing=st.drawings.find(d=>d.id===hit);dragStart={x:e.clientX,y:e.clientY};return;}
   let best=null,bd=1e9;st.planes.forEach(p=>{
+    if(!isPlaneVisibleToCurrentRole(p)) return;
     if(isPlaneKillConfirmed(p)) return;
     const d=Math.hypot(wx-p.x,wy-p.y);
     if(d<15/zoom && d<bd){bd=d;best=p;}
@@ -16450,7 +16460,8 @@ function __reportPlaneRecords(){
     (row.planes||[]).forEach(p=>ensure(p.id,p.name).samples.push({t:__reportNum(row.t),alt:__reportNum(p.alt),spd:__reportNum(p.spd)}));
   });
   (st.planes||[]).forEach(p=>{ const rec=ensure(p.id,p.name); rec.current=p; if(!rec.samples.length) rec.samples.push({t:__reportNum(st.elapsed),alt:__reportNum(p.alt),spd:__reportNum(p.spd)}); });
-  return Array.from(records.values()).map(rec=>{
+  const showAll = !!(window.__SETCA_hasFullAircraftVisibility && window.__SETCA_hasFullAircraftVisibility());
+  return Array.from(records.values()).filter(rec=>showAll || isPlaneVisibleToCurrentRole(rec.current)).map(rec=>{
     rec.samples.sort((a,b)=>a.t-b.t);
     const alts=rec.samples.map(s=>s.alt).filter(Number.isFinite);
     const spds=rec.samples.map(s=>s.spd).filter(Number.isFinite);
@@ -17659,6 +17670,7 @@ try{
   }
 }catch(e){}
 
+  try{ if(window.__SETCA_refreshAircraftVisibilityUI) window.__SETCA_refreshAircraftVisibilityUI(); }catch(_){ }
   const __liveState = st;
   const __delayActive = false;
   const __renderState = (__liveState.localPause && __liveState.pauseSnapshot)
@@ -17675,7 +17687,7 @@ try{
       ctx.strokeStyle='rgba(46,231,79,0.4)';
       ctx.lineWidth=1;
       st.planes.forEach(p=>{
-        if(!window.__SETCA_canRenderPlane || !window.__SETCA_canRenderPlane(p)) return;
+        if(!isPlaneVisibleToCurrentRole(p)) return;
         const acquisition = (typeof window.__SETCA_getPlaneAcquisitionVisual === 'function') ? window.__SETCA_getPlaneAcquisitionVisual(p) : null;
         if(acquisition && !acquisition.showDataBlock) return;
         if(p.ghosts.length>1){
@@ -17691,7 +17703,7 @@ try{
 
     if(window.__dbOverlayItems) window.__dbOverlayItems.length = 0;
     if(typeof drawSpiderWeb === 'function') drawSpiderWeb();
-    st.planes.forEach(p=>{ if(!window.__SETCA_canRenderPlane || window.__SETCA_canRenderPlane(p)) drawPlane(p); });
+    st.planes.forEach(p=>{ if(isPlaneVisibleToCurrentRole(p)) drawPlane(p); });
     drawPairs(); drawMissiles(); drawShapes();
     if(typeof window.__renderDbOverlay === 'function') window.__renderDbOverlay();
     __drawLocalEtaOverlays();
@@ -17802,7 +17814,7 @@ function spiderPlaneName(p){
 }
 function spiderVisiblePlanes(){
   return (Array.isArray(st && st.planes) ? st.planes : [])
-    .filter(p=>p && p.id && (!window.__SETCA_canRenderPlane || window.__SETCA_canRenderPlane(p)));
+    .filter(p=>p && p.id && isPlaneVisibleToCurrentRole(p));
 }
 function spiderDistanceText(nm){
   const v = Number(nm);
@@ -18206,7 +18218,7 @@ setInterval(()=>{ const m=$('#navReport'); if(m && m.style.display==='block' && 
     const meta = document.getElementById('araMeta');
     const kpis = document.getElementById('araKpis');
     if(!modal || !body || !meta || !kpis) return;
-    const planes = (Array.isArray(st.planes) ? st.planes : []).filter(p=>p && !p._hit && !isPlaneKillConfirmed(p));
+    const planes = (Array.isArray(st.planes) ? st.planes : []).filter(p=>p && !p._hit && !isPlaneKillConfirmed(p) && isPlaneVisibleToCurrentRole(p));
     const focusId = araPopulateSelect(planes);
     const shownPlanes = focusId ? planes.filter(p=>String(p.id)===focusId) : planes;
     if(!planes.length){
@@ -19628,7 +19640,7 @@ requestAnimationFrame(()=>{ repaintPlanesList(); repaintNav(); repaintStudent();
     return raw;
   }
   function buildObserverStats(){
-    const planes = Array.isArray(st.planes) ? st.planes.filter(Boolean) : [];
+    const planes = Array.isArray(st.planes) ? st.planes.filter(isPlaneVisibleToCurrentRole) : [];
     const impacts = Array.isArray(st.impactMarks) ? st.impactMarks.filter(Boolean) : [];
     const missiles = Array.isArray(st.missiles) ? st.missiles.filter(Boolean) : [];
     const missileStats = (typeof __normalizeMissileStats === 'function') ? __normalizeMissileStats(st.missileStats) : { aircraft:0, dart:0 };
@@ -19874,6 +19886,7 @@ requestAnimationFrame(()=>{ repaintPlanesList(); repaintNav(); repaintStudent();
     const pulse = 1 + 0.6*Math.sin(t*2*Math.PI);
     ctx.save();
     st.collisionRisks.forEach(r=>{
+      if(!isPlaneVisibleToCurrentRole(r.a) || !isPlaneVisibleToCurrentRole(r.b)) return;
       const sA = toScreen(r.a.x, r.a.y);
       const sB = toScreen(r.b.x, r.b.y);
       const midX = (sA.x + sB.x)/2, midY = (sA.y + sB.y)/2;
@@ -22413,6 +22426,7 @@ document.querySelectorAll('#pCmdBody .btn').forEach(btn=>{
     if(!Number.isFinite(+p.tagDy)) p.tagDy = -6;
   }
   function hitDataBlock(p, x, y){
+    if(!isPlaneVisibleToCurrentRole(p)) return false;
     ensureOffset(p);
     const s = toScreen(p.x||0, p.y||0);
     const scale = (typeof getTacticalVisualScale === 'function') ? getTacticalVisualScale(Number.isFinite(+window.zoom) ? +window.zoom : 1) : 1;
@@ -22806,7 +22820,7 @@ document.querySelectorAll('#pCmdBody .btn').forEach(btn=>{
     let best = null, bd = 1e9;
     for(const p of st.planes){
       if(!p) continue;
-      if(window.__SETCA_canRenderPlane && !window.__SETCA_canRenderPlane(p)) continue;
+      if(!isPlaneVisibleToCurrentRole(p)) continue;
       const s = toScreen(p.x||0, p.y||0);
       const d = Math.hypot(px - s.x, py - s.y);
       if(d <= thPx && d < bd){ bd = d; best = p; }
@@ -24050,7 +24064,7 @@ document.querySelectorAll('#pCmdBody .btn').forEach(btn=>{
     const th = planePickThresholdPx();
     for(const p of st.planes){
       if(!p || p._hit) continue;
-      if(window.__SETCA_canRenderPlane && !window.__SETCA_canRenderPlane(p)) continue;
+      if(!isPlaneVisibleToCurrentRole(p)) continue;
       const s = toScreen(p.x||0, p.y||0);
       const d = Math.hypot((s.x||0) - px, (s.y||0) - py);
       if(d <= th && d < bestD){ bestD = d; best = p; }
@@ -24199,7 +24213,7 @@ document.querySelectorAll('#pCmdBody .btn').forEach(btn=>{
   function getGlobalTargetEntries(excludePlaneId=''){
     const skip = String(excludePlaneId || '');
     const planes = ((window.st && Array.isArray(st.planes)) ? st.planes : [])
-      .filter(x=>x && !x._hit && String(x.id || '') !== skip)
+      .filter(x=>x && !x._hit && String(x.id || '') !== skip && isPlaneVisibleToCurrentRole(x))
       .map(x=>({ id:String(x.id || ''), label:String(x.name || x.id || ''), group:'Aviones' }));
     const gtc = ((window.st && Array.isArray(st.gtc)) ? st.gtc : [])
       .filter(x=>x && String(x.id || '').trim())
@@ -24735,7 +24749,7 @@ document.querySelectorAll('#pCmdBody .btn').forEach(btn=>{
   }
 
   function getTargetPlane(){
-    return (window.st && Array.isArray(st.planes)) ? st.planes.find(x => x && x.id === targetPlaneId) : null;
+    return (window.st && Array.isArray(st.planes)) ? st.planes.find(x => x && x.id === targetPlaneId && isPlaneVisibleToCurrentRole(x)) : null;
   }
   function deleteTargetPlane(){
     if(!canDeletePlaneFromContext()) return false;
@@ -26691,47 +26705,45 @@ import { getAuth } from "https://www.gstatic.com/firebasejs/10.12.3/firebase-aut
     return 'Friend';
   };
   function baseCanSeePlane(){
-    return true;
+    // La vista sin restricciones pertenece solo al rol INSTRUCTOR.
+    return String((window.__setcaAccess || {}).role || '').toLowerCase() === 'default';
   }
-  const SETCA_AWACS_COVERAGE_CACHE_MS = 100;
-  let setcaAwacsCoverageCache = {planesRef:null, enabled:false, at:0, list:[]};
+  window.__SETCA_hasFullAircraftVisibility = baseCanSeePlane;
+  let setcaVisibilitySourcePlanes = null;
+  function sensorSourcePlanes(){
+    return setcaVisibilitySourcePlanes || ((window.st && Array.isArray(st.planes)) ? st.planes : []);
+  }
+  function hasSensorPosition(entity){
+    return !!entity && [entity.x, entity.y].every(v=>v !== null && v !== '' && Number.isFinite(Number(v)));
+  }
   function awacsCoveragePlanes(){
-    const planes = (window.st && Array.isArray(window.st.planes)) ? window.st.planes : [];
-    const enabled = !!(window.st && st.showAwacsCoverage);
-    if(!enabled) return [];
-    const now = Date.now();
-    if(setcaAwacsCoverageCache.planesRef === planes &&
-      setcaAwacsCoverageCache.enabled === enabled &&
-      now - setcaAwacsCoverageCache.at < SETCA_AWACS_COVERAGE_CACHE_MS){
-      return setcaAwacsCoverageCache.list;
-    }
-    const list = planes.filter(aw=> aw && isAwacsPlane(aw) && aw.awacsCoverage !== false);
-    setcaAwacsCoverageCache = {planesRef:planes, enabled, at:now, list};
-    return list;
+    // showAwacsCoverage solo dibuja el círculo: ocultarlo no apaga el sensor.
+    return sensorSourcePlanes().filter(aw=>hasSensorPosition(aw) && !aw._hit &&
+      isAwacsPlane(aw) && aw.awacsCoverage !== false && !isPlaneKillConfirmed(aw));
   }
   function insideAwacsCoverage(p){
-    if(!p) return false;
-    const awacsList = awacsCoveragePlanes();
-    if(!awacsList.length) return false;
-    const px = Number(p.x || 0), py = Number(p.y || 0);
-    return awacsList.some(aw=>{
-      const dx = px - Number(aw.x || 0);
-      const dy = py - Number(aw.y || 0);
+    if(!hasSensorPosition(p)) return false;
+    return awacsCoveragePlanes().some(aw=>{
+      const dx = Number(p.x) - Number(aw.x);
+      const dy = Number(p.y) - Number(aw.y);
       return Math.hypot(dx, dy) <= AWACS_COVERAGE_NM;
     });
   }
-  function legacyCanRenderPlane(p){
-    if(!p) return false;
-    const awacsList = awacsCoveragePlanes();
-    if(isAwacsPlane(p)){
-      if(baseCanSeePlane(p)) return true;
-      return awacsList.length ? insideAwacsCoverage(p) : false;
-    }
-    if(awacsList.length){
-      return insideAwacsCoverage(p);
-    }
-    return baseCanSeePlane(p);
+  function insideGroundCoverage(p){
+    if(!hasSensorPosition(p) || p.alt === null || p.alt === '' || !Number.isFinite(Number(p.alt))) return false;
+    const units = (window.st && Array.isArray(st.gtc)) ? st.gtc : [];
+    return units.some(u=>{
+      if(!hasSensorPosition(u) || u._hit) return false;
+      // Detección: covR (NM) y covH (ft), nunca el alcance de lanzamiento.
+      const radius = Number(u.covR), ceiling = Number(u.covH);
+      return Number.isFinite(radius) && radius > 0 && Number.isFinite(ceiling) && ceiling > 0 &&
+        Number(p.alt) <= ceiling && Math.hypot(Number(p.x)-Number(u.x), Number(p.y)-Number(u.y)) <= radius;
+    });
   }
+  window.__SETCA_isPlaneInSensorCoverage = function(p){
+    return insideAwacsCoverage(p) || insideGroundCoverage(p);
+  };
+  window.__SETCA_isPlaneInGroundCoverage = insideGroundCoverage;
   const SETCA_RADAR_ACQUIRE_MS = 2600;
   const SETCA_RADAR_VISUAL_CACHE_MS = 14;
   const setcaRadarAcquisition = new Map();
@@ -26744,7 +26756,7 @@ import { getAuth } from "https://www.gstatic.com/firebasejs/10.12.3/firebase-aut
   function pruneRadarAcquisition(now){
     if(now - setcaRadarAcquisitionPrunedAt < 15000) return;
     setcaRadarAcquisitionPrunedAt = now;
-    const activeIds = new Set(((window.st && Array.isArray(st.planes)) ? st.planes : []).map(planeDetectionKey).filter(Boolean));
+    const activeIds = new Set(sensorSourcePlanes().map(planeDetectionKey).filter(Boolean));
     for(const id of setcaRadarAcquisition.keys()){
       if(!activeIds.has(id)) setcaRadarAcquisition.delete(id);
     }
@@ -26753,10 +26765,9 @@ import { getAuth } from "https://www.gstatic.com/firebasejs/10.12.3/firebase-aut
   window.__SETCA_resetRadarAcquisition = function(){
     setcaRadarAcquisition.clear();
     setcaRadarVisualByPlane = new WeakMap();
-    setcaAwacsCoverageCache = {planesRef:null, enabled:false, at:0, list:[]};
   };
-  function rememberRadarVisual(id, state, p, now, fadeUntil, result){
-    setcaRadarVisualByPlane.set(p, {at:now, fadeUntil, result});
+  function rememberRadarVisual(id, state, p, now, fadeUntil, inCoverage, result){
+    setcaRadarVisualByPlane.set(p, {at:now, fadeUntil, inCoverage, result});
     if(state) setcaRadarAcquisition.set(id, state);
     return result;
   }
@@ -26767,21 +26778,25 @@ import { getAuth } from "https://www.gstatic.com/firebasejs/10.12.3/firebase-aut
     const id = planeDetectionKey(p);
     const fadeEntry = window.st && st.contingencies && st.contingencies.fadeLost && st.contingencies.fadeLost[id];
     const fadeUntil = Math.max(0, Number(fadeEntry && fadeEntry.until) || 0);
-    const visualCached = setcaRadarVisualByPlane.get(p);
-    if(visualCached && now - visualCached.at < SETCA_RADAR_VISUAL_CACHE_MS &&
-      visualCached.fadeUntil === fadeUntil) return visualCached.result;
-    let state = setcaRadarAcquisition.get(id);
-    const inCoverage = legacyCanRenderPlane(p);
+    const fullVisibility = baseCanSeePlane();
+    const inCoverage = fullVisibility || window.__SETCA_isPlaneInSensorCoverage(p);
     const faded = fadeUntil > now || ((!(fadeUntil > 0)) && (typeof window.__SETCA_getActiveFadeLost === 'function') ? !!window.__SETCA_getActiveFadeLost(p) : false);
+    if(fullVisibility && !faded){
+      return {visible:true, showDataBlock:true, alpha:1, scale:1, phase:'track'};
+    }
+    const visualCached = setcaRadarVisualByPlane.get(p);
+    if(visualCached && !faded && now - visualCached.at < SETCA_RADAR_VISUAL_CACHE_MS &&
+      visualCached.fadeUntil === fadeUntil && visualCached.inCoverage === inCoverage) return visualCached.result;
+    let state = setcaRadarAcquisition.get(id);
     if(!inCoverage || faded){
       if(!state) state = {hidden:true, acquiredAt:0, reason:''};
       state.hidden = true;
       state.acquiredAt = 0;
       state.reason = faded ? 'fade' : 'coverage';
-      return rememberRadarVisual(id, state, p, now, fadeUntil, {visible:false, showDataBlock:false, alpha:0, scale:0, phase:state.reason});
+      return rememberRadarVisual(id, state, p, now, fadeUntil, inCoverage, {visible:false, showDataBlock:false, alpha:0, scale:0, phase:state.reason});
     }
     if(!state){
-      return rememberRadarVisual(id, null, p, now, fadeUntil, {visible:true, showDataBlock:true, alpha:1, scale:1, phase:'track'});
+      return rememberRadarVisual(id, null, p, now, fadeUntil, inCoverage, {visible:true, showDataBlock:true, alpha:1, scale:1, phase:'track'});
     }else if(state.hidden || !(state.acquiredAt > 0)){
       state.hidden = false;
       state.acquiredAt = now;
@@ -26790,10 +26805,10 @@ import { getAuth } from "https://www.gstatic.com/firebasejs/10.12.3/firebase-aut
     const elapsed = Math.max(0, now - state.acquiredAt);
     if(elapsed >= SETCA_RADAR_ACQUIRE_MS){
       state.reason = 'track';
-      return rememberRadarVisual(id, state, p, now, fadeUntil, {visible:true, showDataBlock:true, alpha:1, scale:1, phase:'track', elapsed});
+      return rememberRadarVisual(id, state, p, now, fadeUntil, inCoverage, {visible:true, showDataBlock:true, alpha:1, scale:1, phase:'track', elapsed});
     }
     const progress = Math.max(0, Math.min(1, elapsed / SETCA_RADAR_ACQUIRE_MS));
-    return rememberRadarVisual(id, state, p, now, fadeUntil, {
+    return rememberRadarVisual(id, state, p, now, fadeUntil, inCoverage, {
       visible:true,
       showDataBlock:false,
       alpha:0.14 + progress * 0.76,
@@ -27254,38 +27269,41 @@ import { getAuth } from "https://www.gstatic.com/firebasejs/10.12.3/firebase-aut
     return (Array.isArray(arr) ? arr : []).filter(x=> x && window.__SETCA_canSeeOwnedEntity(x));
   }
   function pruneSelection(){
-    if(!window.st) return;
-    const visible = new Set(visiblePlanes(window.st.planes).map(p=>String(p.id||'')));
-    if(Array.isArray(window.st.sel)){
-      window.st.sel = window.st.sel.filter(id=>visible.has(String(id||'')));
+    if(typeof st === 'undefined' || !st) return;
+    const visible = new Set(visiblePlanes(st.planes).map(p=>String(p.id||'')));
+    if(Array.isArray(st.sel)){
+      st.sel = st.sel.filter(id=>visible.has(String(id||'')));
     }
   }
   function wrapWithVisibleState(fnName){
     const fn = window[fnName];
     if(typeof fn !== 'function' || fn.__setcaWrapped) return;
     const wrapped = function(){
-      if(!window.st) return fn.apply(this, arguments);
+      if(typeof st === 'undefined' || !st) return fn.apply(this, arguments);
       pruneSelection();
       const bak = {
-        planes: window.st.planes,
-        sel: window.st.sel,
-        pairs: window.st.pairs,
-        missiles: window.st.missiles,
-        gtc: window.st.gtc
+        planes: st.planes,
+        sel: st.sel,
+        pairs: st.pairs,
+        missiles: st.missiles,
+        gtc: st.gtc
       };
+      const previousSourcePlanes = setcaVisibilitySourcePlanes;
+      setcaVisibilitySourcePlanes = previousSourcePlanes || bak.planes;
       try{
-        window.st.planes = visiblePlanes(bak.planes);
-        window.st.sel = Array.isArray(bak.sel) ? bak.sel.filter(id=>window.st.planes.some(p=>String(p.id||'')===String(id||''))) : [];
-        window.st.pairs = visiblePairs(bak.pairs, bak.planes);
-        window.st.missiles = visibleMissiles(bak.missiles, bak.planes);
-        window.st.gtc = visibleOwned(bak.gtc);
+        st.planes = visiblePlanes(bak.planes);
+        st.sel = Array.isArray(bak.sel) ? bak.sel.filter(id=>st.planes.some(p=>String(p.id||'')===String(id||''))) : [];
+        st.pairs = visiblePairs(bak.pairs, bak.planes);
+        st.missiles = visibleMissiles(bak.missiles, bak.planes);
+        st.gtc = visibleOwned(bak.gtc);
         return fn.apply(this, arguments);
       } finally {
-        window.st.planes = bak.planes;
-        window.st.sel = bak.sel;
-        window.st.pairs = bak.pairs;
-        window.st.missiles = bak.missiles;
-        window.st.gtc = bak.gtc;
+        st.planes = bak.planes;
+        st.sel = bak.sel;
+        st.pairs = bak.pairs;
+        st.missiles = bak.missiles;
+        st.gtc = bak.gtc;
+        setcaVisibilitySourcePlanes = previousSourcePlanes;
       }
     };
     wrapped.__setcaWrapped = true;
@@ -27304,48 +27322,48 @@ import { getAuth } from "https://www.gstatic.com/firebasejs/10.12.3/firebase-aut
   if(typeof window.drawMissiles === 'function' && !window.drawMissiles.__setcaWrapped){
     const orig = window.drawMissiles;
     window.drawMissiles = function(){
-      if(!window.st) return orig.apply(this, arguments);
-      const bak = window.st.missiles;
+      if(typeof st === 'undefined' || !st) return orig.apply(this, arguments);
+      const bak = st.missiles;
       try{
-        window.st.missiles = visibleMissiles(bak, window.st.planes);
+        st.missiles = visibleMissiles(bak, st.planes);
         return orig.apply(this, arguments);
-      } finally { window.st.missiles = bak; }
+      } finally { st.missiles = bak; }
     };
     window.drawMissiles.__setcaWrapped = true;
   }
   if(typeof window.drawPairs === 'function' && !window.drawPairs.__setcaWrapped){
     const orig = window.drawPairs;
     window.drawPairs = function(){
-      if(!window.st) return orig.apply(this, arguments);
-      const bak = window.st.pairs;
+      if(typeof st === 'undefined' || !st) return orig.apply(this, arguments);
+      const bak = st.pairs;
       try{
-        window.st.pairs = visiblePairs(bak, window.st.planes);
+        st.pairs = visiblePairs(bak, st.planes);
         return orig.apply(this, arguments);
-      } finally { window.st.pairs = bak; }
+      } finally { st.pairs = bak; }
     };
     window.drawPairs.__setcaWrapped = true;
   }
   if(typeof window.drawGTC === 'function' && !window.drawGTC.__setcaWrapped){
     const orig = window.drawGTC;
     window.drawGTC = function(){
-      if(!window.st) return orig.apply(this, arguments);
-      const bak = window.st.gtc;
+      if(typeof st === 'undefined' || !st) return orig.apply(this, arguments);
+      const bak = st.gtc;
       try{
-        window.st.gtc = visibleOwned(bak);
+        st.gtc = visibleOwned(bak);
         return orig.apply(this, arguments);
-      } finally { window.st.gtc = bak; }
+      } finally { st.gtc = bak; }
     };
     window.drawGTC.__setcaWrapped = true;
   }
   if(typeof window.drawShapes === 'function' && !window.drawShapes.__setcaWrapped){
     const orig = window.drawShapes;
     window.drawShapes = function(){
-      if(!window.st) return orig.apply(this, arguments);
-      const bak = window.st.drawings;
+      if(typeof st === 'undefined' || !st) return orig.apply(this, arguments);
+      const bak = st.drawings;
       try{
-        window.st.drawings = visibleOwned(bak);
+        st.drawings = visibleOwned(bak);
         return orig.apply(this, arguments);
-      } finally { window.st.drawings = bak; }
+      } finally { st.drawings = bak; }
     };
     window.drawShapes.__setcaWrapped = true;
   }
@@ -27360,24 +27378,26 @@ import { getAuth } from "https://www.gstatic.com/firebasejs/10.12.3/firebase-aut
   if(typeof window.gtcFillPlaneSelect === 'function' && !window.gtcFillPlaneSelect.__setcaWrapped){
     const orig = window.gtcFillPlaneSelect;
     window.gtcFillPlaneSelect = function(sel, selectedId){
-      if(!window.st) return orig.apply(this, arguments);
-      const bak = window.st.planes;
+      if(typeof st === 'undefined' || !st) return orig.apply(this, arguments);
+      const bak = st.planes;
+      const previousSourcePlanes = setcaVisibilitySourcePlanes;
+      setcaVisibilitySourcePlanes = previousSourcePlanes || bak;
       try{
-        window.st.planes = visiblePlanes(bak);
+        st.planes = visiblePlanes(bak);
         return orig.apply(this, arguments);
-      } finally { window.st.planes = bak; }
+      } finally { st.planes = bak; setcaVisibilitySourcePlanes = previousSourcePlanes; }
     };
     window.gtcFillPlaneSelect.__setcaWrapped = true;
   }
   if(typeof window.findGtcAtClient === 'function' && !window.findGtcAtClient.__setcaWrapped){
     const orig = window.findGtcAtClient;
     window.findGtcAtClient = function(){
-      if(!window.st) return orig.apply(this, arguments);
-      const bak = window.st.gtc;
+      if(typeof st === 'undefined' || !st) return orig.apply(this, arguments);
+      const bak = st.gtc;
       try{
-        window.st.gtc = visibleOwned(bak);
+        st.gtc = visibleOwned(bak);
         return orig.apply(this, arguments);
-      } finally { window.st.gtc = bak; }
+      } finally { st.gtc = bak; }
     };
     window.findGtcAtClient.__setcaWrapped = true;
   }
@@ -27389,11 +27409,36 @@ import { getAuth } from "https://www.gstatic.com/firebasejs/10.12.3/firebase-aut
     try{ if(typeof window.repaintPairs === 'function') window.repaintPairs(); }catch(_){ }
     try{ if(typeof window.repaintAlt === 'function') window.repaintAlt(); }catch(_){ }
     try{ if(typeof window.repaintGTC === 'function') window.repaintGTC(); }catch(_){ }
-    try{ if(typeof window.paintAlerts === 'function') window.paintAlerts(); }catch(_){ }
+    try{ if(typeof window.paintAlerts === 'function') window.paintAlerts(true); }catch(_){ }
     try{ if(typeof window.repaintAll === 'function') window.repaintAll(); }catch(_){ }
     try{ __SETCA_refreshLocalWorkstationPanels(window.__setcaAccess || {}); }catch(_){ }
   }
   window.__SETCA_applyAccessFilters = refreshAfterAccess;
+  let setcaVisiblePlaneSignature = null;
+  let setcaRefreshingVisibility = false;
+  window.__SETCA_refreshAircraftVisibilityUI = function(){
+    if(!window.st || setcaRefreshingVisibility) return;
+    const ids = visiblePlanes(st.planes).map(p=>String(p.id || ''));
+    const signature = String((window.__setcaAccess || {}).role || '') + ':' + ids.join('|');
+    if(signature === setcaVisiblePlaneSignature) return;
+    setcaVisiblePlaneSignature = signature;
+    setcaRefreshingVisibility = true;
+    try{
+      // Refrescar solo al entrar/salir contactos; no reconstruir controles cada frame.
+      refreshAfterAccess();
+      const planeMenu = document.getElementById('setcaPlaneBeCtx');
+      if(planeMenu) planeMenu.style.display = 'none';
+      const refreshOpen = (id, fn)=>{
+        const modal = document.getElementById(id);
+        if(modal && modal.style.display === 'block' && typeof fn === 'function') fn(true);
+      };
+      refreshOpen('navReport', window.renderNavReport);
+      refreshOpen('araReport', window.__SETCA_renderARA);
+      refreshOpen('report', window.renderReport);
+      try{ if(typeof window.renderObserverStats === 'function') window.renderObserverStats(); }catch(_){ }
+      try{ if(typeof refreshSpiderWebPanel === 'function') refreshSpiderWebPanel(true); }catch(_){ }
+    } finally { setcaRefreshingVisibility = false; }
+  };
 
   function unlockWithAccess(access){
     const role = validAccessRole(access && access.role);
@@ -27911,7 +27956,7 @@ import { getAuth } from "https://www.gstatic.com/firebasejs/10.12.3/firebase-aut
     location.href = cleanUrl || location.href.split('#')[0];
   };
 
-  setInterval(()=>{ pruneSelection(); }, 400);
+  setInterval(()=>{ pruneSelection(); window.__SETCA_refreshAircraftVisibilityUI(); }, 400);
 })();
 </script>
 
@@ -28658,7 +28703,7 @@ import { getDatabase, ref, get, set } from "https://www.gstatic.com/firebasejs/1
     const thPx = pickRadiusPx();
     let best = null, bd = 1e9;
     for(const p of st.planes){
-      if(!p) continue;
+      if(!isPlaneVisibleToCurrentRole(p)) continue;
       const s = toScreen(p.x||0, p.y||0);
       const d = Math.hypot(mx - s.x, my - s.y);
       if(d <= thPx && d < bd){
@@ -28670,7 +28715,7 @@ import { getDatabase, ref, get, set } from "https://www.gstatic.com/firebasejs/1
   }
   function getPlane(){
     if(!state.planeId || !window.st || !Array.isArray(st.planes)) return null;
-    return st.planes.find(p => p && String(p.id||'') === String(state.planeId)) || null;
+    return st.planes.find(p => p && String(p.id||'') === String(state.planeId) && isPlaneVisibleToCurrentRole(p)) || null;
   }
   function resetCapOnly(){
     state.capHoverId = null;
@@ -29332,7 +29377,7 @@ import { getDatabase, ref, get, set } from "https://www.gstatic.com/firebasejs/1
       let best = null, bestD = 1e9;
       const th = 12;
       for(const p of st.planes){
-        if(!p || p._hit) continue;
+        if(!p || p._hit || !isPlaneVisibleToCurrentRole(p)) continue;
         const s = toScreen(p.x||0, p.y||0);
         const d = Math.hypot((s.x||0) - px, (s.y||0) - py);
         if(d <= th && d < bestD){ bestD = d; best = p; }
