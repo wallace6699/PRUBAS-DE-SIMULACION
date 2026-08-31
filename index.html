@@ -11,12 +11,65 @@
 <script>
 (function(){
   const GATE_KEY = 'setca_access_gate_v3';
+  // Equipo propietario, independiente del rol del usuario y de la clasificación IFF.
+  const TEAMS = Object.freeze({
+    blue:Object.freeze({id:'blue', label:'TEAM BLUE', playable:true}),
+    red:Object.freeze({id:'red', label:'TEAM RED', playable:true}),
+    white:Object.freeze({id:'white', label:'WHITE TEAM', playable:false})
+  });
+  function normalizeTeam(value, fallback=''){
+    const key = String(value || '').trim().toLowerCase().replace(/^team[ _-]+/, '').replace(/[ _-]+team$/, '');
+    const id = ({azul:'blue', rojo:'red', blanco:'white', neutral:'white'})[key] || key;
+    return Object.prototype.hasOwnProperty.call(TEAMS, id) ? id : fallback;
+  }
+  function participantTeam(value){
+    const id = normalizeTeam(value);
+    return id === 'red' ? 'red' : 'blue'; // Accesos anteriores: TEAM BLUE; WHITE requiere su futuro acceso autorizado.
+  }
+  window.__SETCA_TEAMS = TEAMS;
+  window.__SETCA_normalizeTeam = normalizeTeam;
+  window.__SETCA_participantTeam = participantTeam;
+  window.__SETCA_teamLabel = value => (TEAMS[normalizeTeam(value)] || {}).label || 'SIN EQUIPO';
+  window.__SETCA_getCurrentTeam = function(){
+    const access = window.__setcaAccess || readSavedAccess() || {};
+    return participantTeam(access.team);
+  };
+  window.__SETCA_stampEntityTeam = function(entity, fallback){
+    if(!entity || typeof entity !== 'object') return entity;
+    entity.team = normalizeTeam(entity.team) || normalizeTeam(fallback) || window.__SETCA_getCurrentTeam();
+    // Los puntos de navegación pertenecen al avión; editar la ruta no cambia su equipo.
+    if(Array.isArray(entity.routePlan)) entity.routePlan.forEach(point=>{
+      if(point && typeof point === 'object') point.team = entity.team;
+    });
+    return entity;
+  };
+  window.__SETCA_sceneTeams = function(scene){
+    const teams = new Set();
+    ['planes','gtc','drawings','pairs','missiles','impactMarks'].forEach(key=>{
+      (Array.isArray(scene && scene[key]) ? scene[key] : []).forEach(entity=>{
+        const team = normalizeTeam(entity && entity.team);
+        if(team) teams.add(team);
+      });
+    });
+    return Array.from(teams).sort();
+  };
+  window.__SETCA_prepareSceneTeams = function(scene, fallback){
+    if(!scene || typeof scene !== 'object') return scene;
+    const team = normalizeTeam(scene.team) || normalizeTeam(fallback) || window.__SETCA_getCurrentTeam();
+    ['planes','gtc','drawings','pairs','missiles','impactMarks'].forEach(key=>{
+      (Array.isArray(scene[key]) ? scene[key] : []).forEach(entity=>window.__SETCA_stampEntityTeam(entity, team));
+    });
+    scene.team = team;
+    scene.teams = window.__SETCA_sceneTeams(scene);
+    return scene;
+  };
   function readSavedAccess(){
     try{
       const raw = sessionStorage.getItem(GATE_KEY);
       if(!raw) return null;
       const parsed = JSON.parse(raw);
       if(!parsed || typeof parsed !== 'object') return null;
+      parsed.team = participantTeam(parsed.team);
       if(parsed.planning) return {...parsed, role:'default', room:'planning-local', freeplay:false};
       const role = String(parsed.role || '').toLowerCase();
       if(!['default','odi','atc','odt','samallocator','observer'].includes(role)){
@@ -6515,6 +6568,49 @@ body.setca-freeplay-mode #simstate{
   font-size:12px;
   white-space:nowrap;
 }
+/* Identidad de equipo: no altera colores ni clasificaciones de los contactos. */
+#setcaAccessChip[data-team="blue"]{border-color:#60a5fa;color:#bfdbfe;}
+#setcaAccessChip[data-team="red"]{border-color:#f87171;color:#fecaca;}
+#gateTeam{width:100%;}
+#gateTeamHint{line-height:1.4;}
+/* Acceso en dos pantallas: identificación/sala → bando/puesto → GO. */
+#setcaAccessGate [hidden]{display:none!important;}
+body.setca-access-locked #setcaServerPauseBanner,
+body.setca-access-locked #setcaGlobalPauseBootNote{display:none!important;}
+#gateLobbyFields{grid-template-columns:minmax(0,1fr);}
+#gateLobbyFields .setca-room-list{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));grid-auto-rows:max-content;align-content:start;}
+#gateLobbyFields .setca-room-item{padding:8px;gap:4px;}
+.setca-entry-brief{flex:1 1 auto;min-height:0;overflow:auto;padding:2px;display:flex;flex-direction:column;gap:16px;}
+.setca-entry-brief>*{flex-shrink:0;}
+.setca-entry-context{display:flex;flex-wrap:wrap;gap:8px;}
+.setca-entry-context span{padding:7px 12px;border:1px solid #2a4f3b;border-radius:8px;background:#0e1d17;color:#d7f3e5;font-size:12px;overflow-wrap:anywhere;}
+.setca-entry-section h3{margin:0 0 8px;font-size:12px;letter-spacing:.12em;color:#c6ddcf;}
+.setca-entry-section>.setca-step-hint{margin-top:6px;}
+.setca-entry-teams{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px;}
+.setca-entry-roles{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px;}
+#setcaAccessGate .setca-entry-card{position:relative;display:flex;flex-direction:column;align-items:flex-start;justify-content:center;gap:6px;width:100%;height:auto;min-height:70px;padding:13px 16px;text-align:left;white-space:normal;border:1px solid #315143;border-color:#315143!important;border-radius:12px;background:#0e1b16!important;color:#e5f0e9!important;cursor:pointer;line-height:1.3;transition:border-color .15s,background .15s;}
+#setcaAccessGate .setca-entry-card strong{font-size:13px;letter-spacing:.04em;}
+#setcaAccessGate .setca-entry-card small{font-size:11px;color:#a6bcaf;font-weight:400;}
+#setcaAccessGate .setca-entry-card[aria-pressed="true"]{border-color:#8ce5ae!important;background:#173528!important;box-shadow:inset 0 0 0 1px #8ce5ae;}
+#setcaAccessGate .setca-entry-card[aria-pressed="true"]::after{content:'✓';position:absolute;top:9px;right:11px;font-weight:800;}
+#setcaAccessGate .setca-entry-card[data-gate-team]{min-height:94px;padding:17px 20px;}
+#setcaAccessGate .setca-entry-card[data-gate-team] strong{font-size:20px;letter-spacing:.08em;}
+#setcaAccessGate .setca-entry-card[data-gate-team="blue"]{border-color:#325b80!important;background:linear-gradient(130deg,#102539,#0c1925)!important;color:#9ecfff!important;}
+#setcaAccessGate .setca-entry-card[data-gate-team="red"]{border-color:#81434c!important;background:linear-gradient(130deg,#311820,#1d1016)!important;color:#ffb3bc!important;}
+#setcaAccessGate .setca-entry-card[data-gate-team="blue"][aria-pressed="true"]{border-color:#72b6ff!important;box-shadow:inset 0 0 0 1px #72b6ff;}
+#setcaAccessGate .setca-entry-card[data-gate-team="red"][aria-pressed="true"]{border-color:#ff8b98!important;box-shadow:inset 0 0 0 1px #ff8b98;}
+#setcaAccessGate .setca-entry-card:focus-visible{outline:2px solid #fff;outline-offset:3px;}
+.setca-entry-note{margin:0;padding:10px 12px;border-radius:9px;background:#101f18;color:#b5cabc;font-size:12px;line-height:1.5;}
+.setca-entry-actions{display:flex;align-items:center;gap:12px;margin-top:10px;padding-top:12px;border-top:1px solid #244231;}
+#gateGoBtn{flex:1;min-height:46px;font-size:18px;letter-spacing:.18em;background:#18482e;border-color:#8ce5ae;color:#e5ffed;}
+#gateGoBtn:disabled{box-shadow:none;}
+#gateBriefSummary{font-size:12px;color:#b6ddc5;line-height:1.4;min-height:17px;}
+@media(max-width:560px){
+  #gateLobbyFields .setca-room-list{grid-template-columns:repeat(2,minmax(0,1fr));}
+  .setca-entry-roles{grid-template-columns:repeat(2,minmax(0,1fr));}
+  #setcaAccessGate .setca-entry-card[data-gate-team]{padding:14px 12px;min-height:82px;}
+  #setcaAccessGate .setca-entry-card[data-gate-team] strong{font-size:17px;}
+}
 #setcaAccessChip strong{ color:#9cf0ad; font-weight:700; }
 body.setca-role-locked #alumnoBtn,
 body.setca-role-locked #odtBtn,
@@ -8483,7 +8579,7 @@ body.setca-modern-ui :is(
   button.biasOn,
   button.setca-spawn-btn-armed,
   button[aria-pressed="true"]
-):not(.samValBtn):not(.setca-validation-confirm),
+):not(.samValBtn):not(.setca-validation-confirm):not(.setca-entry-card),
 body.setca-modern-ui button[data-contingency].is-open{
   --setca-local-button-state:on;
   --setca-local-button-bg:linear-gradient(180deg,#d3ad16 0%,#927000 100%);
@@ -11998,7 +12094,7 @@ function spawnFormation(key){
     case 'CHAMPAGNE': planes = GenForm.CHAMPAGNE(center); break;
     default: planes = GenForm.LINEABREAST2(center); break;
   }
-  planes.forEach(p=>{ st.planes.push(p); try{ if(typeof __setcaMarkSyncStaged === 'function') __setcaMarkSyncStaged(p, (__SETCA_SYNC_STAGING && __SETCA_SYNC_STAGING.planeAddMs) || 3000); }catch(_){} st.roles[p.id] = Math.random()>.5?'Friend':'Bandit'; });
+  planes.forEach(p=>{ window.__SETCA_stampEntityTeam(p); st.planes.push(p); try{ if(typeof __setcaMarkSyncStaged === 'function') __setcaMarkSyncStaged(p, (__SETCA_SYNC_STAGING && __SETCA_SYNC_STAGING.planeAddMs) || 3000); }catch(_){} st.roles[p.id] = Math.random()>.5?'Friend':'Bandit'; });
   repaintPlanesList(); repaintNav(); repaintAlt(); repaintVuelos();
 }
 
@@ -12331,7 +12427,8 @@ function sweepDetect(dt){
 
 /* ===== Aviones ===== */
 function isPlaneVisibleToCurrentRole(p){
-  return !!(p && typeof window.__SETCA_canRenderPlane === 'function' && window.__SETCA_canRenderPlane(p));
+  // Selección, listas y reportes requieren una traza ya adquirida, no un eco provisional.
+  return !!(p && typeof window.__SETCA_canSeePlane === 'function' && window.__SETCA_canSeePlane(p));
 }
 const EMERGENCY_XPDR_CODES = new Set(['7500','7600','7700']);
 function sanitizeXpdr(v){
@@ -12696,7 +12793,7 @@ if (Math.min(diffCW, diffCCW) > 0.1) {
   p._gt=(p._gt||0)+dt*1000;if(p._gt>1800){p.ghosts.push({x:p.x,y:p.y});if(p.ghosts.length>40)p.ghosts.shift();p._gt=0;}
 }
 function drawPlane(p){
-  if(!isPlaneVisibleToCurrentRole(p)) return;
+  if(!p || typeof window.__SETCA_canRenderPlane !== 'function' || !window.__SETCA_canRenderPlane(p)) return;
   const __livePlaneRef = p;
   const __fadeLost = (typeof window.__SETCA_getActiveFadeLost === 'function') ? window.__SETCA_getActiveFadeLost(p) : null;
   if(__fadeLost) return;
@@ -12710,28 +12807,33 @@ function drawPlane(p){
     ? window.__SETCA_getPlaneAcquisitionVisual(__livePlaneRef || p)
     : null;
   if(__acquisitionVisual && __acquisitionVisual.visible && !__acquisitionVisual.showDataBlock){
-    const __echoRole = syncPlaneRoleState(p);
-    const __echoColor = getRoleUiColor(__echoRole);
-    const __echoScale = Math.max(0.3, Math.min(1, Number(__acquisitionVisual.scale) || 0.3));
-    const __echoAlpha = Math.max(0.1, Math.min(0.95, Number(__acquisitionVisual.alpha) || 0.1));
-    const __echoRadius = 1.35 + 3.15 * __echoScale;
-    const __pulse = 0.5 + 0.5 * Math.sin(performance.now() / 145);
+    // Eco sin identificación: ni el color de equipo/IFF ni las etiquetas se anticipan.
+    const __echoColor = st.labelMode === 3 ? '#ff9900' : '#b8d9ca';
+    const __echoScale = Math.max(0.12, Math.min(1, Number(__acquisitionVisual.scale) || 0.12));
+    const __echoAlpha = Math.max(0.16, Math.min(0.9, Number(__acquisitionVisual.alpha) || 0.16));
+    const __echoProgress = Math.max(0, Math.min(1, Number(__acquisitionVisual.progress) || 0));
+    const __echoRadius = 0.65 + 2.35 * __echoScale;
+    const __pulse = 0.5 + 0.5 * Math.sin(performance.now() / 650);
     ctx.save();
     ctx.globalAlpha = __echoAlpha;
     ctx.fillStyle = __echoColor;
     ctx.beginPath();
     ctx.arc(s.x, s.y, __echoRadius, 0, 2*Math.PI);
     ctx.fill();
-    ctx.globalAlpha = __echoAlpha * (0.25 + 0.35 * __pulse);
+    ctx.globalAlpha = __echoAlpha * __echoProgress * (0.12 + 0.12 * __pulse);
     ctx.strokeStyle = __echoColor;
     ctx.lineWidth = 0.8;
     ctx.beginPath();
     ctx.arc(s.x, s.y, __echoRadius + 2 + __pulse * 2, 0, 2*Math.PI);
     ctx.stroke();
-    if(__echoScale > 0.62){
+    if(st.labelMode !== 3 && __echoProgress > 0.6){
+      // Últimos 8 s: se afirma un contorno provisional, todavía sin datos del contacto.
+      const __outlineProgress = (__echoProgress - 0.6) / 0.4;
+      const __half = 2 + 2 * __outlineProgress;
+      ctx.globalAlpha = __echoAlpha * __outlineProgress;
+      ctx.strokeRect(s.x - __half, s.y - __half, __half * 2, __half * 2);
       const __echoHdg = ((Number(p.hdg) || 0) - 90) * Math.PI / 180;
-      const __echoLead = 3 + 7 * __echoScale;
-      ctx.globalAlpha = __echoAlpha * Math.min(1, (__echoScale - 0.62) / 0.38);
+      const __echoLead = 3 + 9 * __outlineProgress;
       ctx.beginPath();
       ctx.moveTo(s.x, s.y);
       ctx.lineTo(s.x + Math.cos(__echoHdg) * __echoLead, s.y + Math.sin(__echoHdg) * __echoLead);
@@ -13119,6 +13221,7 @@ cvs.addEventListener('mousedown',e=>{ if(e.button!==0) return; // block measure 
     st.gtc = Array.isArray(st.gtc) ? st.gtc : [];
     const name = (typeof gtcNextNameForPreset === 'function') ? gtcNextNameForPreset(preset) : ((preset.namePrefix || preset.shortLabel || 'GTC') + '-' + (st.gtc.length+1));
     st.gtc.push({
+      team:window.__SETCA_getCurrentTeam(),
       ownerSide:(window.__SETCA_getCurrentSide ? window.__SETCA_getCurrentSide() : 'neutral'),
       id,
       presetKey:preset.key,
@@ -16258,7 +16361,7 @@ addEventListener('mouseup',(e)=>{
     if(pts.length < minPts) return;
     const c = polyCentroid(pts);
     const id='D-'+Math.random().toString(36).slice(2,6).toUpperCase();
-    st.drawings.push({ownerSide:(window.__SETCA_getCurrentSide ? window.__SETCA_getCurrentSide() : 'neutral'),visibility:'global',createdBy:(window.__SETCA_getCurrentDrawingCreator ? window.__SETCA_getCurrentDrawingCreator() : 'sinNombre'),id,type:tool.tool,x:c.x,y:c.y,pts,lw:tool.tool==='arwy' ? 0.4 : 0.6});
+    st.drawings.push({team:window.__SETCA_getCurrentTeam(),ownerSide:(window.__SETCA_getCurrentSide ? window.__SETCA_getCurrentSide() : 'neutral'),visibility:'global',createdBy:(window.__SETCA_getCurrentDrawingCreator ? window.__SETCA_getCurrentDrawingCreator() : 'sinNombre'),id,type:tool.tool,x:c.x,y:c.y,pts,lw:tool.tool==='arwy' ? 0.4 : 0.6});
     const __newDrawing = st.drawings[st.drawings.length-1];
     try{ if(window.__SETCA_isLocalDrawingWorkstation && window.__SETCA_isLocalDrawingWorkstation()) __newDrawing.visibility = 'local'; }catch(_){}
     ensureDrawingName(__newDrawing);
@@ -16282,31 +16385,31 @@ addEventListener('mouseup',(e)=>{
     let created = false;
 
     if(tool.tool==='point'){
-      st.drawings.push({ownerSide:(window.__SETCA_getCurrentSide ? window.__SETCA_getCurrentSide() : 'neutral'),visibility:'global',createdBy:(window.__SETCA_getCurrentDrawingCreator ? window.__SETCA_getCurrentDrawingCreator() : 'sinNombre'),id,type:'point',x:a.x,y:a.y}); created = true;
+      st.drawings.push({team:window.__SETCA_getCurrentTeam(),ownerSide:(window.__SETCA_getCurrentSide ? window.__SETCA_getCurrentSide() : 'neutral'),visibility:'global',createdBy:(window.__SETCA_getCurrentDrawingCreator ? window.__SETCA_getCurrentDrawingCreator() : 'sinNombre'),id,type:'point',x:a.x,y:a.y}); created = true;
 } else if(tool.tool==='line'){
-      st.drawings.push({ownerSide:(window.__SETCA_getCurrentSide ? window.__SETCA_getCurrentSide() : 'neutral'),visibility:'global',createdBy:(window.__SETCA_getCurrentDrawingCreator ? window.__SETCA_getCurrentDrawingCreator() : 'sinNombre'),id,type:'line',x:a.x,y:a.y,ex:b.x,ey:b.y,lw:0.6}); created = true;
+      st.drawings.push({team:window.__SETCA_getCurrentTeam(),ownerSide:(window.__SETCA_getCurrentSide ? window.__SETCA_getCurrentSide() : 'neutral'),visibility:'global',createdBy:(window.__SETCA_getCurrentDrawingCreator ? window.__SETCA_getCurrentDrawingCreator() : 'sinNombre'),id,type:'line',x:a.x,y:a.y,ex:b.x,ey:b.y,lw:0.6}); created = true;
       ensureDrawingName(st.drawings[st.drawings.length-1]);
     } else if(tool.tool==='circle'){
       const r=Math.hypot(b.x-a.x,b.y-a.y);
-      st.drawings.push({ownerSide:(window.__SETCA_getCurrentSide ? window.__SETCA_getCurrentSide() : 'neutral'),visibility:'global',createdBy:(window.__SETCA_getCurrentDrawingCreator ? window.__SETCA_getCurrentDrawingCreator() : 'sinNombre'),id,type:'circle',x:a.x,y:a.y,r,lw:0.6}); created = true;
+      st.drawings.push({team:window.__SETCA_getCurrentTeam(),ownerSide:(window.__SETCA_getCurrentSide ? window.__SETCA_getCurrentSide() : 'neutral'),visibility:'global',createdBy:(window.__SETCA_getCurrentDrawingCreator ? window.__SETCA_getCurrentDrawingCreator() : 'sinNombre'),id,type:'circle',x:a.x,y:a.y,r,lw:0.6}); created = true;
       ensureDrawingName(st.drawings[st.drawings.length-1]);
     } else if(tool.tool==='square'){
       const side=Math.max(Math.abs(b.x-a.x),Math.abs(b.y-a.y));
       const cx=a.x+(b.x-a.x)/2, cy=a.y+(b.y-a.y)/2;
-      st.drawings.push({ownerSide:(window.__SETCA_getCurrentSide ? window.__SETCA_getCurrentSide() : 'neutral'),visibility:'global',createdBy:(window.__SETCA_getCurrentDrawingCreator ? window.__SETCA_getCurrentDrawingCreator() : 'sinNombre'),id,type:'square',x:cx,y:cy,a:side,lw:0.6}); created = true;
+      st.drawings.push({team:window.__SETCA_getCurrentTeam(),ownerSide:(window.__SETCA_getCurrentSide ? window.__SETCA_getCurrentSide() : 'neutral'),visibility:'global',createdBy:(window.__SETCA_getCurrentDrawingCreator ? window.__SETCA_getCurrentDrawingCreator() : 'sinNombre'),id,type:'square',x:cx,y:cy,a:side,lw:0.6}); created = true;
       ensureDrawingName(st.drawings[st.drawings.length-1]);
     } else if(tool.tool==='bullseye'){
-      st.drawings.push({ownerSide:(window.__SETCA_getCurrentSide ? window.__SETCA_getCurrentSide() : 'neutral'),visibility:'global',createdBy:(window.__SETCA_getCurrentDrawingCreator ? window.__SETCA_getCurrentDrawingCreator() : 'sinNombre'),id,type:'bullseye',x:a.x,y:a.y,lw:0.6}); created = true;
+      st.drawings.push({team:window.__SETCA_getCurrentTeam(),ownerSide:(window.__SETCA_getCurrentSide ? window.__SETCA_getCurrentSide() : 'neutral'),visibility:'global',createdBy:(window.__SETCA_getCurrentDrawingCreator ? window.__SETCA_getCurrentDrawingCreator() : 'sinNombre'),id,type:'bullseye',x:a.x,y:a.y,lw:0.6}); created = true;
       ensureDrawingName(st.drawings[st.drawings.length-1]);
     } else if(tool.tool==='cap_l'){
-      st.drawings.push({ownerSide:(window.__SETCA_getCurrentSide ? window.__SETCA_getCurrentSide() : 'neutral'),visibility:'global',createdBy:(window.__SETCA_getCurrentDrawingCreator ? window.__SETCA_getCurrentDrawingCreator() : 'sinNombre'),id,type:'cap_l',x:a.x,y:a.y,legLenNM:50,widthNM:10,angleDeg:0,capDirection:'R',color:'#4da3ff',lineColor:'#4da3ff',lw:0.9,name:''}); created = true;
+      st.drawings.push({team:window.__SETCA_getCurrentTeam(),ownerSide:(window.__SETCA_getCurrentSide ? window.__SETCA_getCurrentSide() : 'neutral'),visibility:'global',createdBy:(window.__SETCA_getCurrentDrawingCreator ? window.__SETCA_getCurrentDrawingCreator() : 'sinNombre'),id,type:'cap_l',x:a.x,y:a.y,legLenNM:50,widthNM:10,angleDeg:0,capDirection:'R',color:'#4da3ff',lineColor:'#4da3ff',lw:0.9,name:''}); created = true;
       ensureDrawingName(st.drawings[st.drawings.length-1]);
     } else if(tool.tool==='cap_s'){
-      st.drawings.push({ownerSide:(window.__SETCA_getCurrentSide ? window.__SETCA_getCurrentSide() : 'neutral'),visibility:'global',createdBy:(window.__SETCA_getCurrentDrawingCreator ? window.__SETCA_getCurrentDrawingCreator() : 'sinNombre'),id,type:'cap_s',x:a.x,y:a.y,legLenNM:16,widthNM:8,angleDeg:0,capDirection:'R',color:'#4da3ff',lineColor:'#4da3ff',lw:0.9,name:''}); created = true;
+      st.drawings.push({team:window.__SETCA_getCurrentTeam(),ownerSide:(window.__SETCA_getCurrentSide ? window.__SETCA_getCurrentSide() : 'neutral'),visibility:'global',createdBy:(window.__SETCA_getCurrentDrawingCreator ? window.__SETCA_getCurrentDrawingCreator() : 'sinNombre'),id,type:'cap_s',x:a.x,y:a.y,legLenNM:16,widthNM:8,angleDeg:0,capDirection:'R',color:'#4da3ff',lineColor:'#4da3ff',lw:0.9,name:''}); created = true;
       ensureDrawingName(st.drawings[st.drawings.length-1]);
     } else if(tool.tool==='label'){
       const text=prompt('Texto de etiqueta:');
-      if(text){ st.drawings.push({ownerSide:(window.__SETCA_getCurrentSide ? window.__SETCA_getCurrentSide() : 'neutral'),visibility:'global',createdBy:(window.__SETCA_getCurrentDrawingCreator ? window.__SETCA_getCurrentDrawingCreator() : 'sinNombre'),id,type:'label',x:a.x,y:a.y,text}); created = true;
+      if(text){ st.drawings.push({team:window.__SETCA_getCurrentTeam(),ownerSide:(window.__SETCA_getCurrentSide ? window.__SETCA_getCurrentSide() : 'neutral'),visibility:'global',createdBy:(window.__SETCA_getCurrentDrawingCreator ? window.__SETCA_getCurrentDrawingCreator() : 'sinNombre'),id,type:'label',x:a.x,y:a.y,text}); created = true;
         ensureDrawingName(st.drawings[st.drawings.length-1]);
       }
     }
@@ -16346,7 +16449,7 @@ addEventListener('mouseup',(e)=>{
       const x = p.x, y = p.y;
       const id='D-'+Math.random().toString(36).slice(2,10).toUpperCase();
       // Punto por coordenadas: usar "+" para diferenciarlo visualmente, renombrable
-      st.drawings.push({ownerSide:(window.__SETCA_getCurrentSide ? window.__SETCA_getCurrentSide() : 'neutral'),visibility:'global',createdBy:(window.__SETCA_getCurrentDrawingCreator ? window.__SETCA_getCurrentDrawingCreator() : 'sinNombre'),id,type:'point',x,y,dotColor:'rgba(255,255,255,0.85)',showName:true,marker:'plus',plusSize:4.5,plusWidth:1.2});
+      st.drawings.push({team:window.__SETCA_getCurrentTeam(),ownerSide:(window.__SETCA_getCurrentSide ? window.__SETCA_getCurrentSide() : 'neutral'),visibility:'global',createdBy:(window.__SETCA_getCurrentDrawingCreator ? window.__SETCA_getCurrentDrawingCreator() : 'sinNombre'),id,type:'point',x,y,dotColor:'rgba(255,255,255,0.85)',showName:true,marker:'plus',plusSize:4.5,plusWidth:1.2});
       try{ if(window.__SETCA_isLocalDrawingWorkstation && window.__SETCA_isLocalDrawingWorkstation()) st.drawings[st.drawings.length-1].visibility = 'local'; }catch(_){}
       try{ if(typeof ensureDrawingName==='function') ensureDrawingName(st.drawings[st.drawings.length-1]); }catch(_){}
       st.selectedDrawing=id;
@@ -17724,7 +17827,7 @@ try{
 
     if(window.__dbOverlayItems) window.__dbOverlayItems.length = 0;
     if(typeof drawSpiderWeb === 'function') drawSpiderWeb();
-    st.planes.forEach(p=>{ if(isPlaneVisibleToCurrentRole(p)) drawPlane(p); });
+    st.planes.forEach(p=>{ if(window.__SETCA_canRenderPlane && window.__SETCA_canRenderPlane(p)) drawPlane(p); });
     drawPairs(); drawMissiles(); drawShapes();
     if(typeof window.__renderDbOverlay === 'function') window.__renderDbOverlay();
     __drawLocalEtaOverlays();
@@ -18623,7 +18726,7 @@ function __spawnEdgeAircraft(cfg){
     awacsSweepAng: hdg,
     tagDx:12,tagDy:-6
   };
-  st.planes.push(p);
+  window.__SETCA_stampEntityTeam(p); st.planes.push(p);
   try{ if(typeof __setcaMarkSyncStaged === 'function') __setcaMarkSyncStaged(p, (__SETCA_SYNC_STAGING && __SETCA_SYNC_STAGING.planeAddMs) || 3000); }catch(_){ }
   st.roles[id]=(window.__SETCA_resolveSpawnRole ? window.__SETCA_resolveSpawnRole(cfg.role || cfg.tipo || '') : (cfg.role || 'Friend'));
 }
@@ -18650,7 +18753,7 @@ function __spawnInlandAircraft(cfg){
     tipo:(cfg.tipo ?? ''),
     tagDx:12,tagDy:-6
   };
-  st.planes.push(p);
+  window.__SETCA_stampEntityTeam(p); st.planes.push(p);
   try{ if(typeof __setcaMarkSyncStaged === 'function') __setcaMarkSyncStaged(p, (__SETCA_SYNC_STAGING && __SETCA_SYNC_STAGING.planeAddMs) || 3000); }catch(_){ }
   st.roles[id]=(window.__SETCA_resolveSpawnRole ? window.__SETCA_resolveSpawnRole(cfg.role || cfg.tipo || '') : (cfg.role || 'Friend'));
 }
@@ -18675,7 +18778,7 @@ $('#addFighter').onclick=()=>{
     tipo:'Caza',
     tagDx:12,tagDy:-6
   };
-  st.planes.push(p); try{ if(typeof __setcaMarkSyncStaged === 'function') __setcaMarkSyncStaged(p, (__SETCA_SYNC_STAGING && __SETCA_SYNC_STAGING.planeAddMs) || 3000); }catch(_){ } st.roles[id]=(window.__SETCA_resolveSpawnRole ? window.__SETCA_resolveSpawnRole('fighter') : (Math.random()>.5?'Friend':'Bandit')); repaintPlanesList(); repaintNav(); repaintPairs(); repaintAlt(); repaintVuelos(); flash($('#addFighter'));
+  window.__SETCA_stampEntityTeam(p); st.planes.push(p); try{ if(typeof __setcaMarkSyncStaged === 'function') __setcaMarkSyncStaged(p, (__SETCA_SYNC_STAGING && __SETCA_SYNC_STAGING.planeAddMs) || 3000); }catch(_){ } st.roles[id]=(window.__SETCA_resolveSpawnRole ? window.__SETCA_resolveSpawnRole('fighter') : (Math.random()>.5?'Friend':'Bandit')); repaintPlanesList(); repaintNav(); repaintPairs(); repaintAlt(); repaintVuelos(); flash($('#addFighter'));
 };
 $('#addCom').onclick=()=>{
   // Parámetros de avión comercial (jet)
@@ -18733,7 +18836,7 @@ $('#doPair').onclick=()=>{
   if(a&&b&&a!==b){
     const ex=st.pairs.find(pr=>(pr.a===a&&pr.b===b)||(pr.a===b&&pr.b===a));
     if(!ex){
-      st.pairs.push({a,b});
+      st.pairs.push({a,b,team:window.__SETCA_getCurrentTeam()});
       try{ if(window.__SETCA_persistLocalPairs) window.__SETCA_persistLocalPairs(); }catch(_){ }
       repaintPairList();
       try{ repaintPairs && repaintPairs(); }catch(_){ }
@@ -18798,7 +18901,7 @@ requestAnimationFrame(()=>{ repaintPlanesList(); repaintNav(); repaintStudent();
     try{
       const q = (n, d=2)=>Number.isFinite(+n) ? Math.round(+n * Math.pow(10,d)) / Math.pow(10,d) : 0;
       const planes = (Array.isArray(st.planes) ? st.planes : []).map(p=>p ? [
-        String(p.id||''), String(p.name||''), String(p.tipo||''), String(p.xpdr||''),
+        String(p.id||''), String(p.name||''), String(p.tipo||''), String(p.xpdr||''), String(p.team||''),
         q(p.x,2), q(p.y,2), q(p.hdg,1), q(p.tgtHdg,1), q(p.spd,1), q(p.tgtSpd,1), q(p.alt,0), q(p.tgtAlt,0),
         q(p.turn,2), String(p.turnBias||'')
       ] : null);
@@ -20936,6 +21039,8 @@ function __SETCA_pasteAircraft(){
   delete copy.arwyTrackDirection;
   delete copy.arwyAssignedAt;
   delete copy.flightProcedure;
+  copy.team = window.__SETCA_getCurrentTeam();
+  window.__SETCA_stampEntityTeam(copy);
   st.planes.push(copy);
   st.roles = st.roles && typeof st.roles === 'object' ? st.roles : {};
   const copiedRole = String(__SETCA_AIRCRAFT_CLIPBOARD.role || 'Neutral');
@@ -20999,6 +21104,7 @@ function __SETCA_pasteDrawing(){
   copy.name = __setcaUniqueDrawingCopyName(source);
   copy.createdBy = (typeof getCurrentDrawingCreator === 'function') ? getCurrentDrawingCreator() : 'sinNombre';
   copy.ownerSide = (window.__SETCA_getCurrentSide ? window.__SETCA_getCurrentSide() : (copy.ownerSide || 'neutral'));
+  copy.team = window.__SETCA_getCurrentTeam();
   copy.visibility = __setcaIsInstructorDrawingAuthority() ? 'global' : 'local';
   delete copy.__syncAfter;
   st.drawings.push(copy);
@@ -21139,7 +21245,7 @@ document.addEventListener('keydown', (ev)=>{
     return [a,b].sort().join('::');
   }
   function remapSceneForMerge(scene){
-    const src = (scene && typeof scene === 'object') ? scene : {};
+    const src = window.__SETCA_prepareSceneTeams(cloneDeep((scene && typeof scene === 'object') ? scene : {}));
     const planeIds = new Set((Array.isArray(st.planes) ? st.planes : []).map(p=>String(p && p.id || '').trim()).filter(Boolean));
     const gtcIds = new Set((Array.isArray(st.gtc) ? st.gtc : []).map(g=>String(g && g.id || '').trim()).filter(Boolean));
     const drawingIds = new Set((Array.isArray(st.drawings) ? st.drawings : []).map(d=>String(d && d.id || '').trim()).filter(Boolean));
@@ -21268,6 +21374,7 @@ document.addEventListener('keydown', (ev)=>{
     return merged;
   }
   function replaceScene(scene){
+    scene = window.__SETCA_prepareSceneTeams(cloneDeep(scene));
     st.planes = Array.isArray(scene.planes) ? cloneDeep(scene.planes) : [];
     st.roles = scene.roles ? cloneDeep(scene.roles) : {};
     st.drawings = Array.isArray(scene.drawings) ? cloneDeep(scene.drawings) : [];
@@ -21481,7 +21588,8 @@ document.addEventListener('keydown', (ev)=>{
     for(let i=0;i<planes.length;i++){
       if(planes[i] && typeof planes[i] === 'object') delete planes[i].dataBlock;
     }
-    return {
+    const scene = {
+      team: window.__SETCA_getCurrentTeam(),
       planes,
       roles: __cloneExportSafe(st.roles || {}) || {},
       drawings: __exportList(Array.isArray(st.drawings) ? st.drawings : []),
@@ -21497,10 +21605,12 @@ document.addEventListener('keydown', (ev)=>{
       // CONFIG queda local: no exportar unidades, etiquetas, predicción, tamaños ni opacidad de mapa.
       radarCenter: __cloneExportSafe(st.radarCenter || null)
     };
+    return window.__SETCA_prepareSceneTeams(scene);
   }
   function buildExportPayload(){
     return {
-      version: 'SETCA-Scenario-2.2',
+      version: 'SETCA-Scenario-2.3-teams',
+      team: window.__SETCA_getCurrentTeam(),
       timestamp: new Date().toISOString(),
       planningMode: !!isPlanningMode(),
       scene: buildSceneSnapshot()
@@ -21626,8 +21736,19 @@ document.addEventListener('keydown', (ev)=>{
     reader.onload = (ev)=>{
       try{
         const data = JSON.parse(ev.target.result);
-        const scene = data && typeof data === 'object' && data.scene ? data.scene : data;
+        let scene = data && typeof data === 'object' && data.scene ? data.scene : data;
         if(!scene || !Array.isArray(scene.planes)) throw new Error('Archivo inválido');
+        const currentTeam = window.__SETCA_getCurrentTeam();
+        const declaredTeam = window.__SETCA_normalizeTeam(scene.team) || window.__SETCA_normalizeTeam(data.team);
+        const originalTeams = window.__SETCA_sceneTeams(scene);
+        if(declaredTeam && !originalTeams.includes(declaredTeam)) originalTeams.push(declaredTeam);
+        const missingTeam = ['planes','gtc','drawings','pairs','missiles','impactMarks'].some(key=>
+          (Array.isArray(scene[key]) ? scene[key] : []).some(entity=>entity && !window.__SETCA_normalizeTeam(entity.team)));
+        const warnings = [];
+        if(missingTeam) warnings.push('Los elementos sin equipo se asignarán a ' + window.__SETCA_teamLabel(declaredTeam || currentTeam) + '.');
+        if(originalTeams.some(team=>team !== currentTeam)) warnings.push('El archivo contiene ' + originalTeams.map(window.__SETCA_teamLabel).join(', ') + '. Se conservarán esos equipos; tu sesión seguirá en ' + window.__SETCA_teamLabel(currentTeam) + '.');
+        if(warnings.length && !window.confirm(warnings.join('\n') + '\n¿Continuar?')) return;
+        scene = window.__SETCA_prepareSceneTeams(cloneDeep(scene), declaredTeam || currentTeam);
 
         if(mode === 'merge'){
           const merged = mergeSceneIntoCurrent(scene);
@@ -21640,7 +21761,7 @@ document.addEventListener('keydown', (ev)=>{
         replaceScene(scene);
         if(typeof scene.showAwacsCoverage === 'boolean') st.showAwacsCoverage = !!scene.showAwacsCoverage;
         refreshImportedScene();
-        alert('Mapa cargado correctamente.');
+        alert('Mapa cargado correctamente. Equipos: ' + (window.__SETCA_sceneTeams(scene).map(window.__SETCA_teamLabel).join(', ') || window.__SETCA_teamLabel(scene.team)) + '.');
       }catch(err){
         alert('Error al cargar el archivo: '+err.message);
       }finally{
@@ -21670,7 +21791,7 @@ document.addEventListener('keydown', (ev)=>{
     }
 
     try{
-      const filename = `setca_mapa_${new Date().toISOString().replace(/[:.]/g,'-')}.json`;
+      const filename = `setca_${window.__SETCA_getCurrentTeam()}_mapa_${new Date().toISOString().replace(/[:.]/g,'-')}.json`;
       const payload = buildExportJsonText();
       triggerJsonDownload(filename, payload);
     }catch(err){
@@ -21699,47 +21820,29 @@ document.addEventListener('keydown', (ev)=>{
 
 <div id="setcaAccessGate" class="setca-gate" aria-hidden="false">
   <div class="setca-gate-backdrop"></div>
-  <div class="setca-gate-dialog">
+  <div class="setca-gate-dialog" role="dialog" aria-modal="true" aria-labelledby="gateHeading">
     <div class="setca-gate-head">
       <div>
         <div class="setca-gate-kicker-row"><button type="button" id="setcaGodDot" class="setca-god-dot" aria-label="Abrir ADMINISTRATOR" title="ADMINISTRATOR">A</button><div class="setca-gate-kicker">Acceso inicial obligatorio</div></div>
-        <h2>Ingreso a SETCA</h2>
-        <p>Completa los 3 pasos en orden antes de entrar a la plataforma.</p>
+        <h2 id="gateHeading">Ingreso a SETCA</h2>
+        <p id="gateDescription">Ingresa tu callsign y elige una sala. El bando y el rol se eligen en el siguiente paso.</p>
       </div>
       <div class="setca-gate-badge-wrap"><div id="setcaGateRoomBadge" class="setca-gate-badge">SIN SALA</div></div>
     </div>
 
-    <div class="setca-gate-grid">
-      <section class="setca-step" id="gateStep2">
+    <div id="gateLobbyFields" class="setca-gate-grid">
+      <section class="setca-step" id="gateStep3">
         <div class="setca-step-num">1</div>
         <div class="setca-step-body">
-          <h3>Elegir rol</h3>
-          <p>El rol define el modo de trabajo que se abre al ingresar.</p>
-          <select id="gateRole" class="ghost focusable">
-            <option value="">Seleccionar rol...</option>
-            <option value="odi">ODI-CO</option>
-            <option value="atc">ATC</option>
-            <option value="odt">ODT</option>
-            <option value="samallocator">SAM ALOCATOR</option>
-            <option value="observer">OBSERVADOR</option>
-            <option value="default">INSTRUCTOR</option>
-          </select>
-          <div id="gateRoleHint" class="setca-step-hint">Selecciona un rol para continuar.</div>
-        </div>
-      </section>
-
-      <section class="setca-step" id="gateStep3">
-        <div class="setca-step-num">2</div>
-        <div class="setca-step-body">
-          <h3>Elegir callsign</h3>
+          <h3><label for="gateCallsign">CALLSIGN</label></h3>
           <p>Este indicativo identifica a la persona dentro de la sala.</p>
           <input id="gateCallsign" class="ghost focusable" type="text" maxlength="24" placeholder="Ej: Oso-21">
-          <div id="gateCallsignHint" class="setca-step-hint">Primero elige el rol.</div>
+          <div id="gateCallsignHint" class="setca-step-hint">Ingresa tu callsign para continuar.</div>
         </div>
       </section>
 
       <section class="setca-step" id="gateStep4">
-        <div class="setca-step-num">3</div>
+        <div class="setca-step-num">2</div>
         <div class="setca-step-body">
           <h3>Elegir o crear sala</h3>
           <p>Puedes entrar a una sala existente o crear una privada con clave.</p>
@@ -21764,16 +21867,48 @@ document.addEventListener('keydown', (ev)=>{
       </section>
     </div>
 
+    <div id="gateEntryBrief" class="setca-entry-brief" hidden>
+      <div class="setca-entry-context"><span id="gateBriefCallsign"></span><span id="gateBriefRoom"></span></div>
+      <section id="gateStepTeam" class="setca-entry-section" aria-labelledby="gateTeamTitle">
+        <h3 id="gateTeamTitle">01 · ELIGE TU BANDO</h3>
+        <input id="gateTeam" type="hidden" value="">
+        <div class="setca-entry-teams" role="group" aria-label="Elegir equipo">
+          <button type="button" class="setca-entry-card" data-gate-team="blue" aria-label="TEAM BLUE" aria-pressed="false"><strong>TEAM BLUE</strong><small>Bando azul</small></button>
+          <button type="button" class="setca-entry-card" data-gate-team="red" aria-label="TEAM RED" aria-pressed="false"><strong>TEAM RED</strong><small>Bando rojo</small></button>
+        </div>
+        <div id="gateTeamHint" class="setca-step-hint">Selecciona BLUE o RED.</div>
+      </section>
+      <section id="gateStep2" class="setca-entry-section" aria-labelledby="gateRoleTitle">
+        <h3 id="gateRoleTitle">02 · ELIGE TU ROL</h3>
+        <div class="setca-entry-roles" role="group" aria-label="Elegir rol">
+          <button type="button" class="setca-entry-card" data-gate-role="default" aria-label="INSTRUCTOR" aria-pressed="false"><strong>INSTRUCTOR</strong><small>Dirigir el entrenamiento</small></button>
+          <button type="button" class="setca-entry-card" data-gate-role="odi" aria-label="ODI-CO" aria-pressed="false"><strong>ODI-CO</strong><small>Control de interceptación</small></button>
+          <button type="button" class="setca-entry-card" data-gate-role="atc" aria-label="ATC" aria-pressed="false"><strong>ATC</strong><small>Control de tránsito aéreo</small></button>
+          <button type="button" class="setca-entry-card" data-gate-role="odt" aria-label="ODT" aria-pressed="false"><strong>ODT</strong><small>Trabajo de trazas</small></button>
+          <button type="button" class="setca-entry-card" data-gate-role="samallocator" aria-label="SAM ALLOCATOR" aria-pressed="false"><strong>SAM ALLOCATOR</strong><small>Asignación de medios SAM</small></button>
+          <button type="button" class="setca-entry-card" data-gate-role="observer" aria-label="OBSERVADOR" aria-pressed="false"><strong>OBSERVADOR</strong><small>Seguimiento del ejercicio</small></button>
+        </div>
+        <div id="gateRoleHint" class="setca-step-hint">Primero selecciona tu bando.</div>
+      </section>
+      <input id="gateRole" type="hidden" value="">
+      <p id="gateBriefNote" class="setca-entry-note"></p>
+      <div id="gateBriefSummary" aria-live="polite"></div>
+    </div>
+
     <div id="gateError" class="setca-gate-error" role="alert"></div>
 
-    <div class="setca-gate-actions">
+    <div id="gateLobbyActions" class="setca-gate-actions">
       <button type="button" id="gateRefreshRooms" class="btn mini focusable">⟳ Actualizar salas</button>
       <div class="setca-gate-action-center">
         <button type="button" id="gateEnterBtn" class="btn focusable">Ingresar</button>
       </div>
-      <button type="button" id="gatePlanningBtn" class="btn focusable ghost ready" title="Entrada directa como instructor de planificación: sin rol, sala ni clave; escenario local siempre pausado.">🗺️ Planning tool</button>
-      <button type="button" id="gateFreePlayBtn" class="btn focusable ghost" title="Abre un modo local para practicar libremente, sin sincronización ni clave general.">🎮 FREE PLAY</button>
+      <button type="button" id="gatePlanningBtn" class="btn focusable ghost ready" title="Elige equipo y planifica como instructor local, sin sala ni clave y siempre pausado.">🗺️ Planning tool</button>
+      <button type="button" id="gateFreePlayBtn" class="btn focusable ghost" title="Escribe tu callsign y entra directamente a practicar, sin clave, sala ni selección de equipo o rol.">🎮 FREE PLAY</button>
       <button type="button" id="gateCancelEdit" class="btn mini focusable" style="display:none;">Cancelar</button>
+    </div>
+    <div id="gateBriefActions" class="setca-entry-actions" hidden>
+      <button type="button" id="gateBriefBack" class="btn focusable">← Volver</button>
+      <button type="button" id="gateGoBtn" class="btn focusable" disabled>GO</button>
     </div>
   </div>
 </div>
@@ -21978,7 +22113,8 @@ function startPresence(){
       try{ window.__setcaPresence[sala] = entries.map(v=>({
         name: String((v && v.name) || (v && v.callsign) || 'sinNombre'),
         callsign: String((v && v.callsign) || (v && v.name) || 'sinNombre'),
-        role: String((v && v.role) || 'default')
+        role: String((v && v.role) || 'default'),
+        team: window.__SETCA_participantTeam(v && v.team)
       })); }catch(_){ }
       const count = names.length;
       const rowId = "room-row-" + sala;
@@ -22014,6 +22150,7 @@ function startPresence(){
       name: username,
       callsign: String((access && access.callsign) || username || 'sinNombre').trim() || 'sinNombre',
       role: String((access && access.role) || 'default'),
+      team: window.__SETCA_participantTeam(access && access.team),
       room: String(currentRoom || 'sala-default'),
       joinedAt,
       t: Date.now()
@@ -22205,6 +22342,7 @@ import { getDatabase, ref, onValue, set } from "https://www.gstatic.com/firebase
     const value = window.__setcaAccess || {};
     return {
       role:String(value.role || '').toLowerCase(),
+      team:window.__SETCA_participantTeam(value.team),
       callsign:String(value.callsign || '').trim(),
       room:String(value.room || '').trim(),
       planning:!!value.planning,
@@ -22235,6 +22373,7 @@ import { getDatabase, ref, onValue, set } from "https://www.gstatic.com/firebase
         uid,
         callsign:String(row.callsign || row.name || 'SIN INDICATIVO').trim() || 'SIN INDICATIVO',
         role:normalizeRole(row.role),
+        team:window.__SETCA_participantTeam(row.team),
         t:Number(row.t || 0)
       };
     }).filter(row=>row.role && row.t > 0 && now - row.t <= ACTIVE_MS);
@@ -22246,14 +22385,14 @@ import { getDatabase, ref, onValue, set } from "https://www.gstatic.com/firebase
     dot.className = 'setca-brief-live-dot';
     const callsign = document.createElement('span');
     callsign.className = 'setca-brief-callsign';
-    callsign.textContent = person.callsign;
+    callsign.textContent = person.callsign + ' · ' + window.__SETCA_teamLabel(person.team);
     row.append(dot, callsign);
     container.appendChild(row);
   }
   function renderRoster(){
     const a = access();
     let users = isLocal(a)
-      ? [{ uid:'local', callsign:a.callsign || 'LOCAL', role:normalizeRole(a.role) || 'default', t:Date.now() }]
+      ? [{ uid:'local', callsign:a.callsign || 'LOCAL', role:normalizeRole(a.role) || 'default', team:a.team, t:Date.now() }]
       : freshUsers(usersValue);
     users = users.sort((left,right)=>{
       const li = TIERS.findIndex(tier=>tier.roles.includes(left.role));
@@ -22928,6 +23067,7 @@ document.querySelectorAll('#pCmdBody .btn').forEach(btn=>{
     // Si no se colocó ningún punto, NO alteramos el curso/ruta actual del avión.
     if(hasPoints){
       p.routePlan = draftedRoute;
+      window.__SETCA_stampEntityTeam(p);
       p.routeIdx = 0;
       p.routeEnabled = true;
       p.routeLoop = false;
@@ -23202,6 +23342,7 @@ document.querySelectorAll('#pCmdBody .btn').forEach(btn=>{
 
     p.routePlan.splice(idx, 1); // BORRADO REAL del waypoint en la ruta activa
     p.routePlan = p.routePlan.filter(Boolean).map(cloneWp);
+    window.__SETCA_stampEntityTeam(p);
 
     if(!p.routePlan.length){
       p.routeIdx = 0;
@@ -23353,6 +23494,7 @@ document.querySelectorAll('#pCmdBody .btn').forEach(btn=>{
           if(i>=0){
             p0.routePlan.splice(i,1); // <-- BORRADO REAL DEL PUNTO
             p0.routePlan = p0.routePlan.filter(Boolean).map(cloneWp);
+            window.__SETCA_stampEntityTeam(p0);
 
             if(!p0.routePlan.length){
               p0.routeIdx = 0;
@@ -23495,6 +23637,7 @@ document.querySelectorAll('#pCmdBody .btn').forEach(btn=>{
 
       // normalizar/forzar nueva referencia de arreglo para overlays y sync
       p.routePlan = p.routePlan.filter(Boolean).map(cloneWp);
+      window.__SETCA_stampEntityTeam(p);
 
       if(!p.routePlan.length){
         p.routeIdx = 0;
@@ -23634,6 +23777,7 @@ document.querySelectorAll('#pCmdBody .btn').forEach(btn=>{
     const reachedWp = cloneWp(wp);
     arr.splice(idx, 1); // CONSUMO REAL: desaparece el punto alcanzado, incluyendo el último.
     p.routePlan = arr.filter(Boolean).map(cloneWp);
+    window.__SETCA_stampEntityTeam(p);
     p.routeCompleted = false;
     p.routeLastReached = reachedWp && reachedWp.id ? reachedWp.id : idx;
     p.routeLastChange = nowMs();
@@ -24857,7 +25001,7 @@ document.querySelectorAll('#pCmdBody .btn').forEach(btn=>{
     const procedureLabel = activeProcedure
       ? (activeProcedure.mode === 'scramble' ? 'SCRAMBLE' : activeProcedure.mode === 'departure' ? 'DPT' : 'ARR')
       : '';
-    if(hdr) hdr.textContent = `CONTROL DE AERONAVE · ${p.name||p.id}${be ? ` · BE:${be.name||be.id}` : ''}`;
+    if(hdr) hdr.textContent = `CONTROL DE AERONAVE · ${p.name||p.id} · ${window.__SETCA_teamLabel(p.team)}${be ? ` · BE:${be.name||be.id}` : ''}`;
     if(hdr && procedureLabel) hdr.textContent += ` Â· ${procedureLabel}`;
     fillBeOptions(beSel, p);
     fillTargetOptions(targetSel, p);
@@ -26648,8 +26792,23 @@ import { getAuth } from "https://www.gstatic.com/firebasejs/10.12.3/firebase-aut
   const planningBtn = document.getElementById('gatePlanningBtn');
   const freePlayBtn = document.getElementById('gateFreePlayBtn');
   const cancelEditBtn = document.getElementById('gateCancelEdit');
+  const lobbyFields = document.getElementById('gateLobbyFields');
+  const lobbyActions = document.getElementById('gateLobbyActions');
+  const entryBrief = document.getElementById('gateEntryBrief');
+  const briefActions = document.getElementById('gateBriefActions');
+  const briefBackBtn = document.getElementById('gateBriefBack');
+  const goBtn = document.getElementById('gateGoBtn');
+  const gateHeading = document.getElementById('gateHeading');
+  const gateDescription = document.getElementById('gateDescription');
+  const briefCallsign = document.getElementById('gateBriefCallsign');
+  const briefRoom = document.getElementById('gateBriefRoom');
+  const briefNote = document.getElementById('gateBriefNote');
+  const briefSummary = document.getElementById('gateBriefSummary');
+  const teamCards = Array.from(gate.querySelectorAll('[data-gate-team]'));
+  const roleCards = Array.from(gate.querySelectorAll('[data-gate-role]'));
 
   const roleSelect = document.getElementById('gateRole');
+  const teamSelect = document.getElementById('gateTeam');
   const callsignInput = document.getElementById('gateCallsign');
   const joinTab = document.getElementById('gateJoinTab');
   const createTab = document.getElementById('gateCreateTab');
@@ -26661,11 +26820,13 @@ import { getAuth } from "https://www.gstatic.com/firebasejs/10.12.3/firebase-aut
   const createPasswordInput = document.getElementById('gateCreatePassword');
 
   const stepEls = {
+    team: document.getElementById('gateStepTeam'),
     role: document.getElementById('gateStep2'),
     callsign: document.getElementById('gateStep3'),
     room: document.getElementById('gateStep4')
   };
   const hints = {
+    team: document.getElementById('gateTeamHint'),
     role: document.getElementById('gateRoleHint'),
     callsign: document.getElementById('gateCallsignHint'),
     join: document.getElementById('gateJoinHint'),
@@ -26677,9 +26838,13 @@ import { getAuth } from "https://www.gstatic.com/firebasejs/10.12.3/firebase-aut
   const __roomInstructorUnsubs = Object.create(null);
   let __roomInstructorRenderTick = null;
   let gateMode = 'join';
+  let gateStage = 'lobby';
+  let gateDestination = 'training';
+  let gateEntryBusy = false;
   let editMode = false;
   let gateState = {
     side: 'neutral',
+    team: '',
     role: '',
     callsign: '',
     room: '',
@@ -26718,6 +26883,7 @@ import { getAuth } from "https://www.gstatic.com/firebasejs/10.12.3/firebase-aut
     const a = window.__setcaAccess || {};
     return {
       side: 'neutral',
+      team: window.__SETCA_getCurrentTeam(),
       role: String(a.role || 'default'),
       callsign: String(a.callsign || '').trim(),
       room: String(a.room || currentHashRoom()).trim() || currentHashRoom(),
@@ -26775,8 +26941,8 @@ import { getAuth } from "https://www.gstatic.com/firebasejs/10.12.3/firebase-aut
     return insideAwacsCoverage(p) || insideGroundCoverage(p);
   };
   window.__SETCA_isPlaneInGroundCoverage = insideGroundCoverage;
-  // La primera detección requiere 25 segundos continuos dentro de cobertura.
-  const SETCA_RADAR_ACQUIRE_MS = 25000;
+  // Eco progresivo desde la entrada; traza completa tras 20 s continuos en cobertura.
+  const SETCA_RADAR_ACQUIRE_MS = 20000;
   const SETCA_RADAR_VISUAL_CACHE_MS = 14;
   const setcaRadarAcquisition = new Map();
   let setcaRadarVisualByPlane = new WeakMap();
@@ -26842,11 +27008,12 @@ import { getAuth } from "https://www.gstatic.com/firebasejs/10.12.3/firebase-aut
       return rememberRadarVisual(id, state, p, now, fadeUntil, inCoverage, {visible:true, showDataBlock:true, alpha:1, scale:1, phase:'track', elapsed});
     }
     const progress = Math.max(0, Math.min(1, elapsed / SETCA_RADAR_ACQUIRE_MS));
+    const strength = progress * progress * (3 - 2 * progress);
     return rememberRadarVisual(id, state, p, now, fadeUntil, inCoverage, {
-      visible:false,
+      visible:true,
       showDataBlock:false,
-      alpha:0,
-      scale:0,
+      alpha:0.16 + 0.74 * strength,
+      scale:0.12 + 0.88 * strength,
       phase:'acquiring',
       elapsed,
       progress
@@ -26854,7 +27021,7 @@ import { getAuth } from "https://www.gstatic.com/firebasejs/10.12.3/firebase-aut
   };
   window.__SETCA_canSeePlane = function(p){
     const visual = window.__SETCA_getPlaneAcquisitionVisual(p);
-    return !!(visual && visual.visible);
+    return !!(visual && visual.visible && visual.showDataBlock);
   };
   window.__SETCA_canRenderPlane = function(p){
     const visual = window.__SETCA_getPlaneAcquisitionVisual(p);
@@ -26885,7 +27052,7 @@ import { getAuth } from "https://www.gstatic.com/firebasejs/10.12.3/firebase-aut
     return VALID_ACCESS_ROLES.has(role) ? role : '';
   }
   function saveSession(access){
-    try{ sessionStorage.setItem(GATE_KEY, JSON.stringify(access)); }catch(_){ }
+    try{ sessionStorage.setItem(GATE_KEY, JSON.stringify({...access, team:window.__SETCA_participantTeam(access.team)})); }catch(_){ }
   }
   function loadSession(){
     try{
@@ -26893,6 +27060,7 @@ import { getAuth } from "https://www.gstatic.com/firebasejs/10.12.3/firebase-aut
       if(!raw) return null;
       const parsed = JSON.parse(raw);
       if(!parsed || typeof parsed !== 'object') return null;
+      parsed.team = window.__SETCA_participantTeam(parsed.team);
       if(parsed.planning) return {...parsed, role:'default', room:'planning-local', freeplay:false};
       const role = validAccessRole(parsed.role);
       if(!role){
@@ -26962,41 +27130,80 @@ import { getAuth } from "https://www.gstatic.com/firebasejs/10.12.3/firebase-aut
     return sanitizeRoomId(gateState.createRoom) && gateState.createPassword.trim().length >= 1;
   }
   function updateGateUI(){
-    const roleReady = !!gateState.role;
-    const callsignReady = roleReady && gateState.callsign.trim().length >= 2;
-    const selectedInstructor = gateMode === 'join' && gateState.room ? __activeInstructorForRoom(gateState.room) : null;
-    const instructorOccupied = String(gateState.role || '').toLowerCase() === 'default' && !!selectedInstructor;
-    const roomReady = roomModeValid() && !instructorOccupied;
+    const team = window.__SETCA_normalizeTeam(gateState.team);
+    const teamReady = ['blue','red'].includes(team);
+    const inBrief = gateStage === 'brief';
+    const planning = gateDestination === 'planning';
+    const training = gateDestination === 'training';
+    const chosenRole = planning ? 'default' : validAccessRole(gateState.role);
+    const roleReady = !!chosenRole;
+    const callsignReady = gateState.callsign.trim().length >= 2;
+    const roomReady = !!roomModeValid();
+    const selectedInstructor = training && gateMode === 'join' && gateState.room ? __activeInstructorForRoom(gateState.room) : null;
+    const instructorOccupied = chosenRole === 'default' && !!selectedInstructor;
+    const ready = teamReady && roleReady && !instructorOccupied && (planning || (callsignReady && (!training || roomReady)));
 
-    setStepState(stepEls.role, roleReady ? 'done' : 'active');
-    setStepState(stepEls.callsign, !roleReady ? '' : (callsignReady ? 'done' : 'active'));
+    lobbyFields.hidden = inBrief;
+    lobbyActions.hidden = inBrief;
+    entryBrief.hidden = !inBrief;
+    briefActions.hidden = !inBrief;
+    gate.setAttribute('aria-busy', String(gateEntryBusy));
+    const exitButton = document.getElementById('setcaGateExitX');
+    if(exitButton) exitButton.disabled = gateEntryBusy;
+    gateHeading.textContent = inBrief ? (planning ? 'PLANNING TOOL' : 'BRIEFING ROOM') : 'Ingreso a SETCA';
+    gateDescription.textContent = !inBrief
+      ? 'Ingresa tu callsign y elige una sala. El bando y el rol se eligen en el siguiente paso.'
+      : planning ? 'Elige el equipo para tu planificación. Entrarás como instructor, con todo pausado.'
+      : 'Elige tu bando y el rol que vas a desempeñar. Pulsa GO cuando estés listo.';
+    teamSelect.value = team;
+    roleSelect.value = chosenRole;
+    stepEls.role.hidden = planning;
+    teamCards.forEach(card=>{
+      card.setAttribute('aria-pressed', String(card.dataset.gateTeam === team));
+      card.disabled = gateEntryBusy;
+    });
+    roleCards.forEach(card=>{
+      const occupied = card.dataset.gateRole === 'default' && !!selectedInstructor;
+      card.setAttribute('aria-pressed', String(card.dataset.gateRole === chosenRole));
+      card.disabled = !teamReady || gateEntryBusy || occupied;
+      card.title = occupied ? 'Instructor de sala: ' + selectedInstructor : '';
+    });
+    hints.team.textContent = teamReady ? window.__SETCA_teamLabel(team) + ' seleccionado.' : 'Selecciona BLUE o RED para continuar.';
+    hints.role.textContent = instructorOccupied ? 'La sala ya tiene instructor: ' + selectedInstructor + '. Elige otro rol o vuelve para cambiar de sala.'
+      : roleReady ? 'Rol elegido: ' + roleToLabel(chosenRole) : teamReady ? 'Selecciona el puesto que vas a desempeñar.' : 'Primero selecciona tu bando.';
+    briefCallsign.textContent = 'CALLSIGN · ' + (gateState.callsign.trim() || (planning ? 'PLANIFICADOR' : '—'));
+    briefRoom.textContent = training ? 'SALA · ' + roomLabel(gateMode === 'join' ? gateState.room : sanitizeRoomId(gateState.createRoom)) : 'SESIÓN LOCAL · PLANNING';
+    briefNote.textContent = planning ? 'INSTRUCTOR DE PLANIFICACIÓN · Visibilidad completa y simulación siempre pausada. Sin conexión a salas.'
+      : 'Entrenamiento normal. Elegir bando no inicia un enfrentamiento. WHITE TEAM queda reservado para el arbitraje.';
+    briefSummary.textContent = ready ? window.__SETCA_teamLabel(team) + ' · ' + roleToLabel(chosenRole) + ' · LISTO PARA INGRESAR' : '';
+    goBtn.disabled = !inBrief || !ready || gateEntryBusy;
+    goBtn.textContent = gateEntryBusy ? 'INGRESANDO…' : 'GO';
+    briefBackBtn.disabled = gateEntryBusy;
+
+    setStepState(stepEls.callsign, callsignReady ? 'done' : 'active');
     setStepState(stepEls.room, !callsignReady ? '' : (roomReady ? 'done' : 'active'));
-
-    roleSelect.disabled = false;
-    callsignInput.disabled = !roleReady;
+    callsignInput.disabled = gateEntryBusy;
     joinTab.disabled = !callsignReady;
     createTab.disabled = !callsignReady;
     joinPasswordInput.disabled = !callsignReady || !gateState.room || gateMode !== 'join';
     createRoomInput.disabled = !callsignReady || gateMode !== 'create';
     createPasswordInput.disabled = !callsignReady || gateMode !== 'create';
-    refreshRoomsBtn.disabled = !callsignReady;
+    refreshRoomsBtn.disabled = gateEntryBusy;
     if(planningBtn){
       planningBtn.disabled = false;
       planningBtn.classList.add('ready');
+      planningBtn.title = 'Elige equipo y planifica como instructor local, siempre pausado.';
     }
     if(freePlayBtn){
-      freePlayBtn.disabled = !callsignReady;
+      freePlayBtn.disabled = !callsignReady || gateEntryBusy;
       freePlayBtn.classList.toggle('ready', callsignReady);
     }
     enterBtn.disabled = !roomReady;
     enterBtn.classList.toggle('ready', roomReady);
 
-    hints.role.textContent = roleReady ? ('Rol elegido: ' + roleToLabel(gateState.role)) : 'Selecciona un rol para continuar.';
-    hints.callsign.textContent = roleReady ? (callsignReady ? ('Callsign listo: ' + gateState.callsign.trim()) : 'Ingresa un callsign de al menos 2 caracteres.') : 'Primero elige el rol.';
+    hints.callsign.textContent = callsignReady ? 'Callsign listo: ' + gateState.callsign.trim() : 'Ingresa un callsign de al menos 2 caracteres.';
     hints.join.textContent = callsignReady
-      ? (instructorOccupied
-          ? ('Sala ocupada por el instructor ' + selectedInstructor + '. Elige otra sala o un rol diferente.')
-          : (gateState.room ? ('Sala elegida: ' + roomLabel(gateState.room)) : 'Selecciona una sala existente.'))
+      ? (gateState.room ? 'Sala elegida: ' + roomLabel(gateState.room) : 'Selecciona una sala existente.')
       : 'Primero define callsign.';
     hints.create.textContent = callsignReady ? 'Escribe nombre de sala y una clave obligatoria.' : 'Primero define callsign.';
 
@@ -27005,6 +27212,55 @@ import { getAuth } from "https://www.gstatic.com/firebasejs/10.12.3/firebase-aut
     joinPane.classList.toggle('active', gateMode === 'join');
     createPane.classList.toggle('active', gateMode === 'create');
     setRoomBadge(gateMode === 'join' ? gateState.room : sanitizeRoomId(gateState.createRoom));
+    if(inBrief && !training && roomBadge) roomBadge.textContent = 'LOCAL';
+  }
+
+  function readGateForm(){
+    safeSetGateState({callsign:callsignInput.value.trim(), joinPassword:joinPasswordInput.value,
+      createRoom:createRoomInput.value, createPassword:createPasswordInput.value});
+  }
+  function openEntryBrief(destination){
+    if(gateEntryBusy) return;
+    if(destination !== 'training' && destination !== 'planning') return;
+    readGateForm();
+    setError('');
+    if(destination !== 'planning' && gateState.callsign.length < 2){
+      setError('Ingresa un callsign de al menos 2 caracteres.'); callsignInput.focus(); return;
+    }
+    if(destination === 'training' && !roomModeValid()){
+      setError('Elige una sala o completa los datos de la sala privada.'); return;
+    }
+    gateDestination = destination;
+    gateStage = 'brief';
+    updateGateUI();
+    entryBrief.scrollTop = 0;
+    const selected = teamCards.find(card=>card.dataset.gateTeam === gateState.team) || teamCards[0];
+    if(selected) selected.focus();
+  }
+  function returnToEntryLobby(){
+    if(gateEntryBusy) return;
+    gateStage = 'lobby';
+    setError('');
+    updateGateUI();
+    const trigger = gateDestination === 'planning' ? planningBtn : enterBtn;
+    if(trigger) trigger.focus();
+  }
+  async function handleEntryGo(){
+    if(gateStage !== 'brief' || gateEntryBusy) return;
+    updateGateUI();
+    if(goBtn.disabled) return;
+    gateEntryBusy = true;
+    updateGateUI();
+    try{
+      if(gateDestination === 'planning') handlePlanningEnter();
+      else await handleEnter();
+    }catch(err){
+      console.error(err);
+      setError('No se pudo completar el ingreso. Revisa los datos e inténtalo otra vez.');
+    }finally{
+      gateEntryBusy = false;
+      updateGateUI();
+    }
   }
 
   async function fetchRooms(){
@@ -27085,15 +27341,19 @@ import { getAuth } from "https://www.gstatic.com/firebasejs/10.12.3/firebase-aut
       chip.id = 'setcaAccessChip';
       hdr.appendChild(chip);
     }
+    const team = window.__SETCA_participantTeam(access.team);
+    chip.dataset.team = team;
+    const teamLabel = window.__SETCA_teamLabel(team);
+    const callsign = __escapeGateHtml(access.callsign);
     if(access && access.planning){
-      chip.innerHTML = `<strong>PLANNING TOOL</strong> · ${roleToLabel(access.role)} · ${access.callsign} · LOCAL`;
+      chip.innerHTML = `<strong>PLANNING TOOL · ${teamLabel}</strong> · ${roleToLabel(access.role)} · ${callsign} · LOCAL · PAUSADO`;
       return;
     }
     if(access && access.freeplay){
-      chip.innerHTML = `<strong>FREE PLAY</strong> · ${roleToLabel(access.role)} · ${access.callsign} · LOCAL`;
+      chip.innerHTML = `<strong>FREE PLAY · ${teamLabel}</strong> · ${roleToLabel(access.role)} · ${callsign} · LOCAL`;
       return;
     }
-    chip.innerHTML = `<strong>${roleToLabel(access.role)}</strong> · ${access.callsign} · ${roomLabel(access.room)}`;
+    chip.innerHTML = `<strong>${teamLabel} · ${roleToLabel(access.role)}</strong> · ${callsign} · ${__escapeGateHtml(roomLabel(access.room))}`;
   }
 
   function __SETCA_canInstructorMovePlanes(){
@@ -27200,6 +27460,7 @@ import { getAuth } from "https://www.gstatic.com/firebasejs/10.12.3/firebase-aut
   }
 
   function applyRoleAccess(access){
+    body.setAttribute('data-setca-team', window.__SETCA_participantTeam(access.team));
     const planning = !!(access && access.planning);
     const freeplay = !!(access && access.freeplay);
     body.classList.toggle('setca-planning-mode', planning);
@@ -27276,7 +27537,7 @@ import { getAuth } from "https://www.gstatic.com/firebasejs/10.12.3/firebase-aut
 
   function visiblePlanes(basePlanes){
     const arr = Array.isArray(basePlanes) ? basePlanes : [];
-    return arr.filter(p=> p && window.__SETCA_canRenderPlane(p));
+    return arr.filter(p=> p && window.__SETCA_canSeePlane(p));
   }
   function visiblePairs(basePairs, basePlanes){
     const arr = Array.isArray(basePairs) ? basePairs : [];
@@ -27284,7 +27545,7 @@ import { getAuth } from "https://www.gstatic.com/firebasejs/10.12.3/firebase-aut
     return arr.filter(pr=>{
       const a = planeMap.get(String(pr && pr.a || ''));
       const b = planeMap.get(String(pr && pr.b || ''));
-      return !!(a && b && window.__SETCA_canRenderPlane(a) && window.__SETCA_canRenderPlane(b));
+      return !!(a && b && window.__SETCA_canSeePlane(a) && window.__SETCA_canSeePlane(b));
     });
   }
   function visibleMissiles(baseMissiles, basePlanes){
@@ -27293,8 +27554,8 @@ import { getAuth } from "https://www.gstatic.com/firebasejs/10.12.3/firebase-aut
     return arr.filter(m=>{
       const lp = planeMap.get(String(m && m.launcher || ''));
       const tp = planeMap.get(String(m && m.tgt || ''));
-      const launcherVisible = !lp || window.__SETCA_canRenderPlane(lp);
-      const targetVisible = !tp || window.__SETCA_canRenderPlane(tp);
+      const launcherVisible = !lp || window.__SETCA_canSeePlane(lp);
+      const targetVisible = !tp || window.__SETCA_canSeePlane(tp);
       return launcherVisible && targetVisible;
     });
   }
@@ -27482,6 +27743,7 @@ import { getAuth } from "https://www.gstatic.com/firebasejs/10.12.3/firebase-aut
     }
     window.__setcaAccess = {
       side: 'neutral',
+      team: window.__SETCA_participantTeam(access.team),
       role,
       callsign: String(access.callsign || (access.planning ? 'PLANIFICADOR' : '')).trim(),
       room: access.planning ? 'planning-local' : (String(access.room || currentHashRoom()).trim() || currentHashRoom()),
@@ -27765,11 +28027,14 @@ import { getAuth } from "https://www.gstatic.com/firebasejs/10.12.3/firebase-aut
 
   function handlePlanningEnter(){
     setError('');
+    const team = window.__SETCA_normalizeTeam(teamSelect.value);
+    if(!['blue','red'].includes(team)){ setError('Elige TEAM BLUE o TEAM RED para planificar.'); return; }
     const requestedCallsign = String(callsignInput.value || '').trim();
     // Acceso local permanente: no hereda permisos ni ocupa una sala en línea.
     const access = {
       side: 'neutral',
       role: 'default',
+      team,
       callsign: requestedCallsign.length >= 2 ? requestedCallsign : 'PLANIFICADOR',
       room: 'planning-local',
       planning: true,
@@ -27782,33 +28047,41 @@ import { getAuth } from "https://www.gstatic.com/firebasejs/10.12.3/firebase-aut
   }
 
   function handleFreePlayEnter(){
+    if(gateEntryBusy) return;
     setError('');
-    safeSetGateState({
-      callsign: callsignInput.value.trim(),
-      createRoom: createRoomInput.value,
-      createPassword: createPasswordInput.value
-    });
+    const callsign = String(callsignInput.value || '').trim();
+    safeSetGateState({callsign});
     updateGateUI();
-
-    if(!gateState.role){ setError('Debes elegir un rol para FREE PLAY.'); return; }
-    if(gateState.callsign.trim().length < 2){ setError('Debes ingresar un callsign válido para FREE PLAY.'); return; }
-
+    if(callsign.length < 2){ setError('Ingresa un callsign de al menos 2 caracteres para FREE PLAY.'); callsignInput.focus(); return; }
+    // Práctica local inmediata: no hereda el rol ni la sala del entrenamiento.
     const access = {
       side: 'neutral',
-      role: String(gateState.role || 'default'),
-      callsign: gateState.callsign.trim(),
+      role: 'default',
+      team: 'blue',
+      callsign,
       room: 'free-play-local',
       planning: false,
       freeplay: true,
       ts: Date.now()
     };
-    saveSession(access);
-    try{ localStorage.setItem('setca_username', access.callsign); }catch(_){ }
-    location.reload();
+    gateEntryBusy = true;
+    updateGateUI();
+    try{
+      saveSession(access);
+      try{ localStorage.setItem('setca_username', access.callsign); }catch(_){ }
+      location.reload();
+    }catch(err){
+      gateEntryBusy = false;
+      updateGateUI();
+      console.error(err);
+      setError('No se pudo iniciar FREE PLAY. Inténtalo otra vez.');
+    }
   }
 
   async function handleEnter(){
     setError('');
+    const team = window.__SETCA_normalizeTeam(teamSelect.value);
+    if(!['blue','red'].includes(team)){ setError('Elige TEAM BLUE o TEAM RED. WHITE TEAM requiere su acceso autorizado.'); return; }
     safeSetGateState({
       callsign: callsignInput.value.trim(),
       joinPassword: joinPasswordInput.value,
@@ -27850,6 +28123,7 @@ import { getAuth } from "https://www.gstatic.com/firebasejs/10.12.3/firebase-aut
     const access = {
       side: 'neutral',
       role: accessRole,
+      team,
       callsign: accessCallsign,
       room: chosenRoom,
       planning: false,
@@ -27864,6 +28138,9 @@ import { getAuth } from "https://www.gstatic.com/firebasejs/10.12.3/firebase-aut
   }
 
   function openGate(isEdit, focusRoom){
+    if(gateEntryBusy) return;
+    gateStage = 'lobby';
+    gateDestination = 'training';
     editMode = !!isEdit;
     cancelEditBtn.style.display = editMode ? '' : 'none';
     if(body.classList.contains('setca-planning-mode')) body.classList.remove('setca-planning-mode');
@@ -27875,6 +28152,7 @@ import { getAuth } from "https://www.gstatic.com/firebasejs/10.12.3/firebase-aut
       const a = getAccess();
       safeSetGateState({
         side: 'neutral',
+        team: a.team,
         role: validAccessRole(a.role),
         callsign: a.callsign,
         room: a.room,
@@ -27882,6 +28160,10 @@ import { getAuth } from "https://www.gstatic.com/firebasejs/10.12.3/firebase-aut
         createRoom: a.room,
         createPassword: ''
       });
+      callsignInput.value = gateState.callsign;
+      joinPasswordInput.value = '';
+      createRoomInput.value = gateState.createRoom;
+      createPasswordInput.value = '';
     }
     updateGateUI();
     if(focusRoom){
@@ -27898,6 +28180,15 @@ import { getAuth } from "https://www.gstatic.com/firebasejs/10.12.3/firebase-aut
   window.__SETCA_openAccessGate = openGate;
 
   roleSelect.addEventListener('change', ()=>{ safeSetGateState({ role: roleSelect.value || '' }); setError(''); updateGateUI(); });
+  teamSelect.addEventListener('change', ()=>{ safeSetGateState({team:teamSelect.value}); setError(''); updateGateUI(); });
+  teamCards.forEach(card=>card.addEventListener('click', ()=>{
+    if(gateEntryBusy) return;
+    safeSetGateState({team:card.dataset.gateTeam}); setError(''); updateGateUI();
+  }));
+  roleCards.forEach(card=>card.addEventListener('click', ()=>{
+    if(card.disabled || gateEntryBusy || gateDestination === 'planning') return;
+    safeSetGateState({role:card.dataset.gateRole}); setError(''); updateGateUI();
+  }));
   callsignInput.addEventListener('input', ()=>{ safeSetGateState({ callsign: callsignInput.value || '' }); updateGateUI(); });
   joinPasswordInput.addEventListener('input', ()=>{ safeSetGateState({ joinPassword: joinPasswordInput.value || '' }); updateGateUI(); });
   createRoomInput.addEventListener('input', ()=>{ safeSetGateState({ createRoom: createRoomInput.value || '' }); updateGateUI(); });
@@ -27905,13 +28196,20 @@ import { getAuth } from "https://www.gstatic.com/firebasejs/10.12.3/firebase-aut
   joinTab.addEventListener('click', ()=>{ if(joinTab.disabled) return; gateMode='join'; setError(''); updateGateUI(); });
   createTab.addEventListener('click', ()=>{ if(createTab.disabled) return; gateMode='create'; setError(''); updateGateUI(); });
   refreshRoomsBtn.addEventListener('click', ()=>{ fetchRooms(); });
-  enterBtn.addEventListener('click', ()=>{ handleEnter().catch(err=>{ console.error(err); setError('No se pudo completar el ingreso.'); }); });
-  if(planningBtn){ planningBtn.addEventListener('click', ()=>{ try{ handlePlanningEnter(); }catch(err){ console.error(err); setError('No se pudo abrir Planning tool.'); } }); }
-  if(freePlayBtn){ freePlayBtn.addEventListener('click', ()=>{ try{ handleFreePlayEnter(); }catch(err){ console.error(err); setError('No se pudo abrir FREE PLAY.'); } }); }
+  enterBtn.addEventListener('click', ()=>openEntryBrief('training'));
+  if(planningBtn) planningBtn.addEventListener('click', ()=>openEntryBrief('planning'));
+  if(freePlayBtn) freePlayBtn.addEventListener('click', handleFreePlayEnter);
+  briefBackBtn.addEventListener('click', returnToEntryLobby);
+  goBtn.addEventListener('click', handleEntryGo);
   cancelEditBtn.addEventListener('click', ()=>{ closeGateFromEdit(); });
 
   addEventListener('keydown', (e)=>{
-    if(e.key !== 'Escape') return;
+    if(e.key !== 'Escape' || gateEntryBusy) return;
+    if(gate.classList.contains('open') && gateStage === 'brief'){
+      e.preventDefault();
+      returnToEntryLobby();
+      return;
+    }
     if(gate.classList.contains('open') && editMode){
       e.preventDefault();
       closeGateFromEdit();
@@ -27920,7 +28218,9 @@ import { getAuth } from "https://www.gstatic.com/firebasejs/10.12.3/firebase-aut
 
   function __openAccessGateFresh(msg){
     clearSession();
-    safeSetGateState({ side:'neutral', role:'', room: '' });
+    gateStage = 'lobby';
+    gateDestination = 'training';
+    safeSetGateState({ side:'neutral', team:'', role:'', room: '' });
     if(roleSelect) roleSelect.value = '';
     gate.classList.add('open');
     gate.setAttribute('aria-hidden', 'false');
@@ -29314,7 +29614,7 @@ import { getDatabase, ref, get, set } from "https://www.gstatic.com/firebasejs/1
     st.pairs = Array.isArray(st.pairs) ? st.pairs : [];
     const exists = st.pairs.some(pr=>(pr && pr.a===a && pr.b===b) || (pr && pr.a===b && pr.b===a));
     if(!exists){
-      st.pairs.push({a,b});
+      st.pairs.push({a,b,team:window.__SETCA_getCurrentTeam()});
       try{ if(window.__SETCA_persistLocalPairs) window.__SETCA_persistLocalPairs(); }catch(_){ }
     }
     else alert('Ya emparejados.');
@@ -29977,7 +30277,7 @@ import { getDatabase, ref, get, set } from "https://www.gstatic.com/firebasejs/1
       tagDx:12, tagDy:-6
     };
     if(tpl.awacs){ p.awacsCoverage = true; p.awacsSweepAng = p.hdg; }
-    st.planes.push(p);
+    window.__SETCA_stampEntityTeam(p); st.planes.push(p);
     st.roles = st.roles || {};
     try{ st.roles[id] = window.__SETCA_resolveSpawnRole ? window.__SETCA_resolveSpawnRole(tpl.role || tpl.tipo || '') : (tpl.role || 'Friend'); }catch(_){ st.roles[id] = tpl.role || 'Friend'; }
     if(Array.isArray(st.sel) && !st.sel.includes(id)) st.sel.push(id);
