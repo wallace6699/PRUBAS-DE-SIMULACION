@@ -17,6 +17,7 @@
       if(!raw) return null;
       const parsed = JSON.parse(raw);
       if(!parsed || typeof parsed !== 'object') return null;
+      if(parsed.planning) return {...parsed, role:'default', room:'planning-local', freeplay:false};
       const role = String(parsed.role || '').toLowerCase();
       if(!['default','odi','atc','odt','samallocator','observer'].includes(role)){
         sessionStorage.removeItem(GATE_KEY);
@@ -27,15 +28,15 @@
   }
   window.__SETCA_readSavedAccess = readSavedAccess;
   window.__SETCA_isPlanningMode = function(){
-    const access = readSavedAccess();
+    const access = window.__setcaAccess || readSavedAccess();
     return !!(access && access.planning);
   };
   window.__SETCA_isFreePlayMode = function(){
-    const access = readSavedAccess();
+    const access = window.__setcaAccess || readSavedAccess();
     return !!(access && access.freeplay);
   };
   window.__SETCA_isLocalOnlyMode = function(){
-    const access = readSavedAccess();
+    const access = window.__setcaAccess || readSavedAccess();
     return !!(access && (access.planning || access.freeplay));
   };
   window.__SETCA_PLANNING_BOOT = !!window.__SETCA_isPlanningMode();
@@ -6469,10 +6470,6 @@ body.setca-access-locked .app{
 .setca-export-import-row{
   grid-template-columns:repeat(3,minmax(0,1fr));
 }
-body.setca-planning-mode #pCmd,
-body.setca-planning-mode #pPair,
-body.setca-planning-mode #pAlt,
-body.setca-planning-mode #pAlerts,
 body.setca-planning-mode #start,
 body.setca-planning-mode #pause,
 body.setca-planning-mode #reportPartialBtn,
@@ -9390,6 +9387,7 @@ function __SETCA_pruneDelayLag(){
 }
 window.__SETCA_getActiveDelayLag = function(plane){
   try{
+    if(window.__SETCA_isPlanningMode && window.__SETCA_isPlanningMode()) return null;
     if(!plane) return null;
     const c = __SETCA_ensureContingencies();
     const id = String(plane.id || '');
@@ -9401,6 +9399,7 @@ window.__SETCA_getActiveDelayLag = function(plane){
 };
 window.__SETCA_getActiveFadeLost = function(plane){
   try{
+    if(window.__SETCA_isPlanningMode && window.__SETCA_isPlanningMode()) return null;
     if(!plane) return null;
     const c = __SETCA_ensureContingencies();
     const id = String(plane.id || '');
@@ -10373,6 +10372,26 @@ function __refreshLocalDelaySnapshot(force){
 function __SETCA_isInstructorSession(){
   try{ return !!(window.__setcaAccess && String(window.__setcaAccess.role || '') === 'default'); }catch(_){ return false; }
 }
+function __SETCA_enforcePlanningPause(){
+  if(!(window.__SETCA_isPlanningMode && window.__SETCA_isPlanningMode())) return false;
+  // Se edita el estado vivo local; una instantánea de pausa ocultaría los cambios.
+  st.paused = true;
+  st.localPause = false;
+  st.pauseSnapshot = null;
+  st.pauseSnapshotAt = 0;
+  st.serverPause = null;
+  const chip = document.getElementById('stateChip');
+  const simst = document.getElementById('simstate');
+  if(chip && chip.textContent !== 'Planning local · PAUSADO') chip.textContent = 'Planning local · PAUSADO';
+  if(simst && simst.textContent !== 'PLAN · PAUSA') simst.textContent = 'PLAN · PAUSA';
+  for(const id of ['start','pause']){
+    const btn = document.getElementById(id);
+    if(btn && !btn.disabled) btn.disabled = true;
+  }
+  const banner = document.getElementById('setcaServerPauseBanner');
+  if(banner && banner.style.display !== 'none') banner.style.display = 'none';
+  return true;
+}
 function __SETCA_isServerPaused(){
   try{ return !!(st && st.serverPause && st.serverPause.active); }catch(_){ return false; }
 }
@@ -10420,7 +10439,7 @@ function __toggleInstructorServerPause(){
   return false;
 }
 function __setLocalPauseUI(){
-  if(window.__SETCA_isPlanningMode && window.__SETCA_isPlanningMode()) return;
+  if(__SETCA_enforcePlanningPause()) return;
   if(__SETCA_isServerPaused()){
     __setServerPauseUI();
     return;
@@ -13193,6 +13212,7 @@ function __entityName(ref, fallbackId=''){
   return String((e && (e.name || e.id)) || fallbackId || '');
 }
 function launch(launcherId,targetId,type){
+  if(window.__SETCA_isPlanningMode && window.__SETCA_isPlanningMode()) return false;
   const L = (Array.isArray(st.planes) ? st.planes : []).find(p=>p && p.id===launcherId);
   const TRef = __resolveMissileTarget(targetId);
   const T = TRef && TRef.entity;
@@ -17601,8 +17621,8 @@ function __SETCA_publishAuthoritativeTick(){
 }
 function loop(ts){
   const dt=Math.max(0,(ts-lastTS)/1000); lastTS=ts;
-  try{ __SETCA_pruneDelayLag && __SETCA_pruneDelayLag(); }catch(_){ }
-  const planningMode = !!(window.__SETCA_isPlanningMode && window.__SETCA_isPlanningMode());
+  const planningMode = __SETCA_enforcePlanningPause();
+  if(!planningMode){ try{ __SETCA_pruneDelayLag && __SETCA_pruneDelayLag(); }catch(_){ } }
   const authHost = __SETCA_isAuthoritativeSimulationHost();
   const serverPaused = __SETCA_isServerPaused();
   if(!planningMode && !serverPaused && authHost){
@@ -17629,6 +17649,7 @@ function loop(ts){
     __SETCA_AUTH_TICK_ACC = 0;
     updatePairs();
   }else{
+    __SETCA_AUTH_TICK_ACC = 0;
     __SETCA_LOCAL_GTC_TICK_ACC = 0;
   }
   if(!planningMode && !serverPaused){
@@ -17658,7 +17679,7 @@ function loop(ts){
     });
     updatePairs();
   }
-  try{ if(typeof __navRecordAll === 'function') __navRecordAll(false); }catch(_){ }
+  try{ if(!planningMode && typeof __navRecordAll === 'function') __navRecordAll(false); }catch(_){ }
 
 // Indicador GTC (botón verde/rojo) según contacto dentro de R y H
 try{
@@ -17729,7 +17750,7 @@ requestAnimationFrame(loop);
 
 /* ===== Wire buttons ===== */
 $('#start').onclick=()=>{
-  if(window.__SETCA_isPlanningMode && window.__SETCA_isPlanningMode()) return;
+  if(__SETCA_enforcePlanningPause()) return;
   if(__SETCA_isInstructorSession() && __SETCA_isServerPaused()){ st.serverPause = null; __setLocalPauseUI(); try{ if(window._SETCA_SYNC && typeof window._SETCA_SYNC.pushNow === 'function') window._SETCA_SYNC.pushNow(); }catch(_){} }
   if(st.localPause){
     st.localPause = false;
@@ -17740,7 +17761,7 @@ $('#start').onclick=()=>{
   __setLocalPauseUI();
 };
 $('#pause').onclick = ()=>{
-  if(window.__SETCA_isPlanningMode && window.__SETCA_isPlanningMode()) return;
+  if(__SETCA_enforcePlanningPause()) return;
   if(__toggleInstructorServerPause()) return;
   st.localPause = !st.localPause;
   if(st.localPause) __captureLocalPauseSnapshot();
@@ -20763,6 +20784,7 @@ function __setcaCloneDrawingPlain(d){
 }
 function __setcaIsInstructorDrawingAuthority(){
   try{
+    if(window.__SETCA_isPlanningMode && window.__SETCA_isPlanningMode()) return true;
     if(typeof window.__SETCA_isInstructorAuthority === 'function') return !!window.__SETCA_isInstructorAuthority();
     const access = window.__setcaAccess || {};
     return !access.planning && !access.freeplay && String(access.role || '').toLowerCase() === 'default';
@@ -20822,6 +20844,7 @@ function __setcaDrawingPasteOffset(pasteCount){
 function __setcaIsInstructorAircraftClipboardAuthority(){
   try{
     if(window.st && st.modoObservador) return false;
+    if(window.__SETCA_isPlanningMode && window.__SETCA_isPlanningMode()) return true;
     if(typeof window.__SETCA_isInstructorAuthority === 'function') return !!window.__SETCA_isInstructorAuthority();
     const access = window.__setcaAccess || {};
     return !access.planning && !access.freeplay && String(access.role || '').toLowerCase() === 'default';
@@ -21748,7 +21771,7 @@ document.addEventListener('keydown', (ev)=>{
       <div class="setca-gate-action-center">
         <button type="button" id="gateEnterBtn" class="btn focusable">Ingresar</button>
       </div>
-      <button type="button" id="gatePlanningBtn" class="btn focusable ghost" title="Abre el mapa en modo de planificación local, sin sincronización ni movimiento.">🗺️ Planning tool</button>
+      <button type="button" id="gatePlanningBtn" class="btn focusable ghost ready" title="Entrada directa como instructor de planificación: sin rol, sala ni clave; escenario local siempre pausado.">🗺️ Planning tool</button>
       <button type="button" id="gateFreePlayBtn" class="btn focusable ghost" title="Abre un modo local para practicar libremente, sin sincronización ni clave general.">🎮 FREE PLAY</button>
       <button type="button" id="gateCancelEdit" class="btn mini focusable" style="display:none;">Cancelar</button>
     </div>
@@ -22780,8 +22803,7 @@ document.querySelectorAll('#pCmdBody .btn').forEach(btn=>{
   function isObserver(){ return !!(window.st && st.modoObservador); }
   function isInstructorRouteOwner(){
     try{
-      // V+click / puntos de control de navegación: solo Instructor real.
-      // No Planning Tool, Free Play, ODT, ODI-CO ni Observador.
+      // V+click / puntos de control: Instructor, incluido Planning local.
       const a = window.__setcaAccess || {};
       const role = String(a.role || '').toLowerCase();
       return role === 'default';
@@ -24347,7 +24369,7 @@ document.querySelectorAll('#pCmdBody .btn').forEach(btn=>{
     try{ return !!(window.__SETCA_isFreePlayMode && window.__SETCA_isFreePlayMode()); }catch(_){ return false; }
   }
   function isAircraftDeferredContext(){
-    if(isFreePlayAircraftContext()) return true;
+    if(isPlanningAircraftContext() || isFreePlayAircraftContext()) return true;
     try{ if(window.__SETCA_isInstructorAuthority && window.__SETCA_isInstructorAuthority()) return true; }catch(_){ }
     return false;
   }
@@ -24356,12 +24378,14 @@ document.querySelectorAll('#pCmdBody .btn').forEach(btn=>{
   }
   function canDeletePlaneFromContext(){
     try{
+      if(isPlanningAircraftContext()) return true;
       if(typeof window.__SETCA_isInstructorAuthority === 'function') return !!window.__SETCA_isInstructorAuthority();
       const access = window.__setcaAccess || {};
       return !access.planning && !access.freeplay && String(access.role || '').toLowerCase() === 'default';
     }catch(_){ return false; }
   }
   function aircraftDeferredLabel(){
+    if(isPlanningAircraftContext()) return 'Planning Tool: Enter aplica y cierra (local, pausado)';
     if(isFreePlayAircraftContext()) return 'Free Play: Enter aplica y cierra (solo local)';
     return 'Instructor: Enter aplica y cierra';
   }
@@ -24861,6 +24885,11 @@ document.querySelectorAll('#pCmdBody .btn').forEach(btn=>{
     if(missileSel) missileSel.value = String(p.ctxMissileType || 'AMRAAM');
     if(deleteBtn) deleteBtn.classList.toggle('ctxHidden',!canDeletePlaneFromContext());
     const planning = isPlanningAircraftContext();
+    const fireBtn = m.querySelector('button[data-act="fire"]');
+    if(fireBtn){
+      fireBtn.disabled = planning;
+      fireBtn.title = planning ? 'Planning Tool: solo planificación, sin ejecutar lanzamientos.' : 'Lanzar misil';
+    }
     const groundReady = isGroundProcedureReady(p);
     if(procedureRow) procedureRow.classList.toggle('ctxHidden',planning);
     if(scrambleBtn){
@@ -25335,6 +25364,7 @@ try{ window.__SETCA_getGtcLaunchPolicyStatus = function(u){ return __setcaCanRes
 
 function gtcLaunchMissile(u, opts={}){
   try{
+    if(window.__SETCA_isPlanningMode && window.__SETCA_isPlanningMode()) return false;
     if(!u || !u.id) return false;
     const launchOpts = (opts && typeof opts === 'object') ? opts : {};
     const accessRole = String(((window.__setcaAccess||{}).role)||'').toLowerCase();
@@ -26705,8 +26735,9 @@ import { getAuth } from "https://www.gstatic.com/firebasejs/10.12.3/firebase-aut
     return 'Friend';
   };
   function baseCanSeePlane(){
-    // La vista sin restricciones pertenece solo al rol INSTRUCTOR.
-    return String((window.__setcaAccess || {}).role || '').toLowerCase() === 'default';
+    // Instructor y Planning local ven el escenario completo, sin adquisición.
+    const access = window.__setcaAccess || {};
+    return !!access.planning || String(access.role || '').toLowerCase() === 'default';
   }
   window.__SETCA_hasFullAircraftVisibility = baseCanSeePlane;
   let setcaVisibilitySourcePlanes = null;
@@ -26744,7 +26775,8 @@ import { getAuth } from "https://www.gstatic.com/firebasejs/10.12.3/firebase-aut
     return insideAwacsCoverage(p) || insideGroundCoverage(p);
   };
   window.__SETCA_isPlaneInGroundCoverage = insideGroundCoverage;
-  const SETCA_RADAR_ACQUIRE_MS = 2600;
+  // La primera detección requiere 25 segundos continuos dentro de cobertura.
+  const SETCA_RADAR_ACQUIRE_MS = 25000;
   const SETCA_RADAR_VISUAL_CACHE_MS = 14;
   const setcaRadarAcquisition = new Map();
   let setcaRadarVisualByPlane = new WeakMap();
@@ -26781,12 +26813,14 @@ import { getAuth } from "https://www.gstatic.com/firebasejs/10.12.3/firebase-aut
     const fullVisibility = baseCanSeePlane();
     const inCoverage = fullVisibility || window.__SETCA_isPlaneInSensorCoverage(p);
     const faded = fadeUntil > now || ((!(fadeUntil > 0)) && (typeof window.__SETCA_getActiveFadeLost === 'function') ? !!window.__SETCA_getActiveFadeLost(p) : false);
-    if(fullVisibility && !faded){
+    if(fullVisibility && (!faded || !!(window.__setcaAccess || {}).planning)){
       return {visible:true, showDataBlock:true, alpha:1, scale:1, phase:'track'};
     }
     const visualCached = setcaRadarVisualByPlane.get(p);
     if(visualCached && !faded && now - visualCached.at < SETCA_RADAR_VISUAL_CACHE_MS &&
-      visualCached.fadeUntil === fadeUntil && visualCached.inCoverage === inCoverage) return visualCached.result;
+      visualCached.fadeUntil === fadeUntil && visualCached.inCoverage === inCoverage &&
+      (visualCached.result.phase !== 'acquiring' ||
+        visualCached.result.elapsed + now - visualCached.at < SETCA_RADAR_ACQUIRE_MS)) return visualCached.result;
     let state = setcaRadarAcquisition.get(id);
     if(!inCoverage || faded){
       if(!state) state = {hidden:true, acquiredAt:0, reason:''};
@@ -26796,7 +26830,7 @@ import { getAuth } from "https://www.gstatic.com/firebasejs/10.12.3/firebase-aut
       return rememberRadarVisual(id, state, p, now, fadeUntil, inCoverage, {visible:false, showDataBlock:false, alpha:0, scale:0, phase:state.reason});
     }
     if(!state){
-      return rememberRadarVisual(id, null, p, now, fadeUntil, inCoverage, {visible:true, showDataBlock:true, alpha:1, scale:1, phase:'track'});
+      state = {hidden:false, acquiredAt:now, reason:'acquiring'};
     }else if(state.hidden || !(state.acquiredAt > 0)){
       state.hidden = false;
       state.acquiredAt = now;
@@ -26809,11 +26843,11 @@ import { getAuth } from "https://www.gstatic.com/firebasejs/10.12.3/firebase-aut
     }
     const progress = Math.max(0, Math.min(1, elapsed / SETCA_RADAR_ACQUIRE_MS));
     return rememberRadarVisual(id, state, p, now, fadeUntil, inCoverage, {
-      visible:true,
+      visible:false,
       showDataBlock:false,
-      alpha:0.14 + progress * 0.76,
-      scale:0.32 + progress * 0.68,
-      phase:'echo',
+      alpha:0,
+      scale:0,
+      phase:'acquiring',
       elapsed,
       progress
     });
@@ -26859,6 +26893,7 @@ import { getAuth } from "https://www.gstatic.com/firebasejs/10.12.3/firebase-aut
       if(!raw) return null;
       const parsed = JSON.parse(raw);
       if(!parsed || typeof parsed !== 'object') return null;
+      if(parsed.planning) return {...parsed, role:'default', room:'planning-local', freeplay:false};
       const role = validAccessRole(parsed.role);
       if(!role){
         clearSession();
@@ -26946,8 +26981,8 @@ import { getAuth } from "https://www.gstatic.com/firebasejs/10.12.3/firebase-aut
     createPasswordInput.disabled = !callsignReady || gateMode !== 'create';
     refreshRoomsBtn.disabled = !callsignReady;
     if(planningBtn){
-      planningBtn.disabled = !callsignReady;
-      planningBtn.classList.toggle('ready', callsignReady);
+      planningBtn.disabled = false;
+      planningBtn.classList.add('ready');
     }
     if(freePlayBtn){
       freePlayBtn.disabled = !callsignReady;
@@ -27228,9 +27263,7 @@ import { getAuth } from "https://www.gstatic.com/firebasejs/10.12.3/firebase-aut
         const chip = document.getElementById('stateChip');
         const simst = document.getElementById('simstate');
         if(planning){
-          st.paused = true;
-          if(chip) chip.textContent = 'Planning local';
-          if(simst) simst.textContent = 'PLAN';
+          __SETCA_enforcePlanningPause();
         }else if(freeplay){
           st.paused = false;
           st.t0 = performance.now() - (Number(st.elapsed || 0) || 0);
@@ -27441,7 +27474,7 @@ import { getAuth } from "https://www.gstatic.com/firebasejs/10.12.3/firebase-aut
   };
 
   function unlockWithAccess(access){
-    const role = validAccessRole(access && access.role);
+    const role = access && access.planning ? 'default' : validAccessRole(access && access.role);
     if(!role){
       clearSession();
       __openAccessGateFresh('El rol guardado ya no está disponible. Elige un rol vigente.');
@@ -27450,10 +27483,10 @@ import { getAuth } from "https://www.gstatic.com/firebasejs/10.12.3/firebase-aut
     window.__setcaAccess = {
       side: 'neutral',
       role,
-      callsign: String(access.callsign || '').trim(),
-      room: String(access.room || currentHashRoom()).trim() || currentHashRoom(),
+      callsign: String(access.callsign || (access.planning ? 'PLANIFICADOR' : '')).trim(),
+      room: access.planning ? 'planning-local' : (String(access.room || currentHashRoom()).trim() || currentHashRoom()),
       planning: !!access.planning,
-      freeplay: !!access.freeplay
+      freeplay: !access.planning && !!access.freeplay
     };
     try{ localStorage.setItem('setca_username', window.__setcaAccess.callsign); }catch(_){ }
     try{ window.__setcaUsername = window.__setcaAccess.callsign; }catch(_){ }
@@ -27464,9 +27497,11 @@ import { getAuth } from "https://www.gstatic.com/firebasejs/10.12.3/firebase-aut
     gate.setAttribute('aria-hidden', 'true');
     setError('');
     refreshAfterAccess();
-    try{ __observeInstructorOnline(window.__setcaAccess.room); }catch(_){ }
-    try{ __startInstructorLockHeartbeat(window.__setcaAccess); }catch(_){ }
-    try{ if(window.__SETCA_startAircraftOrderListener) window.__SETCA_startAircraftOrderListener(); }catch(_){ }
+    if(!window.__setcaAccess.planning && !window.__setcaAccess.freeplay){
+      try{ __observeInstructorOnline(window.__setcaAccess.room); }catch(_){ }
+      try{ __startInstructorLockHeartbeat(window.__setcaAccess); }catch(_){ }
+      try{ if(window.__SETCA_startAircraftOrderListener) window.__SETCA_startAircraftOrderListener(); }catch(_){ }
+    }
 
     const salasBtn = document.getElementById('salasBtn');
     if(salasBtn){
@@ -27730,22 +27765,13 @@ import { getAuth } from "https://www.gstatic.com/firebasejs/10.12.3/firebase-aut
 
   function handlePlanningEnter(){
     setError('');
-    safeSetGateState({
-      callsign: callsignInput.value.trim(),
-      createRoom: createRoomInput.value,
-      createPassword: createPasswordInput.value
-    });
-    updateGateUI();
-
-    if(!gateState.role){ setError('Debes elegir un rol para Planning tool.'); return; }
-    if(gateState.callsign.trim().length < 2){ setError('Debes ingresar un callsign válido para Planning tool.'); return; }
-    if(!requireMasterAccessKey()) return;
-
+    const requestedCallsign = String(callsignInput.value || '').trim();
+    // Acceso local permanente: no hereda permisos ni ocupa una sala en línea.
     const access = {
       side: 'neutral',
-      role: String(gateState.role || 'default'),
-      callsign: gateState.callsign.trim(),
-      room: currentHashRoom(),
+      role: 'default',
+      callsign: requestedCallsign.length >= 2 ? requestedCallsign : 'PLANIFICADOR',
+      room: 'planning-local',
       planning: true,
       freeplay: false,
       ts: Date.now()
@@ -27918,7 +27944,7 @@ import { getAuth } from "https://www.gstatic.com/firebasejs/10.12.3/firebase-aut
   }
 
   __bootstrapSavedAccess();
-  fetchRooms();
+  if(!(window.__SETCA_isLocalOnlyMode && window.__SETCA_isLocalOnlyMode())) fetchRooms();
   updateGateUI();
 
   if(typeof window.setcaOff === 'function' && !window.setcaOff.__setcaWrapped){
