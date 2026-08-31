@@ -34,6 +34,47 @@
     const access = window.__setcaAccess || readSavedAccess() || {};
     return participantTeam(access.team);
   };
+  // El equipo nunca se deduce de Friend/Hostile: los archivos antiguos son BLUE.
+  window.__SETCA_entityTeam = entity => normalizeTeam(entity && entity.team) || 'blue';
+  window.__SETCA_isOwnTeam = entity => !!entity && window.__SETCA_entityTeam(entity) === window.__SETCA_getCurrentTeam();
+  window.__SETCA_canSeeOwnedEntity = window.__SETCA_isOwnTeam;
+  const contactRoles = {blue:Object.create(null), red:Object.create(null)};
+  window.__SETCA_contactRoles = contactRoles;
+  window.__SETCA_getContactRole = function(p, roles){
+    if(!p) return 'Unknown';
+    const row = contactRoles[window.__SETCA_getCurrentTeam()][String(p.id || '')];
+    if(row && row.role) return row.role;
+    return window.__SETCA_isOwnTeam(p) ? String((roles || {})[p.id] || 'Neutral') : 'Unknown';
+  };
+  window.__SETCA_rolesForTeam = function(planes, roles){
+    const result = {};
+    (Array.isArray(planes) ? planes : []).forEach(p=>{
+      if(p && p.id) result[p.id] = window.__SETCA_getContactRole(p, roles);
+    });
+    return result;
+  };
+  window.__SETCA_setTeamContactRole = function(p, role){
+    const team = window.__SETCA_getCurrentTeam();
+    const row = {role, at:Date.now(), by:String((window.__setcaAccess || {}).callsign || '')};
+    contactRoles[team][String(p.id)] = row;
+    if(window.__SETCA_publishTeamContactRole) window.__SETCA_publishTeamContactRole(p, row);
+    return role;
+  };
+  window.__SETCA_contactView = function(p){
+    if(!p || window.__SETCA_isOwnTeam(p)) return p;
+    // Solo posición/cinemática del contacto: nunca identidad, rutas o sensores rivales.
+    return {id:p.id, team:p.team, name:'CONTACTO ' + String(p.id || '').slice(-6),
+      tipo:'Desconocido', x:p.x, y:p.y, alt:p.alt, spd:p.spd, hdg:p.hdg,
+      tgtAlt:p.alt, tgtSpd:p.spd, tgtHdg:p.hdg, turn:0, ghosts:[], lastDet:p.lastDet,
+      fail:{}, xpdr:'', awacsCoverage:false, __setcaContactView:true};
+  };
+  window.__SETCA_ownedMissileStats = function(scene){
+    const shots = new Map();
+    [].concat(scene.missiles || [], scene.impactMarks || []).filter(window.__SETCA_isOwnTeam).forEach(m=>{
+      shots.set(String(m.missileId || m.id || ''), String(m.launcherType || '').toLowerCase());
+    });
+    return {aircraft:Array.from(shots.values()).filter(t=>t !== 'gtc').length, dart:Array.from(shots.values()).filter(t=>t === 'gtc').length};
+  };
   window.__SETCA_stampEntityTeam = function(entity, fallback){
     if(!entity || typeof entity !== 'object') return entity;
     entity.team = normalizeTeam(entity.team) || normalizeTeam(fallback) || window.__SETCA_getCurrentTeam();
@@ -177,6 +218,51 @@
   try{ window.__SETCA_canLaunchGtcMissile = __SETCA_canLaunchGtcMissile; }catch(_){ }
   try{ window.__SETCA_canWriteSharedState = __SETCA_canWriteSharedState; }catch(_){ }
   let currentUID = null;
+  let __setcaTeamContactsUnsub = null;
+  function __SETCA_refreshTeamContacts(){
+    if(typeof st === 'undefined' || !st) return;
+    st.roles = window.__SETCA_rolesForTeam(st.planes, st.roles);
+    ['repaintVuelos','repaintNav','repaintPlanesList','repaintAlt'].forEach(name=>{
+      try{ if(typeof window[name] === 'function') window[name](); }catch(_){ }
+    });
+  }
+  function __SETCA_startTeamContacts(){
+    if(__localOnlyMode || __setcaTeamContactsUnsub) return;
+    const team = window.__SETCA_getCurrentTeam();
+    __setcaTeamContactsUnsub = onValue(ref(db, `rooms/${ROOM_ID}/teamContacts/${team}`), snap=>{
+      const incoming = snap.val() || {};
+      const previous = window.__SETCA_contactRoles[team];
+      const next = Object.create(null);
+      Object.entries(incoming).forEach(([id, row])=>{
+        if(row && ['Commercial','Friend','Neutral','Boogey','Bandit','Hostile','Unknown','Kill-confirm'].includes(row.role)) next[id] = row;
+      });
+      // No sustituir una edición local pendiente por una instantánea anterior.
+      Object.entries(previous).forEach(([id,row])=>{
+        if(row.pending && (!next[id] || Number(row.at) > Number(next[id].at))) next[id] = row;
+      });
+      window.__SETCA_contactRoles[team] = next;
+      __SETCA_refreshTeamContacts();
+    }, error=>console.warn('SETCA: no se pudo sincronizar la clasificación de equipo', error));
+  }
+  window.__SETCA_publishTeamContactRole = async function(p, row){
+    if(__localOnlyMode) return false;
+    if(!p || !p.id || !['default','odi','atc','odt','samallocator'].includes(__SETCA_getSharedWriteRole())) return false;
+    if(window.__SETCA_canSeePlane && !window.__SETCA_canSeePlane(p)) return false;
+    const team = window.__SETCA_getCurrentTeam();
+    const key = String(p.id);
+    if(['.','#','$','[',']','/'].some(char=>key.includes(char))) return false;
+    row.pending = true;
+    try{
+      await set(ref(db, `rooms/${ROOM_ID}/teamContacts/${team}/${key}`), {role:row.role, at:row.at, by:row.by});
+      delete row.pending;
+      return true;
+    }catch(error){
+      delete row.pending;
+      console.warn('SETCA: clasificación guardada localmente; falta sincronizar con el equipo', error);
+      if(typeof alert === 'function') alert('La clasificación no se pudo compartir con tu equipo. Revisa la conexión y vuelve a intentarlo.');
+      return false;
+    }
+  };
   let __setcaGtcRefreshTimer = null;
   let __setcaGtcRefreshHit = false;
 
@@ -300,6 +386,7 @@
     onAuthStateChanged(auth, (user) => {
       if (!user) return;
       currentUID = user.uid;
+      __SETCA_startTeamContacts();
       try{ window.currentUID = currentUID; }catch(_){ }
       const presRef = ref(db, `rooms/${ROOM_ID}/presence/${currentUID}`);
       set(presRef, true);
@@ -333,7 +420,7 @@
   try{ window.__SETCA_isSharedMissile = __SETCA_isSharedMissile; }catch(_){ }
 
   const __SETCA_GTC_LAUNCH_FIELDS = Object.freeze([
-    'id','name','launcher','launcherType','launcherName','targetName','tgt',
+    'id','team','name','launcher','launcherType','launcherName','targetName','tgt',
     'tx','ty','x','y','alt','spd','drift','travKM','rangeKM','maxAltFt',
     'launchedAt','launcherShotNumber','launcherRemainingShots','status',
     'courseDeg','validationStatus','validationCompletedPhases','validationBy',
@@ -911,6 +998,7 @@
       if(!window.st.impactMarks.some(mark=>mark && String(mark.missileId || '') === missileId)){
         const impact = {
           id:String(event.id || ('GTC_RESULT_' + eventId)).slice(0, 120),
+          team:window.__SETCA_entityTeam(event),
           type:result,
           reason:String(event.reason || (result === 'hit' ? 'impact' : 'range')).slice(0, 30),
           x:Number.isFinite(+event.x) ? +event.x : 0,
@@ -948,6 +1036,7 @@
         if(addedImpact){
           window.st.splashes = Array.isArray(window.st.splashes) ? window.st.splashes : [];
           window.st.splashes.push({
+            team:window.__SETCA_entityTeam(event),
             x:Number.isFinite(+event.x) ? +event.x : 0,
             y:Number.isFinite(+event.y) ? +event.y : 0,
             t:0
@@ -1151,8 +1240,8 @@
         : [];
       await runTransaction(stateRef, current=>{
         const base = (current && typeof current === 'object') ? {...current} : {};
-        base.drawings = drawings;
-        base.gtc = gtc;
+        base.drawings = __SETCA_mergeOwnedItems(base.drawings, drawings);
+        base.gtc = __SETCA_mergeOwnedItems(base.gtc, gtc);
         base.lastWriteBy = currentUID || 'pending';
         base.lastWriteRole = role;
         // Permite que el Instructor reciba cambios GTC del ODT sin rechazar el paquete.
@@ -1223,9 +1312,22 @@
     return out;
   }
 
+  function __SETCA_mergeOwnedItems(current, incoming){
+    const opponents = (Array.isArray(current) ? current : []).filter(x=>x && !window.__SETCA_isOwnTeam(x));
+    const protectedIds = new Set(opponents.map(x=>String(x.id || '')));
+    const own = (Array.isArray(incoming) ? incoming : []).filter(x=>window.__SETCA_isOwnTeam(x) && !protectedIds.has(String(x.id || '')));
+    return opponents.concat(own);
+  }
   function __setcaMergeAuthoritativePayload(current, payload){
     if(!current || typeof current !== 'object') return payload;
     const out = {...payload};
+    out.roles = {...(current.roles || {})};
+    (Array.isArray(current.planes) ? current.planes : []).filter(window.__SETCA_isOwnTeam).forEach(p=>{ delete out.roles[p.id]; });
+    (Array.isArray(payload.planes) ? payload.planes : []).filter(window.__SETCA_isOwnTeam).forEach(p=>{
+      if(payload.roles && payload.roles[p.id]) out.roles[p.id] = payload.roles[p.id];
+    });
+    out.gtc = __SETCA_mergeOwnedItems(current.gtc, payload.gtc);
+    out.drawings = __SETCA_mergeOwnedItems(current.drawings, payload.drawings);
     out.planes = __setcaMergePlanesByAuthority(current.planes, payload.planes);
     out.missiles = __setcaMergeMissilesById(
       current.missiles,
@@ -1516,7 +1618,7 @@ let __setcaLastAppliedRemoteTs = 0;
       }
 
       if (v.roles) {
-        const nextRoles = {...v.roles};
+        const nextRoles = window.__SETCA_rolesForTeam(st.planes, v.roles);
         const nowTs = Date.now();
         __setcaPendingAircraftFallbackUntil.forEach((until, id)=>{
           if(Number(until || 0) > nowTs && st.roles && Object.prototype.hasOwnProperty.call(st.roles, id)){
@@ -9000,8 +9102,6 @@ function flash(el){el.classList.add('flash');setTimeout(()=>el.classList.remove(
 const NM2KM=1.852,KTS2KMH=1.852,KMH2KTS=1/1.852,FT2M=0.3048;
 const AWACS_COVERAGE_KM = 500;
 const AWACS_COVERAGE_NM = AWACS_COVERAGE_KM / NM2KM;
-const AWACS_BEAM_HALF_DEG = 18;
-const AWACS_BEAM_ROT_DEG_PER_SEC = 42;
 const MAX_RANGE_NM=1000,GRID_STEP_NM=10,PX_PER_NM=20;
 // GTC: edición solo desde el panel (sin clicks sobre el radar)
 window.GTC_PANEL_ONLY = true;
@@ -10330,7 +10430,7 @@ function __navEnsureTrack(p){
   let track = __NAV_STORE.tracks[id];
   if(!track){
     track = __NAV_STORE.tracks[id] = {
-      id,
+      id, team:window.__SETCA_entityTeam(p),
       name:String(p.name || id),
       tipo:String((typeof getPlaneTipoDisplay === 'function' ? getPlaneTipoDisplay(p) : (p.tipo || '')) || ''),
       color:__navGetTrackColor(id, __navColorForId(id)),
@@ -10344,6 +10444,8 @@ function __navEnsureTrack(p){
 }
 function __navRecordPlane(p, force=false, nowTs=null){
   if(!p || !p.id) return;
+  if(!isPlaneVisibleToCurrentRole(p)) return;
+  p = window.__SETCA_contactView(p);
   const track = __navEnsureTrack(p);
   if(!track) return;
   const now = Number.isFinite(nowTs) ? nowTs : performance.now();
@@ -10378,7 +10480,7 @@ function __navEnsureMissileTrack(m){
   let track = __NAV_STORE.missileTracks[id];
   if(!track){
     track = __NAV_STORE.missileTracks[id] = {
-      id,
+      id, team:window.__SETCA_entityTeam(m),
       name:String(m.name || id),
       launcher:String(m.launcher || ''),
       launcherName:String(m.launcherName || m.launcher || ''),
@@ -10398,6 +10500,7 @@ function __navEnsureMissileTrack(m){
 }
 function __navRecordMissile(m, force=false, nowTs=null){
   if(!m || !m.id) return;
+  if(!window.__SETCA_canSeeOwnedEntity(m)) return;
   const track = __navEnsureMissileTrack(m);
   if(!track) return;
   const now = Number.isFinite(nowTs) ? nowTs : performance.now();
@@ -10913,7 +11016,7 @@ function __navCollectRenderData(){
   const missileMap = new Map((Array.isArray(currentState && currentState.missiles) ? currentState.missiles : []).map(m=>[String(m && m.id || ''), m]));
   const visibleIds = new Set((Array.isArray(st.planes) ? st.planes : []).filter(isPlaneVisibleToCurrentRole).map(p=>String(p.id || '')));
   const showAllTracks = !!(window.__SETCA_hasFullAircraftVisibility && window.__SETCA_hasFullAircraftVisibility());
-  const tracks = Object.values(__NAV_STORE.tracks || {}).filter(track=>showAllTracks || visibleIds.has(String(track.id || ''))).map(track=>{
+  const tracks = Object.values(__NAV_STORE.tracks || {}).filter(track=>(showAllTracks && (!window.__SETCA_isOwnTeam || window.__SETCA_isOwnTeam(track))) || visibleIds.has(String(track.id || ''))).map(track=>{
     const pts = (Array.isArray(track.pts) ? track.pts : []).filter(pt=>!Number.isFinite(cutoff) || pt.t <= cutoff);
     const plane = replayActive ? null : planeMap.get(String(track.id || ''));
     const replayPoint = replayActive ? __navPointAtCutoff(track.pts, cutoff) : null;
@@ -10933,7 +11036,7 @@ function __navCollectRenderData(){
           } : (pts.length ? pts[pts.length-1] : null))
     };
   }).filter(track=>track.pts.length || track.current);
-  const missiles = Object.values(__NAV_STORE.missileTracks || {}).map(track=>{
+  const missiles = Object.values(__NAV_STORE.missileTracks || {}).filter(track=>window.__SETCA_canSeeOwnedEntity(track)).map(track=>{
     const pts = (Array.isArray(track.pts) ? track.pts : []).filter(pt=>!Number.isFinite(cutoff) || pt.t <= cutoff);
     const live = replayActive ? null : missileMap.get(String(track.id || ''));
     const replayPoint = replayActive ? __navPointAtCutoff(track.pts, cutoff) : null;
@@ -12391,7 +12494,7 @@ function toScreen(x,y){return {x:CX+offX+x*zoom*PX_PER_NM,y:CY+offY+y*zoom*PX_PE
 function toWorld(px,py){return {x:(px-CX-offX)/(zoom*PX_PER_NM),y:(py-CY-offY)/(zoom*PX_PER_NM)};}
 function getTacticalVisualScale(z){ return 1; }
 
-/* ===== Analógico: detección por haz ===== */
+/* ===== Analógico: detección AWACS por cobertura circular ===== */
 function normDeg(a){
   a = Number(a || 0);
   return ((a % 360) + 360) % 360;
@@ -12406,21 +12509,16 @@ function bearingDeg(dx,dy){
 function sweepDetect(dt){
   if(!window.st || !Array.isArray(st.planes) || !st.planes.length) return;
   const now = performance.now();
-  const awacsList = st.planes.filter(p=> p && !p._hit && isAwacsPlane(p) && p.awacsCoverage !== false && !isPlaneKillConfirmed(p));
+  const awacsList = st.planes.filter(p=> p && window.__SETCA_isOwnTeam(p) && !p._hit && isAwacsPlane(p) && p.awacsCoverage !== false && !isPlaneKillConfirmed(p));
   if(!awacsList.length) return;
   awacsList.forEach(aw=>{
-    const nextAng = normDeg((Number.isFinite(aw.awacsSweepAng) ? aw.awacsSweepAng : (aw.hdg || 0)) + AWACS_BEAM_ROT_DEG_PER_SEC * dt);
-    aw.awacsSweepAng = nextAng;
     st.planes.forEach(tgt=>{
       if(!tgt || tgt===aw) return;
       const dx = (tgt.x || 0) - (aw.x || 0);
       const dy = (tgt.y || 0) - (aw.y || 0);
       const dist = Math.hypot(dx, dy);
       if(!isFinite(dist) || dist > AWACS_COVERAGE_NM) return;
-      const brg = bearingDeg(dx, dy);
-      if(angDiffDeg(brg, nextAng) <= AWACS_BEAM_HALF_DEG){
-        tgt.lastDet = now;
-      }
+      tgt.lastDet = now;
     });
   });
 }
@@ -12795,6 +12893,7 @@ if (Math.min(diffCW, diffCCW) > 0.1) {
 function drawPlane(p){
   if(!p || typeof window.__SETCA_canRenderPlane !== 'function' || !window.__SETCA_canRenderPlane(p)) return;
   const __livePlaneRef = p;
+  if(window.__SETCA_contactView) p = window.__SETCA_contactView(p);
   const __fadeLost = (typeof window.__SETCA_getActiveFadeLost === 'function') ? window.__SETCA_getActiveFadeLost(p) : null;
   if(__fadeLost) return;
   const __delayLag = (typeof window.__SETCA_getActiveDelayLag === 'function') ? window.__SETCA_getActiveDelayLag(p) : null;
@@ -12808,7 +12907,7 @@ function drawPlane(p){
     : null;
   if(__acquisitionVisual && __acquisitionVisual.visible && !__acquisitionVisual.showDataBlock){
     // Eco sin identificación: ni el color de equipo/IFF ni las etiquetas se anticipan.
-    const __echoColor = st.labelMode === 3 ? '#ff9900' : '#b8d9ca';
+    const __echoColor = '#ffff00';
     const __echoScale = Math.max(0.12, Math.min(1, Number(__acquisitionVisual.scale) || 0.12));
     const __echoAlpha = Math.max(0.16, Math.min(0.9, Number(__acquisitionVisual.alpha) || 0.16));
     const __echoProgress = Math.max(0, Math.min(1, Number(__acquisitionVisual.progress) || 0));
@@ -12817,6 +12916,8 @@ function drawPlane(p){
     ctx.save();
     ctx.globalAlpha = __echoAlpha;
     ctx.fillStyle = __echoColor;
+    ctx.shadowColor = __echoColor;
+    ctx.shadowBlur = 5 + 5 * __echoProgress;
     ctx.beginPath();
     ctx.arc(s.x, s.y, __echoRadius, 0, 2*Math.PI);
     ctx.fill();
@@ -12843,7 +12944,7 @@ function drawPlane(p){
     return;
   }
 
-  if(st.showAwacsCoverage && isAwacsPlane(p) && p.awacsCoverage !== false){
+  if(st.showAwacsCoverage && window.__SETCA_isOwnTeam(p) && isAwacsPlane(p) && p.awacsCoverage !== false){
     const rPx = AWACS_COVERAGE_NM * zoom * PX_PER_NM;
     if(isFinite(rPx) && rPx > 1){
       ctx.save();
@@ -12852,18 +12953,7 @@ function drawPlane(p){
       ctx.arc(s.x, s.y, rPx, 0, 2*Math.PI);
       ctx.fill();
 
-      const beamAng = normDeg(Number.isFinite(p.awacsSweepAng) ? p.awacsSweepAng : (p.hdg || 0));
-      const beamDir = (beamAng - 90) * Math.PI / 180;
-      const beamHalf = AWACS_BEAM_HALF_DEG * Math.PI / 180;
-      const beamRadius = Math.max(12, rPx * 0.94);
-      const beamInner = Math.max(16, Math.min(rPx * 0.26, beamRadius - 8));
-      ctx.fillStyle = st.labelMode===3 ? 'rgba(255,153,0,0.10)' : 'rgba(77,227,255,0.07)';
-      ctx.beginPath();
-      ctx.arc(s.x, s.y, beamRadius, beamDir - beamHalf, beamDir + beamHalf);
-      ctx.arc(s.x, s.y, beamInner, beamDir + beamHalf, beamDir - beamHalf, true);
-      ctx.closePath();
-      ctx.fill();
-
+      // Sin haz visual: solo permanece la cobertura circular efectiva del AWACS.
       ctx.strokeStyle = 'rgba(77,227,255,0.34)';
       ctx.lineWidth = 1;
       ctx.setLineDash([6,6]);
@@ -12883,7 +12973,7 @@ function drawPlane(p){
 
   // Modo 3: radar analógico (solo puntos naranjas de contactos detectados por el radar)
   if(st.labelMode===3){
-    const fullVisibility = !!(window.__SETCA_hasFullAircraftVisibility && window.__SETCA_hasFullAircraftVisibility());
+    const fullVisibility = !!(window.__SETCA_hasFullAircraftVisibility && window.__SETCA_hasFullAircraftVisibility(__livePlaneRef));
     const groundContact = !!(window.__SETCA_isPlaneInGroundCoverage && window.__SETCA_isPlaneInGroundCoverage(__livePlaneRef));
     const age = (fullVisibility || groundContact) ? 0 : performance.now()-p.lastDet;
     if(age<CONTACT_PERSIST_MS){ // 5 s
@@ -13320,8 +13410,11 @@ function launch(launcherId,targetId,type){
   const TRef = __resolveMissileTarget(targetId);
   const T = TRef && TRef.entity;
   if(!L || !T) return;
+  if(!window.__SETCA_isOwnTeam(L)) return;
+  if(TRef.kind === 'plane' ? !isPlaneVisibleToCurrentRole(T) : !window.__SETCA_canSeeOwnedEntity(T)) return;
   const missile = {
     id:'MS'+Date.now(),
+    team:window.__SETCA_entityTeam(L),
     name:type==='R77'?'R-77':'AMRAAM',
     x:+L.x||0,
     y:+L.y||0,
@@ -13331,7 +13424,7 @@ function launch(launcherId,targetId,type){
     spd:2500,
     tgt:targetId,
     tgtType:(TRef && TRef.kind) || 'plane',
-    targetName:__entityName(TRef, targetId),
+    targetName:TRef.kind === 'plane' ? window.__SETCA_contactView(T).name : __entityName(TRef, targetId),
     launcher:launcherId,
     launcherType:'plane',
     launcherName:String(L.name || L.id || launcherId),
@@ -13355,6 +13448,7 @@ function __registerMissileImpact(target, missile, targetKind='plane'){
   if(!Array.isArray(st.impactMarks)) st.impactMarks = [];
   const impact = {
     id:'IMP'+Date.now()+Math.random().toString(36).slice(2,6),
+    team:window.__SETCA_entityTeam(missile),
     x:Number.isFinite(+target.x) ? +target.x : Number(missile && missile.x || 0),
     y:Number.isFinite(+target.y) ? +target.y : Number(missile && missile.y || 0),
     by:String(missile && missile.launcher || ''),
@@ -13364,7 +13458,7 @@ function __registerMissileImpact(target, missile, targetKind='plane'){
     launcherName:String(missile && missile.launcherName || missile && missile.launcher || ''),
     launcherType:String(missile && missile.launcherType || ''),
     targetId:String(target.id || ''),
-    targetName:String(target.name || ''),
+    targetName:targetKind === 'plane' ? window.__SETCA_contactView(target).name : String(target.name || ''),
     ts:Date.now()
   };
   st.impactMarks.push(impact);
@@ -13407,6 +13501,7 @@ function __registerMissileMiss(missile, reason='range'){
   if(existing) return existing;
   const mark = {
     id,
+    team:window.__SETCA_entityTeam(missile),
     type:'miss',
     reason:String(reason || 'range'),
     x:Number.isFinite(+missile.x) ? +missile.x : 0,
@@ -13558,7 +13653,7 @@ function updateMissiles(dt, options={}){
     const distBeforeHitNM = hasLiveTarget ? Math.hypot(dx, dy) : Infinity;
     const canReachTargetBeforeRange = (rangeKM <= 0) || ((distBeforeHitNM * NM2KM) <= (remainingKM + 0.05)) || distBeforeHitNM < 1.0;
     if(hasLiveTarget && !altitudeBlocked && canReachTargetBeforeRange && distBeforeHitNM <= Math.max(1.0, step)){
-      const targetName = __entityName(TRef, m.targetName || m.tgt);
+      const targetName = TRef.kind === 'plane' ? window.__SETCA_contactView(T).name : __entityName(TRef, m.targetName || m.tgt);
       const targetX = +T.x||0;
       const targetY = +T.y||0;
       m.x = targetX;
@@ -13569,7 +13664,7 @@ function updateMissiles(dt, options={}){
       if(__SETCA_finishGlobalGtcReplica(m, 'hit', 'impact')) return;
       m.status='hit';
       m.consumedAt = Date.now();
-      st.splashes.push({x:targetX,y:targetY,t:0});
+      st.splashes.push({x:targetX,y:targetY,t:0,team:window.__SETCA_entityTeam(m)});
       if(TRef && TRef.kind === 'plane') T._hit=true;
       __registerMissileImpact(T, m, (TRef && TRef.kind) || 'plane');
       __SETCA_finalizeLocalGtcOutcome(m, 'hit', 'impact', T);
@@ -13578,7 +13673,7 @@ function updateMissiles(dt, options={}){
         __gtcImpactChanged = true;
         __gtcHitChanged = true;
       }else __nonGtcImpactChanged = true;
-      logEvent(`SPLASH: ${targetName} destruido`);
+      logEvent(`SPLASH: ${targetName} destruido`, m);
 
       const LRef = __resolveMissileLauncher(m.launcher);
       const L = LRef && LRef.entity;
@@ -13607,7 +13702,7 @@ function updateMissiles(dt, options={}){
 
     const distNM=Math.hypot(dx,dy);
     if(hasLiveTarget && !altitudeBlocked && distNM<1.0){
-      const targetName = __entityName(TRef, m.targetName || m.tgt);
+      const targetName = TRef.kind === 'plane' ? window.__SETCA_contactView(T).name : __entityName(TRef, m.targetName || m.tgt);
       const targetX = +T.x||0;
       const targetY = +T.y||0;
       m.x = targetX;
@@ -13617,7 +13712,7 @@ function updateMissiles(dt, options={}){
       if(__SETCA_finishGlobalGtcReplica(m, 'hit', 'impact')) return;
       m.status='hit';
       m.consumedAt = Date.now();
-      st.splashes.push({x:targetX,y:targetY,t:0});
+      st.splashes.push({x:targetX,y:targetY,t:0,team:window.__SETCA_entityTeam(m)});
       if(TRef && TRef.kind === 'plane') T._hit=true;
       __registerMissileImpact(T, m, (TRef && TRef.kind) || 'plane');
       __SETCA_finalizeLocalGtcOutcome(m, 'hit', 'impact', T);
@@ -13626,7 +13721,7 @@ function updateMissiles(dt, options={}){
         __gtcImpactChanged = true;
         __gtcHitChanged = true;
       }else __nonGtcImpactChanged = true;
-      logEvent(`SPLASH: ${targetName} destruido`);
+      logEvent(`SPLASH: ${targetName} destruido`, m);
 
       const LRef = __resolveMissileLauncher(m.launcher);
       const L = LRef && LRef.entity;
@@ -13665,6 +13760,7 @@ function updateMissiles(dt, options={}){
 }
 function drawMissiles(){
   st.missiles.forEach(m=>{
+    if(!window.__SETCA_canSeeOwnedEntity(m)) return;
     const s=toScreen(m.x,m.y);
     const TRef = __resolveMissileTarget(m.tgt);
     const T = TRef && TRef.entity;
@@ -13675,9 +13771,10 @@ function drawMissiles(){
     ctx.strokeStyle='#ffe066';ctx.setLineDash([2,4]);ctx.beginPath();ctx.moveTo(s.x,s.y);ctx.lineTo(t.x,t.y);ctx.stroke();ctx.setLineDash([]);
     ctx.fillStyle='#ffe066';ctx.font='10px monospace';ctx.textAlign='center';ctx.fillText(m.name,s.x,s.y-8);
   });
-  st.splashes.forEach(sp=>{sp.t+=1/60;const r=(sp.t*60);const s=toScreen(sp.x,sp.y);ctx.strokeStyle=`rgba(255,100,100,${Math.max(0,1-sp.t)})`;ctx.beginPath();ctx.arc(s.x,s.y,r,0,2*Math.PI);ctx.stroke();});
+  st.splashes.forEach(sp=>{sp.t+=1/60;if(!window.__SETCA_canSeeOwnedEntity(sp)) return;const r=(sp.t*60);const s=toScreen(sp.x,sp.y);ctx.strokeStyle=`rgba(255,100,100,${Math.max(0,1-sp.t)})`;ctx.beginPath();ctx.arc(s.x,s.y,r,0,2*Math.PI);ctx.stroke();});
   st.splashes=st.splashes.filter(sp=>sp.t<1.2);
   (Array.isArray(st.impactMarks) ? st.impactMarks : []).forEach(mark=>{
+    if(!window.__SETCA_canSeeOwnedEntity(mark)) return;
     const s = toScreen(mark.x, mark.y);
     ctx.save();
     ctx.strokeStyle = 'rgba(255,72,72,0.96)';
@@ -13736,6 +13833,7 @@ function getAspectCode(sector){
 }
 function drawPairs(){
   st.pairs.forEach(pr=>{
+    if(!window.__SETCA_canSeeOwnedEntity(pr)) return;
     const A=st.planes.find(p=>p.id===pr.a),B=st.planes.find(p=>p.id===pr.b); if(!A||!B) return;
     const s1=toScreen(A.x,A.y),s2=toScreen(B.x,B.y);
     ctx.beginPath();ctx.moveTo(s1.x,s1.y);ctx.lineTo(s2.x,s2.y);ctx.strokeStyle='#eaffea';ctx.lineWidth=1;ctx.stroke();
@@ -14069,6 +14167,7 @@ function drawGTC(){
   if(!arr.length) return;
   ctx.save();
   for(const u of arr){
+    if(!window.__SETCA_canSeeOwnedEntity(u)) continue;
     const s = toScreen(u.x, u.y);
     const theme = gtcUnitTheme(u);
     const canLaunch = __gtcCanLaunch(u);
@@ -14705,6 +14804,7 @@ function __translateDrawingGeometry(d, dx, dy){
 function drawShapes(){
   st.drawings.forEach(d=>{
     if(!d) return;
+    if(!window.__SETCA_canSeeOwnedEntity(d)) return;
     if(isDrawingHiddenLocal(d.id)) return;
     __normalizeDrawingScope(d);
     try{ if(typeof isDrawingGroupHiddenLocal === 'function' && isDrawingGroupHiddenLocal(getDrawingGroupName(d))) return; }catch(_){ }
@@ -15146,6 +15246,7 @@ function __pointInPolyPx(px, py, poly){
 }
 
 function __hitDrawingPx(d, px, py, tolPx){
+  if(!window.__SETCA_canSeeOwnedEntity(d)) return false;
   const s = toScreen(d.x, d.y);
 
   if(d.type==='point'){
@@ -15247,6 +15348,7 @@ function pickShapePrecisePx(px, py, tolPx=7){
 }
 
 function __hitDrawingPerimeterPx(d, px, py, tolPx){
+  if(!window.__SETCA_canSeeOwnedEntity(d)) return false;
   if(!d) return false;
   const s = toScreen(d.x, d.y);
 
@@ -15307,7 +15409,7 @@ function pickShapePerimeterPrecisePx(px, py, tolPx=7){
 }
 
 function __findDrawingById(id){
-  return (st.drawings||[]).find(d=>d.id===id) || null;
+  return (st.drawings||[]).find(d=>d.id===id && window.__SETCA_canSeeOwnedEntity(d)) || null;
 }
 
 /* ===== ALT arrastra avión / dibujo ===== */
@@ -16218,6 +16320,7 @@ cvs.addEventListener('mousedown',e=>{
   const hit=null; // ALT: solo mover aeronaves, no dibujos if(hit){st.selectedDrawing=hit;draggingDrawing=st.drawings.find(d=>d.id===hit);dragStart={x:e.clientX,y:e.clientY};return;}
   let best=null,bd=1e9;st.planes.forEach(p=>{
     if(!isPlaneVisibleToCurrentRole(p)) return;
+    if(!window.__SETCA_isOwnTeam(p)) return;
     if(isPlaneKillConfirmed(p)) return;
     const d=Math.hypot(wx-p.x,wy-p.y);
     if(d<15/zoom && d<bd){bd=d;best=p;}
@@ -16536,8 +16639,9 @@ function fmt(ms) {
 function logTel() {
   tel.rows.push({
     t: st.elapsed,
-    planes: st.planes.map(p => ({
+    planes: st.planes.filter(isPlaneVisibleToCurrentRole).map(window.__SETCA_contactView).map(p => ({
       id: p.id,
+      team: window.__SETCA_entityTeam(p),
       name: p.name,
       alt: p.alt,
       spd: p.spd
@@ -16545,8 +16649,17 @@ function logTel() {
   });
 }
 
-function logEvent(txt) {
-  tel.evts.push({ t: st.elapsed, txt });
+function logEvent(txt, source) {
+  if(source && !window.__SETCA_isOwnTeam(source)) return;
+  let text = String(txt || '');
+  for(const p of (st.planes || [])){
+    if(window.__SETCA_isOwnTeam(p) || !p.name || !text.includes(p.name)) continue;
+    if(!isPlaneVisibleToCurrentRole(p)) return;
+    text = text.split(p.name).join(window.__SETCA_contactView(p).name);
+  }
+  const privateItems = [].concat(st.gtc || [], st.drawings || [], st.missiles || []);
+  if(privateItems.some(x=>!window.__SETCA_isOwnTeam(x) && x.name && text.includes(x.name))) return;
+  tel.evts.push({ t: st.elapsed, txt:text, team:window.__SETCA_getCurrentTeam() });
 }
 
 let telTick = 0;
@@ -16584,7 +16697,7 @@ function __reportPlaneRecords(){
   });
   (st.planes||[]).forEach(p=>{ const rec=ensure(p.id,p.name); rec.current=p; if(!rec.samples.length) rec.samples.push({t:__reportNum(st.elapsed),alt:__reportNum(p.alt),spd:__reportNum(p.spd)}); });
   const showAll = !!(window.__SETCA_hasFullAircraftVisibility && window.__SETCA_hasFullAircraftVisibility());
-  return Array.from(records.values()).filter(rec=>showAll || isPlaneVisibleToCurrentRole(rec.current)).map(rec=>{
+  return Array.from(records.values()).filter(rec=>isPlaneVisibleToCurrentRole(rec.current)).map(rec=>{
     rec.samples.sort((a,b)=>a.t-b.t);
     const alts=rec.samples.map(s=>s.alt).filter(Number.isFinite);
     const spds=rec.samples.map(s=>s.spd).filter(Number.isFinite);
@@ -16607,7 +16720,7 @@ function __reportMissileRecords(){
   Object.entries(logs).forEach(([id,pts])=>{ if(Array.isArray(pts)&&pts.length) ensure(id).logs=pts.slice(); });
   (st.missiles||[]).forEach(m=>{ const rec=ensure(m.id||m.name); rec.active=m; rec.validation=m.samDualLaunch||rec.validation; });
   (st.impactMarks||[]).forEach(mark=>{ const rec=ensure(mark.missileId||mark.id); rec.mark=mark; rec.validation=mark.samDualLaunch||rec.validation; });
-  return Array.from(map.values()).map(rec=>{
+  return Array.from(map.values()).filter(rec=>window.__SETCA_canSeeOwnedEntity(rec.active || rec.mark)).map(rec=>{
     const a=rec.active||{}, mark=rec.mark||{}, last=rec.logs[rec.logs.length-1]||{}, first=rec.logs[0]||{};
     const isMiss=String(mark.type||'')==='miss', isHit=!!rec.mark&&!isMiss, isActive=!!rec.active&&(!rec.active.status||String(rec.active.status)==='fly');
     const result=isHit?'IMPACTO':(isMiss?'NO IMPACTO':(isActive?'TRAYECTORIA ACTIVA':'SIN REGISTRO'));
@@ -16628,7 +16741,7 @@ function __reportValidationHtml(s){
   }).join('')+'</div>';
 }
 function __reportEventRows(){
-  return (tel.evts||[]).map((e,index)=>{
+  return (tel.evts||[]).filter(window.__SETCA_isOwnTeam).map((e,index)=>{
     const txt=String(e&&e.txt||'Sin registro');
     let category='AERONAVE',result='REGISTRO',actor='SISTEMA',action=txt;
     if(/VALIDACION|VALIDACIÓN/i.test(txt)){category='VALIDACION';result=/completa|BUEN/i.test(txt)?'COMPLETA':'REGISTRADA';}
@@ -16856,7 +16969,7 @@ function isPlaneKillConfirmed(p){
   }catch(_){}
   return false;
 }
-function getPlaneRoleOptionsHtml(selectedRole){
+function getPlaneRoleOptionsHtml(selectedRole, plane=null){
   const rv = normalizePlaneRole(selectedRole);
   const items = [
     ['Commercial','Commercial'],
@@ -16867,7 +16980,7 @@ function getPlaneRoleOptionsHtml(selectedRole){
     ['Hostile','Hostile'],
     ['Unknown','Unknown']
   ];
-  if(__SETCA_canUseKillConfirm() || rv === 'Kill-confirm') items.push(['Kill-confirm','Kill-confirm']);
+  if((!plane || window.__SETCA_isOwnTeam(plane)) && (__SETCA_canUseKillConfirm() || rv === 'Kill-confirm')) items.push(['Kill-confirm','Kill-confirm']);
   return items.map(([val,label])=>`<option value="${val}"${rv===val?' selected':''}>${label}</option>`).join('');
 }
 function __setcaEnsureCallsignSeed(){
@@ -16909,17 +17022,23 @@ function nextUnknownCallsign(){
 }
 function syncPlaneRoleState(p){
   if(!p || !st || !st.roles) return 'Neutral';
-  const rv = normalizePlaneRole(st.roles[p.id] || 'Neutral');
+  const rv = normalizePlaneRole(window.__SETCA_getContactRole(p, st.roles));
+  st.roles[p.id] = rv;
   p._setcaPrevRole = rv;
   return rv;
 }
 function applyPlaneRoleChange(p, nextRole){
   if(!p || !st || !st.roles) return normalizePlaneRole(nextRole);
-  const currentRole = normalizePlaneRole(st.roles[p.id] || 'Neutral');
+  const currentRole = normalizePlaneRole(window.__SETCA_getContactRole(p, st.roles));
   const rv = normalizePlaneRole(nextRole);
+  const access = window.__setcaAccess || {};
+  if(!access.planning && !access.freeplay && !['default','odi','atc','odt','samallocator'].includes(String(access.role || ''))) return currentRole;
+  if(window.__SETCA_canSeePlane && !window.__SETCA_canSeePlane(p)) return currentRole;
+  if(rv === 'Kill-confirm' && !window.__SETCA_isOwnTeam(p)) return currentRole;
   if(rv === 'Kill-confirm' && !__SETCA_canUseKillConfirm()) return currentRole;
   if((currentRole === 'Kill-confirm' || rv === 'Kill-confirm') && !__SETCA_canUseKillConfirm()) return currentRole;
   st.roles[p.id] = rv;
+  window.__SETCA_setTeamContactRole(p, rv);
   if(p) p._setcaPrevRole = rv;
   if(rv === 'Kill-confirm'){
     p._killConfirmedAt = Date.now();
@@ -17038,7 +17157,7 @@ function __SETCA_markOdiLocalVuelos(p, fields){
       if(field === 'name') row.name = String(p.name || '');
       else if(field === 'tipo') row.tipo = String(p.tipo || '');
       else if(field === 'xpdr') row.xpdr = getPlaneXpdr(p);
-      else if(field === 'role') row.role = normalizePlaneRole((st.roles && st.roles[sid]) || 'Neutral');
+      else if(field === 'role') delete row.role; // La clasificación ahora pertenece al equipo, no al puesto.
       else if(field && typeof field === 'object' && field.m1 !== undefined) row.m1 = String(field.m1 || '').replace(/\D+/g,'').slice(0,2);
     });
     return true;
@@ -17058,7 +17177,7 @@ function __SETCA_applyOdiLocalVuelosOverrides(planes, roles){
       if(Object.prototype.hasOwnProperty.call(row, 'name') && p.name !== row.name){ p.name = row.name; changed = true; }
       if(Object.prototype.hasOwnProperty.call(row, 'tipo') && p.tipo !== row.tipo){ p.tipo = row.tipo; changed = true; }
       if(Object.prototype.hasOwnProperty.call(row, 'xpdr') && getPlaneXpdr(p) !== row.xpdr){ setPlaneXpdr(p, row.xpdr); changed = true; }
-      if(Object.prototype.hasOwnProperty.call(row, 'role') && roleMap && roleMap[p.id] !== row.role){ roleMap[p.id] = row.role; changed = true; }
+      if(Object.prototype.hasOwnProperty.call(row, 'role')) delete row.role;
     });
     return changed;
   }catch(_){ return false; }
@@ -17136,7 +17255,7 @@ function repaintVuelos(){
       </td>
       <td>
         <select class="ghost focusable focusAlt vuelosRoleSelect">
-          ${getPlaneRoleOptionsHtml(roleVal)}
+          ${getPlaneRoleOptionsHtml(roleVal, p)}
         </select>
       </td>
       <td>
@@ -17185,6 +17304,7 @@ function repaintVuelos(){
 
     // Glow/focus visual consistente
     [nameInput, tipoInput, roleSelect, m1Input, xpdrInput].forEach(el=>{
+      if(!window.__SETCA_isOwnTeam(p) && el !== roleSelect) el.disabled = true;
       el.addEventListener('focus',()=>el.classList.add('focusGlow'));
       el.addEventListener('blur',()=>el.classList.remove('focusGlow'));
     });
@@ -17324,7 +17444,7 @@ function repaintNav(){
 
         <span class="lbl" style="margin-left:6px">ROL</span>
         <select id="role-${id}" class="ghost focusable focusAlt">
-          ${getPlaneRoleOptionsHtml(st.roles[id] || 'Neutral')}
+          ${getPlaneRoleOptionsHtml(st.roles[id] || 'Neutral', p)}
         </select>
 
         <span class="lbl" style="margin-left:6px">OBJ</span>
@@ -17575,6 +17695,8 @@ function __SETCA_pushInstructorCommandNow(){
 function __SETCA_routeAircraftPatchToInstructor(p, patch, kind, role){
   try{
     if(!p || !p.id) return false;
+    if(kind === 'role') return false; // Canal teamContacts; jamás la cola global del instructor.
+    if(!window.__SETCA_isOwnTeam(p)) return true;
     if(!(window.__SETCA_shouldRouteAircraftCommand && window.__SETCA_shouldRouteAircraftCommand())) return false;
     if(window.__SETCA_submitAircraftCommand){
       window.__SETCA_submitAircraftCommand({ planeId:p.id, patch:patch || {}, kind:kind || 'aircraft-command', role:role || '' });
@@ -17585,6 +17707,7 @@ function __SETCA_routeAircraftPatchToInstructor(p, patch, kind, role){
 }
 function __SETCA_setCommandHdg(p, value){
   if(!p) return 0;
+  if(!window.__SETCA_isOwnTeam(p)) return Number(p.hdg) || 0;
   const hdg = ((Number(value) || 0) % 360 + 360) % 360;
   const currentCommand = Number(p.tgtHdg);
   const changesHeading = !Number.isFinite(currentCommand) || Math.abs((((hdg-currentCommand)+540)%360)-180) > 0.5;
@@ -17606,6 +17729,7 @@ function __SETCA_setCommandHdg(p, value){
 }
 function __SETCA_setCommandSpd(p, value){
   if(!p) return 0;
+  if(!window.__SETCA_isOwnTeam(p)) return Number(p.spd) || 0;
   const spd = Math.max(0, Number(value) || 0);
   if(__SETCA_routeAircraftPatchToInstructor(p, {tgtSpd:spd}, 'speed')) return spd;
   const activeProcedure = getPlaneFlightProcedure(p);
@@ -17625,6 +17749,7 @@ function __SETCA_setCommandSpd(p, value){
 }
 function __SETCA_setCommandAlt(p, value){
   if(!p) return 0;
+  if(!window.__SETCA_isOwnTeam(p)) return Number(p.alt) || 0;
   const alt = Math.max(0, Number(value) || 0);
   if(__SETCA_routeAircraftPatchToInstructor(p, {tgtAlt:alt}, 'altitude')) return alt;
   const activeProcedure = getPlaneFlightProcedure(p);
@@ -17812,6 +17937,7 @@ try{
       ctx.lineWidth=1;
       st.planes.forEach(p=>{
         if(!isPlaneVisibleToCurrentRole(p)) return;
+        if(!window.__SETCA_isOwnTeam(p)) return; // No revelar la ruta previa a la detección.
         const acquisition = (typeof window.__SETCA_getPlaneAcquisitionVisual === 'function') ? window.__SETCA_getPlaneAcquisitionVisual(p) : null;
         if(acquisition && !acquisition.showDataBlock) return;
         if(p.ghosts.length>1){
@@ -18227,7 +18353,7 @@ setInterval(()=>{ const m=$('#navReport'); if(m && m.style.display==='block' && 
     return 'Cambiar ruta';
   }
   function araGroundForPlane(p){
-    const units = Array.isArray(st.gtc) ? st.gtc.filter(Boolean) : [];
+    const units = Array.isArray(st.gtc) ? st.gtc.filter(window.__SETCA_canSeeOwnedEntity) : [];
     let nearest = null;
     let nearestFriendly = null;
     const exposures = [];
@@ -19764,9 +19890,9 @@ requestAnimationFrame(()=>{ repaintPlanesList(); repaintNav(); repaintStudent();
     return raw;
   }
   function buildObserverStats(){
-    const planes = Array.isArray(st.planes) ? st.planes.filter(isPlaneVisibleToCurrentRole) : [];
-    const impacts = Array.isArray(st.impactMarks) ? st.impactMarks.filter(Boolean) : [];
-    const missiles = Array.isArray(st.missiles) ? st.missiles.filter(Boolean) : [];
+    const planes = Array.isArray(st.planes) ? st.planes.filter(isPlaneVisibleToCurrentRole).map(window.__SETCA_contactView) : [];
+    const impacts = Array.isArray(st.impactMarks) ? st.impactMarks.filter(window.__SETCA_canSeeOwnedEntity) : [];
+    const missiles = Array.isArray(st.missiles) ? st.missiles.filter(window.__SETCA_canSeeOwnedEntity) : [];
     const missileStats = (typeof __normalizeMissileStats === 'function') ? __normalizeMissileStats(st.missileStats) : { aircraft:0, dart:0 };
     const fallbackAir = missiles.filter(m=> String(m && m.launcherType || '').toLowerCase() !== 'gtc').length;
     const fallbackDart = missiles.filter(m=> String(m && m.launcherType || '').toLowerCase() === 'gtc').length;
@@ -19784,8 +19910,8 @@ requestAnimationFrame(()=>{ repaintPlanesList(); repaintNav(); repaintStudent();
       connected: getObserverConnectedCount(),
       activeAircraft: planes.length,
       destroyed: destroyedIds.size || impacts.length,
-      aircraftMissiles: Math.max(missileStats.aircraft, fallbackAir),
-      dartMissiles: Math.max(missileStats.dart, fallbackDart),
+      aircraftMissiles: fallbackAir + impacts.filter(m=>String(m.launcherType || '').toLowerCase() !== 'gtc').length,
+      dartMissiles: fallbackDart + impacts.filter(m=>String(m.launcherType || '').toLowerCase() === 'gtc').length,
       typeCounts
     };
   }
@@ -19833,7 +19959,7 @@ requestAnimationFrame(()=>{ repaintPlanesList(); repaintNav(); repaintStudent();
         const pid = t.id.slice(3);
         if(Array.isArray(st.planes)){
           const p = st.planes.find(x => x.id === pid || x.name === pid);
-          if(p){ p.name = t.value || p.name; }
+          if(p && window.__SETCA_isOwnTeam(p)){ p.name = t.value || p.name; }
         }
         (window.repaintPlanesList||function(){})();
         (window.repaintPairs||function(){})();
@@ -20438,6 +20564,7 @@ function getDrawingCreatorName(d){
 }
 function canCurrentUserDeleteDrawing(d){
   if(!d) return false;
+  if(!window.__SETCA_canSeeOwnedEntity(d)) return false;
   const creator = getDrawingCreatorName(d);
   if(!creator || creator === 'Legado') return false;
   return creator === getCurrentDrawingCreator();
@@ -20691,7 +20818,7 @@ function renderDrawingScopePanel(){
   const list = document.getElementById('drawingScopeList');
   const count = document.getElementById('drawingScopeCount');
   if(!list || !count) return;
-  const arr = (window.st && Array.isArray(st.drawings)) ? st.drawings.slice() : [];
+  const arr = (window.st && Array.isArray(st.drawings)) ? st.drawings.filter(window.__SETCA_canSeeOwnedEntity) : [];
   count.textContent = String(arr.length);
   if(!arr.length){
     list.innerHTML = '<div class="drawingScopeEmpty">Sin gráficos todavía.</div>';
@@ -20999,6 +21126,7 @@ function __setcaRefreshAfterAircraftPaste(copy){
 function __SETCA_copySelectedAircraft(){
   const source = __setcaSelectedAircraftForClipboard();
   if(!source) return false;
+  if(!window.__SETCA_isOwnTeam(source)) return false;
   const copy = __setcaCloneAircraftPlain(source);
   if(!copy) return false;
   __SETCA_AIRCRAFT_CLIPBOARD.plane = copy;
@@ -21584,20 +21712,20 @@ document.addEventListener('keydown', (ev)=>{
     return out;
   }
   function buildSceneSnapshot(){
-    const planes = __exportList(Array.isArray(st.planes) ? st.planes : []);
+    const planes = __exportList(Array.isArray(st.planes) ? st.planes.filter(window.__SETCA_isOwnTeam) : []);
     for(let i=0;i<planes.length;i++){
       if(planes[i] && typeof planes[i] === 'object') delete planes[i].dataBlock;
     }
     const scene = {
       team: window.__SETCA_getCurrentTeam(),
       planes,
-      roles: __cloneExportSafe(st.roles || {}) || {},
-      drawings: __exportList(Array.isArray(st.drawings) ? st.drawings : []),
-      gtc: __exportList(Array.isArray(st.gtc) ? st.gtc : []),
-      missiles: __exportList(Array.isArray(st.missiles) ? st.missiles : []),
-      impactMarks: __exportList(Array.isArray(st.impactMarks) ? st.impactMarks : []),
-      missileStats: __normalizeMissileStats(st.missileStats),
-      pairs: __exportList(Array.isArray(st.pairs) ? st.pairs : []),
+      roles: Object.fromEntries(planes.map(p=>[p.id, window.__SETCA_getContactRole(p, st.roles)])),
+      drawings: __exportList(Array.isArray(st.drawings) ? st.drawings.filter(window.__SETCA_isOwnTeam) : []),
+      gtc: __exportList(Array.isArray(st.gtc) ? st.gtc.filter(window.__SETCA_isOwnTeam) : []),
+      missiles: __exportList(Array.isArray(st.missiles) ? st.missiles.filter(window.__SETCA_isOwnTeam) : []),
+      impactMarks: __exportList(Array.isArray(st.impactMarks) ? st.impactMarks.filter(window.__SETCA_isOwnTeam) : []),
+      missileStats: window.__SETCA_ownedMissileStats(st),
+      pairs: __exportList(Array.isArray(st.pairs) ? st.pairs.filter(window.__SETCA_isOwnTeam) : []),
       windKmh: Number.isFinite(+st.windKmh) ? +st.windKmh : 0,
       windDir: Number.isFinite(+st.windDir) ? +st.windDir : 0,
       showAwacsCoverage: !!st.showAwacsCoverage,
@@ -22982,6 +23110,7 @@ document.querySelectorAll('#pCmdBody .btn').forEach(btn=>{
     for(const p of st.planes){
       if(!p) continue;
       if(!isPlaneVisibleToCurrentRole(p)) continue;
+      if(!window.__SETCA_isOwnTeam(p)) continue;
       const s = toScreen(p.x||0, p.y||0);
       const d = Math.hypot(px - s.x, py - s.y);
       if(d <= thPx && d < bd){ bd = d; best = p; }
@@ -24240,7 +24369,7 @@ document.querySelectorAll('#pCmdBody .btn').forEach(btn=>{
 
   function getBullseyeDrawings(){
     if(!window.st || !Array.isArray(st.drawings)) return [];
-    return st.drawings.filter(d => d && d.type === 'bullseye');
+    return st.drawings.filter(d => d && d.type === 'bullseye' && window.__SETCA_canSeeOwnedEntity(d));
   }
   function findBullseyeById(id){
     return getBullseyeDrawings().find(d => d.id === id) || null;
@@ -24380,9 +24509,10 @@ document.querySelectorAll('#pCmdBody .btn').forEach(btn=>{
     const skip = String(excludePlaneId || '');
     const planes = ((window.st && Array.isArray(st.planes)) ? st.planes : [])
       .filter(x=>x && !x._hit && String(x.id || '') !== skip && isPlaneVisibleToCurrentRole(x))
+      .map(window.__SETCA_contactView)
       .map(x=>({ id:String(x.id || ''), label:String(x.name || x.id || ''), group:'Aviones' }));
     const gtc = ((window.st && Array.isArray(st.gtc)) ? st.gtc : [])
-      .filter(x=>x && String(x.id || '').trim())
+      .filter(x=>x && String(x.id || '').trim() && window.__SETCA_canSeeOwnedEntity(x))
       .map(x=>({ id:String(x.id || ''), label:`LANZA · ${String(x.name || x.id || '')}`, group:'LANZAS GTC' }));
     return planes.concat(gtc);
   }
@@ -24923,6 +25053,7 @@ document.querySelectorAll('#pCmdBody .btn').forEach(btn=>{
     if(!canDeletePlaneFromContext()) return false;
     const p = getTargetPlane();
     if(!p || !window.st || !Array.isArray(st.planes)) return false;
+    if(!window.__SETCA_isOwnTeam(p)) return false;
     const planeId = String(p.id || '');
     if(!planeId) return false;
     const planeName = String(p.name || p.id || 'Aeronave');
@@ -24960,6 +25091,7 @@ document.querySelectorAll('#pCmdBody .btn').forEach(btn=>{
   function fireMenuMissile(){
     const p = getTargetPlane();
     if(!p) return false;
+    if(!window.__SETCA_isOwnTeam(p)) return false;
     const m = ensureMenu();
     const targetSel = m.querySelector('#setcaPlaneCtxTarget');
     const missileSel = m.querySelector('#setcaPlaneCtxMissile');
@@ -24975,7 +25107,10 @@ document.querySelectorAll('#pCmdBody .btn').forEach(btn=>{
     return true;
   }
   function populateMenu(p){
+    const enemyContact = !window.__SETCA_isOwnTeam(p);
+    p = window.__SETCA_contactView(p);
     const m = ensureMenu();
+    m.querySelectorAll('input, select').forEach(el=>{ el.disabled = enemyContact && el.id !== 'setcaPlaneCtxRole'; });
     const hdr = m.querySelector('#setcaPlaneBeCtxHdr');
     const beSel = m.querySelector('#setcaPlaneCtxBe');
     const altFormatSel = m.querySelector('#setcaPlaneCtxAltFormat');
@@ -25001,7 +25136,7 @@ document.querySelectorAll('#pCmdBody .btn').forEach(btn=>{
     const procedureLabel = activeProcedure
       ? (activeProcedure.mode === 'scramble' ? 'SCRAMBLE' : activeProcedure.mode === 'departure' ? 'DPT' : 'ARR')
       : '';
-    if(hdr) hdr.textContent = `CONTROL DE AERONAVE · ${p.name||p.id} · ${window.__SETCA_teamLabel(p.team)}${be ? ` · BE:${be.name||be.id}` : ''}`;
+    if(hdr) hdr.textContent = enemyContact ? `CLASIFICACIÓN DE CONTACTO · ${p.name}` : `CONTROL DE AERONAVE · ${p.name||p.id} · ${window.__SETCA_teamLabel(p.team)}${be ? ` · BE:${be.name||be.id}` : ''}`;
     if(hdr && procedureLabel) hdr.textContent += ` Â· ${procedureLabel}`;
     fillBeOptions(beSel, p);
     fillTargetOptions(targetSel, p);
@@ -25022,7 +25157,7 @@ document.querySelectorAll('#pCmdBody .btn').forEach(btn=>{
     if(callsignIn) callsignIn.value = String((p.name ?? p.callsign ?? p.id ?? '') || '');
     if(tipoIn) tipoIn.value = String((p.tipo ?? p.tipoAeronave ?? p.planeType ?? '') || '');
     if(roleSel){
-      roleSel.innerHTML = getPlaneRoleOptionsHtml(roleVal);
+      roleSel.innerHTML = getPlaneRoleOptionsHtml(roleVal, p);
       roleSel.value = normalizePlaneRole(roleVal);
     }
     if(iffIn) iffIn.value = String(getPlaneXpdr(p) || '');
@@ -25059,11 +25194,24 @@ document.querySelectorAll('#pCmdBody .btn').forEach(btn=>{
       }catch(_){ }
       hint.textContent = text;
     }
+    if(enemyContact){
+      if(hint) hint.textContent = 'Clasificación compartida solo con ' + window.__SETCA_teamLabel(window.__SETCA_getCurrentTeam());
+      if(deleteBtn) deleteBtn.classList.add('ctxHidden');
+      if(procedureRow) procedureRow.classList.add('ctxHidden');
+    }
+    if(fireBtn && enemyContact) fireBtn.disabled = true;
   }
   function applyMenuValues(){
     const p = getTargetPlane();
     if(!p) return false;
     const m = ensureMenu();
+    if(!window.__SETCA_isOwnTeam(p)){
+      const roleControl = m.querySelector('#setcaPlaneCtxRole');
+      applyPlaneRoleChange(p, roleControl ? roleControl.value : 'Unknown');
+      populateMenu(p);
+      repaintAll();
+      return true;
+    }
     const beSel = m.querySelector('#setcaPlaneCtxBe');
     const altIn = m.querySelector('#setcaPlaneCtxAlt');
     const spdIn = m.querySelector('#setcaPlaneCtxSpd');
@@ -25507,6 +25655,7 @@ function __setcaReserveLauncherShot(u, now=Date.now()){
 try{ window.__SETCA_getGtcLaunchPolicyStatus = function(u){ return __setcaCanReserveLauncherShot(u, Date.now()); }; }catch(_){ }
 
 function gtcLaunchMissile(u, opts={}){
+  if(!window.__SETCA_isOwnTeam(u)) return false;
   try{
     if(window.__SETCA_isPlanningMode && window.__SETCA_isPlanningMode()) return false;
     if(!u || !u.id) return false;
@@ -25564,11 +25713,12 @@ function gtcLaunchMissile(u, opts={}){
     const name = String(launchOpts.missileName || ((typeof gtcNextDartName === 'function') ? gtcNextDartName(u.missileCode || u.shortLabel || 'DART') : 'DART'));
     const __setcaLocalMissile = {
       id,
+      team:window.__SETCA_entityTeam(u),
       name,
       launcher: u.id,
       launcherType: 'gtc',
       launcherName: (u.name || u.label || 'LANZADOR'),
-      targetName: (T.name || T.id || ''),
+      targetName: window.__SETCA_contactView(T).name,
       tgt: T.id,
       tx: +T.x||0,
       ty: +T.y||0,
@@ -25785,8 +25935,9 @@ function repaintGTC(){
   const countEl = document.getElementById('gtcCount');
   if(!list) return;
   const src = Array.isArray(st.gtc) ? st.gtc : [];
-  const arr = src.map((u, idx)=>gtcNormalizeUnit(u, idx));
-  st.gtc = arr;
+  const normalized = src.map((u, idx)=>gtcNormalizeUnit(u, idx));
+  st.gtc = normalized;
+  const arr = normalized.filter(window.__SETCA_canSeeOwnedEntity);
   list.innerHTML = '';
   try{ gtcUiById.clear(); }catch(_){ }
   try{ gtcPlaneSelById.clear(); }catch(_){ }
@@ -26900,10 +27051,11 @@ import { getAuth } from "https://www.gstatic.com/firebasejs/10.12.3/firebase-aut
     if(raw === 'Commercial' || raw === 'Friend' || raw === 'Neutral' || raw === 'Boogey' || raw === 'Bandit' || raw === 'Hostile' || raw === 'Unknown' || raw === 'Kill-confirm') return raw;
     return 'Friend';
   };
-  function baseCanSeePlane(){
-    // Instructor y Planning local ven el escenario completo, sin adquisición.
+  function baseCanSeePlane(p){
+    // Instructor/Planning solo tienen visibilidad inmediata sobre su propio equipo.
     const access = window.__setcaAccess || {};
-    return !!access.planning || String(access.role || '').toLowerCase() === 'default';
+    const own = !p || !window.__SETCA_isOwnTeam || window.__SETCA_isOwnTeam(p);
+    return own && (!!access.planning || String(access.role || '').toLowerCase() === 'default');
   }
   window.__SETCA_hasFullAircraftVisibility = baseCanSeePlane;
   let setcaVisibilitySourcePlanes = null;
@@ -26916,6 +27068,7 @@ import { getAuth } from "https://www.gstatic.com/firebasejs/10.12.3/firebase-aut
   function awacsCoveragePlanes(){
     // showAwacsCoverage solo dibuja el círculo: ocultarlo no apaga el sensor.
     return sensorSourcePlanes().filter(aw=>hasSensorPosition(aw) && !aw._hit &&
+      (!window.__SETCA_isOwnTeam || window.__SETCA_isOwnTeam(aw)) &&
       isAwacsPlane(aw) && aw.awacsCoverage !== false && !isPlaneKillConfirmed(aw));
   }
   function insideAwacsCoverage(p){
@@ -26931,6 +27084,7 @@ import { getAuth } from "https://www.gstatic.com/firebasejs/10.12.3/firebase-aut
     const units = (window.st && Array.isArray(st.gtc)) ? st.gtc : [];
     return units.some(u=>{
       if(!hasSensorPosition(u) || u._hit) return false;
+      if(window.__SETCA_isOwnTeam && !window.__SETCA_isOwnTeam(u)) return false;
       // Detección: covR (NM) y covH (ft), nunca el alcance de lanzamiento.
       const radius = Number(u.covR), ceiling = Number(u.covH);
       return Number.isFinite(radius) && radius > 0 && Number.isFinite(ceiling) && ceiling > 0 &&
@@ -26949,7 +27103,8 @@ import { getAuth } from "https://www.gstatic.com/firebasejs/10.12.3/firebase-aut
   let setcaRadarAcquisitionPrunedAt = 0;
   function planeDetectionKey(p){
     const raw = p && (p.id || p.name);
-    return typeof raw === 'string' ? raw : String(raw || '');
+    const id = typeof raw === 'string' ? raw : String(raw || '');
+    return (window.__SETCA_getCurrentTeam ? window.__SETCA_getCurrentTeam() + ':' : '') + id;
   }
   function pruneRadarAcquisition(now){
     if(now - setcaRadarAcquisitionPrunedAt < 15000) return;
@@ -26965,7 +27120,7 @@ import { getAuth } from "https://www.gstatic.com/firebasejs/10.12.3/firebase-aut
     setcaRadarVisualByPlane = new WeakMap();
   };
   function rememberRadarVisual(id, state, p, now, fadeUntil, inCoverage, result){
-    setcaRadarVisualByPlane.set(p, {at:now, fadeUntil, inCoverage, result});
+    setcaRadarVisualByPlane.set(p, {at:now, key:id, fadeUntil, inCoverage, result});
     if(state) setcaRadarAcquisition.set(id, state);
     return result;
   }
@@ -26974,16 +27129,20 @@ import { getAuth } from "https://www.gstatic.com/firebasejs/10.12.3/firebase-aut
     const now = Date.now();
     pruneRadarAcquisition(now);
     const id = planeDetectionKey(p);
-    const fadeEntry = window.st && st.contingencies && st.contingencies.fadeLost && st.contingencies.fadeLost[id];
+    const fadeEntry = window.st && st.contingencies && st.contingencies.fadeLost && st.contingencies.fadeLost[String(p.id || p.name || '')];
     const fadeUntil = Math.max(0, Number(fadeEntry && fadeEntry.until) || 0);
-    const fullVisibility = baseCanSeePlane();
+    const fullVisibility = baseCanSeePlane(p);
+    const own = !window.__SETCA_isOwnTeam || window.__SETCA_isOwnTeam(p);
+    if((window.__setcaAccess || {}).planning && !own){
+      return {visible:false, showDataBlock:false, alpha:0, scale:0, phase:'other-team'};
+    }
     const inCoverage = fullVisibility || window.__SETCA_isPlaneInSensorCoverage(p);
     const faded = fadeUntil > now || ((!(fadeUntil > 0)) && (typeof window.__SETCA_getActiveFadeLost === 'function') ? !!window.__SETCA_getActiveFadeLost(p) : false);
     if(fullVisibility && (!faded || !!(window.__setcaAccess || {}).planning)){
       return {visible:true, showDataBlock:true, alpha:1, scale:1, phase:'track'};
     }
     const visualCached = setcaRadarVisualByPlane.get(p);
-    if(visualCached && !faded && now - visualCached.at < SETCA_RADAR_VISUAL_CACHE_MS &&
+    if(visualCached && visualCached.key === id && !faded && now - visualCached.at < SETCA_RADAR_VISUAL_CACHE_MS &&
       visualCached.fadeUntil === fadeUntil && visualCached.inCoverage === inCoverage &&
       (visualCached.result.phase !== 'acquiring' ||
         visualCached.result.elapsed + now - visualCached.at < SETCA_RADAR_ACQUIRE_MS)) return visualCached.result;
@@ -27027,8 +27186,8 @@ import { getAuth } from "https://www.gstatic.com/firebasejs/10.12.3/firebase-aut
     const visual = window.__SETCA_getPlaneAcquisitionVisual(p);
     return !!(visual && visual.visible);
   };
-  window.__SETCA_canSeeOwnedEntity = function(){
-    return true;
+  window.__SETCA_canSeeOwnedEntity = function(entity){
+    return !!entity && (!window.__SETCA_isOwnTeam || window.__SETCA_isOwnTeam(entity));
   };
 
   function sanitizeRoomId(v){
@@ -27537,12 +27696,13 @@ import { getAuth } from "https://www.gstatic.com/firebasejs/10.12.3/firebase-aut
 
   function visiblePlanes(basePlanes){
     const arr = Array.isArray(basePlanes) ? basePlanes : [];
-    return arr.filter(p=> p && window.__SETCA_canSeePlane(p));
+    return arr.filter(p=> p && window.__SETCA_canSeePlane(p)).map(p=>window.__SETCA_contactView ? window.__SETCA_contactView(p) : p);
   }
   function visiblePairs(basePairs, basePlanes){
     const arr = Array.isArray(basePairs) ? basePairs : [];
     const planeMap = new Map((Array.isArray(basePlanes) ? basePlanes : []).map(p=>[String(p.id||''), p]));
     return arr.filter(pr=>{
+      if(!window.__SETCA_canSeeOwnedEntity(pr)) return false;
       const a = planeMap.get(String(pr && pr.a || ''));
       const b = planeMap.get(String(pr && pr.b || ''));
       return !!(a && b && window.__SETCA_canSeePlane(a) && window.__SETCA_canSeePlane(b));
@@ -27552,6 +27712,7 @@ import { getAuth } from "https://www.gstatic.com/firebasejs/10.12.3/firebase-aut
     const arr = Array.isArray(baseMissiles) ? baseMissiles : [];
     const planeMap = new Map((Array.isArray(basePlanes) ? basePlanes : []).map(p=>[String(p.id||''), p]));
     return arr.filter(m=>{
+      if(!window.__SETCA_canSeeOwnedEntity(m)) return false;
       const lp = planeMap.get(String(m && m.launcher || ''));
       const tp = planeMap.get(String(m && m.tgt || ''));
       const launcherVisible = !lp || window.__SETCA_canSeePlane(lp);
@@ -27568,6 +27729,7 @@ import { getAuth } from "https://www.gstatic.com/firebasejs/10.12.3/firebase-aut
     if(Array.isArray(st.sel)){
       st.sel = st.sel.filter(id=>visible.has(String(id||'')));
     }
+    if(st.selectedDrawing && !(st.drawings || []).some(d=>d.id === st.selectedDrawing && window.__SETCA_canSeeOwnedEntity(d))) st.selectedDrawing = null;
   }
   function wrapWithVisibleState(fnName){
     const fn = window[fnName];
@@ -27580,7 +27742,9 @@ import { getAuth } from "https://www.gstatic.com/firebasejs/10.12.3/firebase-aut
         sel: st.sel,
         pairs: st.pairs,
         missiles: st.missiles,
-        gtc: st.gtc
+        gtc: st.gtc,
+        drawings: st.drawings,
+        impactMarks: st.impactMarks
       };
       const previousSourcePlanes = setcaVisibilitySourcePlanes;
       setcaVisibilitySourcePlanes = previousSourcePlanes || bak.planes;
@@ -27590,6 +27754,8 @@ import { getAuth } from "https://www.gstatic.com/firebasejs/10.12.3/firebase-aut
         st.pairs = visiblePairs(bak.pairs, bak.planes);
         st.missiles = visibleMissiles(bak.missiles, bak.planes);
         st.gtc = visibleOwned(bak.gtc);
+        st.drawings = visibleOwned(bak.drawings);
+        st.impactMarks = visibleOwned(bak.impactMarks);
         return fn.apply(this, arguments);
       } finally {
         st.planes = bak.planes;
@@ -27597,13 +27763,15 @@ import { getAuth } from "https://www.gstatic.com/firebasejs/10.12.3/firebase-aut
         st.pairs = bak.pairs;
         st.missiles = bak.missiles;
         st.gtc = bak.gtc;
+        st.drawings = bak.drawings;
+        st.impactMarks = bak.impactMarks;
         setcaVisibilitySourcePlanes = previousSourcePlanes;
       }
     };
     wrapped.__setcaWrapped = true;
     window[fnName] = wrapped;
   }
-  ['repaintPlanesList','repaintVuelos','repaintNav','repaintPairs','repaintAlt','paintAlerts','repaintGTC','repaintPairList','repaintStudent'].forEach(wrapWithVisibleState);
+  ['repaintPlanesList','repaintVuelos','repaintNav','repaintPairs','repaintAlt','paintAlerts','repaintGTC','repaintPairList','repaintStudent','renderDrawingScopePanel','renderReport','renderObserverStats','drawSpiderWeb','drawFlightProcedureGuidance'].forEach(wrapWithVisibleState);
 
   if(typeof window.drawPlane === 'function' && !window.drawPlane.__setcaWrapped){
     const orig = window.drawPlane;
@@ -29030,6 +29198,7 @@ import { getDatabase, ref, get, set } from "https://www.gstatic.com/firebasejs/1
     let best = null, bd = 1e9;
     for(const p of st.planes){
       if(!isPlaneVisibleToCurrentRole(p)) continue;
+      if(!window.__SETCA_isOwnTeam(p)) continue;
       const s = toScreen(p.x||0, p.y||0);
       const d = Math.hypot(mx - s.x, my - s.y);
       if(d <= thPx && d < bd){
