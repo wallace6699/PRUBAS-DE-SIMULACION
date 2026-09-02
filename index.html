@@ -1114,6 +1114,7 @@
 
   function __SETCA_cleanDrawingForGtcGlobalSync(d, role){
     if(!d || typeof d !== 'object') return null;
+    if(window.__SETCA_isOwnTeam && !window.__SETCA_isOwnTeam(d)) return null;
     const q = (typeof __clonePlain === 'function') ? __clonePlain(d) : {...d};
     if(q.visibility === 'local') return null;
     if(__SETCA_isGtcGlobalWriterRole(role)) q.visibility = 'global';
@@ -1125,6 +1126,7 @@
 
   function __SETCA_cleanGtcForGlobalSync(u){
     if(!u || typeof u !== 'object') return null;
+    if(window.__SETCA_isOwnTeam && !window.__SETCA_isOwnTeam(u)) return null;
     const q = (typeof __clonePlain === 'function') ? __clonePlain(u) : {...u};
     delete q.samDual;
     if(!String(q.id || '').trim()) q.id = 'GTC-' + Math.random().toString(36).slice(2,8).toUpperCase();
@@ -1271,13 +1273,14 @@
   try{ window.__SETCA_cleanGtcForGlobalSync = __SETCA_cleanGtcForGlobalSync; }catch(_){ }
   function __setcaMergePlanesByAuthority(currentPlanes, nextPlanes){
     const currentArr = __setcaPlaneRosterArray(currentPlanes).filter(Boolean);
-    const nextArr = __setcaPlaneRosterArray(nextPlanes).filter(Boolean);
+    const nextArr = __setcaPlaneRosterArray(nextPlanes).filter(p=>p && window.__SETCA_isOwnTeam(p));
     const currentMap = new Map();
-    currentArr.forEach((p, idx)=>{
+    currentArr.filter(p=>window.__SETCA_isOwnTeam(p)).forEach((p, idx)=>{
       const key = String((p && p.id) || idx);
       currentMap.set(key, p);
     });
-    const merged = [];
+    // Un instructor nunca sustituye ni elimina el inventario del equipo contrario.
+    const merged = currentArr.filter(p=>!window.__SETCA_isOwnTeam(p));
     nextArr.forEach((p, idx)=>{
       const key = String((p && p.id) || idx);
       const cur = currentMap.get(key);
@@ -1296,14 +1299,18 @@
 
   function __setcaMergeMissilesById(currentMissiles, payloadMissiles, impactMarks){
     const completed = __setcaCompletedMissileIds(impactMarks);
-    const out = (Array.isArray(payloadMissiles) ? payloadMissiles : []).filter(m=>{
+    const opponents = (Array.isArray(currentMissiles) ? currentMissiles : []).filter(m=>{
       const id = String(m && m.id || '');
-      return __SETCA_isSharedMissile(m) && (!m.status || String(m.status).toLowerCase() === 'fly') && (!id || !completed.has(id));
+      return __SETCA_isSharedMissile(m) && !window.__SETCA_isOwnTeam(m) && (!id || !completed.has(id));
     });
+    const out = opponents.concat((Array.isArray(payloadMissiles) ? payloadMissiles : []).filter(m=>{
+      const id = String(m && m.id || '');
+      return __SETCA_isSharedMissile(m) && window.__SETCA_isOwnTeam(m) && (!m.status || String(m.status).toLowerCase() === 'fly') && (!id || !completed.has(id));
+    }));
     const seen = new Set(out.map(m=>String(m && m.id || '')).filter(Boolean));
     (Array.isArray(currentMissiles) ? currentMissiles : []).forEach(m=>{
       const id = String(m && m.id || '');
-      if(!__SETCA_isSharedMissile(m) || !id || seen.has(id) || completed.has(id)) return;
+      if(!__SETCA_isSharedMissile(m) || !window.__SETCA_isOwnTeam(m) || !id || seen.has(id) || completed.has(id)) return;
       if(m && (!m.status || String(m.status).toLowerCase() === 'fly')){
         out.push(m);
         seen.add(id);
@@ -1334,6 +1341,7 @@
       payload.missiles,
       [].concat(Array.isArray(current.impactMarks) ? current.impactMarks : [], Array.isArray(payload.impactMarks) ? payload.impactMarks : [])
     );
+    out.impactMarks = __SETCA_mergeOwnedItems(current.impactMarks, payload.impactMarks);
     return out;
   }
   try{ window.__SETCA_markAircraftDirty = __SETCA_markAircraftDirty; }catch(_){ }
@@ -1360,7 +1368,7 @@
         // ⚠️ LOCAL ONLY (no sync): Data Block offsets (tagDx/tagDy/dataBlock), unidades, predicción
         // Enviamos a la nube el estado compartido, pero sin esas preferencias locales.
         const syncNow = __setcaStageNow();
-        const planesClean = Array.isArray(snap.planes) ? snap.planes.filter(p=>__setcaSyncIsMature(p, syncNow)).map(p=>{
+        const planesClean = Array.isArray(snap.planes) ? snap.planes.filter(p=>window.__SETCA_isOwnTeam(p) && __setcaSyncIsMature(p, syncNow)).map(p=>{
           if(!p || typeof p !== 'object') return p;
           const q = {...p};
           delete q.tagDx;
@@ -1381,7 +1389,7 @@
           delete q.__syncAfter;
           return q;
         }) : snap.planes;
-        const missilesClean = Array.isArray(snap.missiles) ? snap.missiles.filter(m=>__SETCA_isSharedMissile(m) && __setcaSyncIsMature(m, syncNow)).map(m=>{
+        const missilesClean = Array.isArray(snap.missiles) ? snap.missiles.filter(m=>window.__SETCA_isOwnTeam(m) && __SETCA_isSharedMissile(m) && __setcaSyncIsMature(m, syncNow)).map(m=>{
           if(!m || typeof m !== 'object') return m;
           const q = {...m};
           delete q.__syncAfter;
@@ -1400,12 +1408,12 @@
           roles: rolesClean,
           serverPause: snap.serverPause && snap.serverPause.active ? {active:true,callsign:String(snap.serverPause.callsign||'INSTRUCTOR'),startedAt:Number(snap.serverPause.startedAt||Date.now())} : null,
           contingencies: __SETCA_cleanContingenciesForSync(snap.contingencies),
-          drawings: Array.isArray(snap.drawings) ? snap.drawings.filter(d=>!(d && d.visibility === 'local')).map(d=>__normalizeDrawingScope(__clonePlain(d))) : snap.drawings,
-          gtc: Array.isArray(snap.gtc) ? snap.gtc.map(u=>__SETCA_cleanGtcForGlobalSync(u)).filter(Boolean) : [],
+          drawings: Array.isArray(snap.drawings) ? snap.drawings.filter(d=>window.__SETCA_isOwnTeam(d) && !(d && d.visibility === 'local')).map(d=>__normalizeDrawingScope(__clonePlain(d))) : [],
+          gtc: Array.isArray(snap.gtc) ? snap.gtc.filter(window.__SETCA_isOwnTeam).map(u=>__SETCA_cleanGtcForGlobalSync(u)).filter(Boolean) : [],
           // Emparejamientos = NETAMENTE LOCAL. No se sincronizan.
           missiles: missilesClean,
-          impactMarks: Array.isArray(snap.impactMarks) ? snap.impactMarks : [],
-          missileStats: __normalizeMissileStats(snap.missileStats),
+          impactMarks: Array.isArray(snap.impactMarks) ? snap.impactMarks.filter(window.__SETCA_isOwnTeam) : [],
+          missileStats: window.__SETCA_ownedMissileStats ? window.__SETCA_ownedMissileStats(snap) : __normalizeMissileStats(snap.missileStats),
           samValidation: (snap.samValidation && typeof snap.samValidation === 'object') ? {phase:String(snap.samValidation.phase || 'green'), byRole:String(snap.samValidation.byRole || ''), at:Number(snap.samValidation.at || Date.now())} : null,
           globalStarted: !!snap.globalStarted,
           windKmh: Number.isFinite(+snap.windKmh) ? +snap.windKmh : 0,
@@ -16918,7 +16926,9 @@ function repaintPlanesList(){
   if(!list) return;
   list.innerHTML='';
   if(__SETCA_shouldHideInstructorAuxPanels()) return;
-  st.planes.forEach(p=>{
+  st.planes.forEach(sourcePlane=>{
+    if(!isPlaneVisibleToCurrentRole(sourcePlane)) return;
+    const p = window.__SETCA_contactView ? window.__SETCA_contactView(sourcePlane) : sourcePlane;
     const b=document.createElement('button'); b.className='mini btn focusable'; b.textContent=p.name;
     if(st.sel.includes(p.id)) b.classList.add('hi');
     b.onclick=()=>{
@@ -17234,7 +17244,9 @@ function repaintVuelos(){
   `;
   const tbody = table.querySelector('tbody');
 
-  st.planes.forEach(p=>{
+  st.planes.forEach(sourcePlane=>{
+    if(!isPlaneVisibleToCurrentRole(sourcePlane)) return;
+    const p = window.__SETCA_contactView ? window.__SETCA_contactView(sourcePlane) : sourcePlane;
     try{ __SETCA_applyOdiLocalVuelosOverrides([p], st.roles); }catch(_){ }
     const odiLocalRow = __SETCA_getOdiLocalVuelos(p.id) || {};
     const tr = document.createElement('tr');
@@ -25436,7 +25448,9 @@ try{ window.__SETCA_canUseGtcAssets = __gtcCanUseAssets; }catch(_){ }
 
 function gtcActivePlanes(){
   const planes = (window.st && Array.isArray(st.planes)) ? st.planes : [];
-  return planes.filter(p=>p && !p._hit);
+  return planes
+    .filter(p=>p && !p._hit && isPlaneVisibleToCurrentRole(p))
+    .map(p=>window.__SETCA_contactView ? window.__SETCA_contactView(p) : p);
 }
 function gtcMakePlaneSig(arr){
   try{ return (arr||[]).map(p=>`${p.id||''}:${p.name||''}`).join('|'); }catch(_){ return ''; }
@@ -27771,7 +27785,21 @@ import { getAuth } from "https://www.gstatic.com/firebasejs/10.12.3/firebase-aut
     wrapped.__setcaWrapped = true;
     window[fnName] = wrapped;
   }
-  ['repaintPlanesList','repaintVuelos','repaintNav','repaintPairs','repaintAlt','paintAlerts','repaintGTC','repaintPairList','repaintStudent','renderDrawingScopePanel','renderReport','renderObserverStats','drawSpiderWeb','drawFlightProcedureGuidance'].forEach(wrapWithVisibleState);
+  const __SETCA_TEAM_PRIVACY_RENDERERS = [
+    'repaintPlanesList','repaintVuelos','repaintNav','repaintPairs','repaintAlt','paintAlerts','repaintGTC','repaintPairList','repaintStudent',
+    'renderDrawingScopePanel','renderReport','renderObserverStats','drawSpiderWeb','drawFlightProcedureGuidance','renderNavReport','renderNavReportMap',
+    'gtcUpdatePlaneSelectOptions','gtcRefreshIndicators','refreshMissilePanel','repaintAll'
+  ];
+  function installTeamPrivacyRenderers(){
+    __SETCA_TEAM_PRIVACY_RENDERERS.forEach(wrapWithVisibleState);
+  }
+  window.__SETCA_installTeamPrivacyRenderers = installTeamPrivacyRenderers;
+  installTeamPrivacyRenderers();
+  // Algunos módulos se declaran después de este bloque; al terminar de cargar se cierran también esas superficies.
+  if(typeof setTimeout === 'function'){
+    setTimeout(installTeamPrivacyRenderers, 0);
+    setTimeout(installTeamPrivacyRenderers, 600);
+  }
 
   if(typeof window.drawPlane === 'function' && !window.drawPlane.__setcaWrapped){
     const orig = window.drawPlane;
