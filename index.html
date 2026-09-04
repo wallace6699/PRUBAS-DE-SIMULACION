@@ -47,12 +47,18 @@
       if(!e || e.team !== team) return;
       const startedAt = Number(e.startedAt), end = Number(e.until);
       if(!Number.isFinite(startedAt) || !Number.isFinite(end) || startedAt > now) return;
-      const until = Math.min(end, startedAt + 10000);
+      const until = Math.min(end, startedAt + 30000);
       if(until <= now || until <= startedAt) return;
-      const points = (Array.isArray(e.points) ? e.points : []).slice(0,24)
+      const points = (Array.isArray(e.points) ? e.points : []).slice(0,48)
         .filter(p=>p && [p.x,p.y].every(v=>typeof v === 'number' && Number.isFinite(v)))
-        .map(p=>({x:p.x,y:p.y}));
-      if(points.length) out[team] = {team,startedAt,until,seconds:(until-startedAt)/1000,points,by:String(e.by || '').slice(0,80)};
+        .map(p=>{
+          const revealAt = Math.max(startedAt, Math.min(until, Number(p.revealAt) || startedAt));
+          const hideAt = Math.min(until, Math.max(revealAt + 250, Number(p.hideAt) || until));
+          return {x:p.x,y:p.y,revealAt,hideAt};
+        });
+      const targets = Array.from(new Set((Array.isArray(e.targets) ? e.targets : [])
+        .map(v=>String(v || '').trim().toUpperCase()).filter(Boolean))).slice(0,128);
+      if(points.length && targets.length) out[team] = {team,startedAt,until,seconds:30,points,targets,by:String(e.by || '').slice(0,80)};
     });
     return out;
   };
@@ -174,7 +180,18 @@
     const access = value && typeof value === 'object' ? value : (window.__setcaAccess || readSavedAccess() || {});
     return !access.planning && !access.freeplay && String(access.room || '').toLowerCase() === 'excs' &&
       String(access.role || '').toLowerCase() === 'white' && participantTeam(access.team) === 'white' &&
-      access.whiteAccess === true && access.excsPreparation === true;
+      access.whiteAccess === true;
+  };
+  window.__SETCA_isExcsWhiteController = function(value){
+    const access = value && typeof value === 'object' ? value : (window.__setcaAccess || readSavedAccess() || {});
+    return !access.planning && !access.freeplay && String(access.room || '').toLowerCase() === 'excs' &&
+      String(access.role || '').toLowerCase() === 'white' && participantTeam(access.team) === 'white' && access.whiteAccess === true;
+  };
+  window.__SETCA_canControlGlobalPause = function(value){
+    const access = value && typeof value === 'object' ? value : (window.__setcaAccess || readSavedAccess() || {});
+    if(!access || access.planning || access.freeplay) return false;
+    if(String(access.room || '').toLowerCase() === 'excs') return window.__SETCA_isExcsWhiteController(access);
+    return String(access.role || '').toLowerCase() === 'default';
   };
   window.__SETCA_PLANNING_BOOT = !!window.__SETCA_isPlanningMode();
   window.__SETCA_FREEPLAY_BOOT = !!window.__SETCA_isFreePlayMode();
@@ -1372,6 +1389,12 @@
   function __setcaMergeAuthoritativePayload(current, payload){
     if(!current || typeof current !== 'object') return payload;
     const out = {...payload};
+    // En EXCS solo WHITE controla el reloj global. Los escritores BLUE/RED
+    // conservan la pausa que ya existe mientras maniobran sus propios medios.
+    if(window.__SETCA_canControlGlobalPause && !window.__SETCA_canControlGlobalPause()){
+      out.serverPause = (current.serverPause && current.serverPause.active) ? current.serverPause : null;
+      out.globalStarted = !!current.globalStarted;
+    }
     if(payload.contingencies) out.contingencies = {...payload.contingencies,
       fakePlots:window.__SETCA_mergeFakePlots(current.contingencies && current.contingencies.fakePlots, payload.contingencies.fakePlots)};
     out.roles = {...(current.roles || {})};
@@ -1878,7 +1901,14 @@ let __setcaLastAppliedRemoteTs = 0;
   if(!__localOnlyMode){
     onValue(stateRef, (snap) => {
       const v = snap.val();
-      if (!v || v.lastWriteBy === currentUID) return;
+      if (!v) return;
+      if(v.lastWriteBy === currentUID){
+        const remotePaused = !!(v.serverPause && v.serverPause.active);
+        const localPaused = !!(window.st && st.serverPause && st.serverPause.active);
+        // Una pausa escrita por WHITE justo antes de recargar debe recuperarse
+        // aunque Firebase reconozca al mismo usuario anónimo después del reload.
+        if(remotePaused === localPaused) return;
+      }
       __scheduleRemoteStateApply(v);
     });
   }
@@ -2232,6 +2262,23 @@ function __normalizeMissileStats(src){
   .setca-brief-section-title{display:flex;align-items:center;justify-content:space-between;gap:10px;margin:0 0 8px;color:#b9eac9;font:800 10px/1.2 ui-monospace,SFMono-Regular,Consolas,monospace;letter-spacing:.12em;text-transform:uppercase}
   .setca-brief-live-count{color:#fff;font-size:10px;letter-spacing:0}
   .setca-brief-roster{display:flex;flex-direction:column;gap:8px;margin-bottom:15px}
+  .setca-brief-dialog.setca-brief-excs-view{width:min(980px,calc(100vw - 28px))}
+  .setca-brief-excs-board{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px}
+  .setca-brief-excs-team{min-width:0;overflow:hidden;border:1px solid #486253;border-radius:7px;background:#101a14}
+  .setca-brief-excs-team[data-team="red"]{border-color:#824550;background:#1d1115}
+  .setca-brief-excs-team[data-team="blue"]{border-color:#376a96;background:#0d1822}
+  .setca-brief-excs-team-head{display:flex;align-items:center;justify-content:space-between;gap:8px;padding:8px 10px;border-bottom:1px solid rgba(255,255,255,.14);font:800 11px/1.2 ui-monospace,SFMono-Regular,Consolas,monospace;letter-spacing:.08em}
+  .setca-brief-excs-team[data-team="red"] .setca-brief-excs-team-head{color:#ffadb8;background:#3a1b22}
+  .setca-brief-excs-team[data-team="blue"] .setca-brief-excs-team-head{color:#a9d5ff;background:#142f46}
+  .setca-brief-excs-team-total{flex:0 0 auto;padding:3px 6px;border:1px solid currentColor;border-radius:4px;color:#fff;font-size:9px;letter-spacing:0}
+  .setca-brief-excs-roles{display:flex;flex-direction:column}
+  .setca-brief-excs-role{border-top:1px solid rgba(255,255,255,.09)}
+  .setca-brief-excs-role:first-child{border-top:0}
+  .setca-brief-excs-role .setca-brief-role-head{min-height:25px;padding:5px 8px;background:rgba(255,255,255,.055);border-bottom-color:rgba(255,255,255,.08)}
+  .setca-brief-excs-role .setca-brief-role-members{grid-template-columns:repeat(auto-fit,minmax(145px,1fr));padding:6px;background:transparent}
+  .setca-brief-excs-white{display:flex;align-items:flex-start;gap:8px;padding:8px 10px;border:1px solid #786a3d;border-radius:7px;background:#211e12;color:#ffe7a0}
+  .setca-brief-excs-white>strong{flex:0 0 auto;font:800 10px/1.35 ui-monospace,SFMono-Regular,Consolas,monospace;letter-spacing:.08em}
+  .setca-brief-excs-white-list{min-width:0;display:flex;flex-wrap:wrap;gap:6px;color:#fff;font:700 10px/1.35 ui-monospace,SFMono-Regular,Consolas,monospace}
   .setca-brief-tier{overflow:hidden;border:1px solid #486253;border-radius:6px;background:#101a14}
   .setca-brief-tier-name{padding:7px 9px;border-bottom:1px solid #52695a;background:#26332b;color:#f4f7f5;font:800 9px/1.2 ui-monospace,SFMono-Regular,Consolas,monospace;letter-spacing:.1em;text-transform:uppercase}
   .setca-brief-tier:nth-child(1){border-color:#8d783d}
@@ -2268,6 +2315,7 @@ function __normalizeMissileStats(src){
     .setca-brief-role-grid.cols-3{grid-template-columns:minmax(0,1fr)}
     .setca-brief-role-cell{border-left:0;border-top:1px solid rgba(85,255,160,.14)}
     .setca-brief-role-cell:first-child{border-top:0}
+    .setca-brief-excs-board{grid-template-columns:minmax(0,1fr)}
   }
     #alumnoBtn,#odtBtn,#observerBtn,#salasBtn,#offBtn,#exitBtn,#configBtn{
     flex:0 0 auto;
@@ -5294,8 +5342,9 @@ body[data-setca-role="default"] #pNav{
 }
 
 /* Contingencies solo visible para INSTRUCTOR de sala */
-body:not([data-setca-role="default"]) #contingenciesBtn{display:none!important;}
-body[data-setca-role="default"] #contingenciesBtn{display:inline-flex;}
+body:not([data-setca-role="default"]):not([data-setca-role="white"]) #contingenciesBtn{display:none!important;}
+body[data-setca-role="default"] #contingenciesBtn,
+body[data-setca-role="white"].setca-excs-white-preparation #contingenciesBtn{display:inline-flex;}
 
 #setcaContingenciesPanel .cont-config{
   grid-column:1 / -1;
@@ -5354,6 +5403,35 @@ body[data-setca-role="default"] #contingenciesBtn{display:inline-flex;}
   color:#94a3b8;
   font:600 9.5px/1.25 system-ui,-apple-system,Segoe UI,sans-serif;
 }
+#setcaContingenciesPanel .fake-plots-targets{
+  grid-column:1 / -1;
+  display:grid;
+  grid-template-columns:repeat(2,minmax(0,1fr));
+  gap:5px;
+  max-height:132px;
+  overflow:auto;
+  padding:6px;
+  border:1px solid rgba(148,163,184,.22);
+  border-radius:9px;
+  background:rgba(15,23,42,.58);
+}
+#setcaContingenciesPanel .fake-plots-target{
+  display:flex!important;
+  grid-column:auto!important;
+  grid-template-columns:none!important;
+  align-items:center;
+  gap:6px;
+  min-width:0;
+  padding:5px 7px;
+  border:1px solid rgba(148,163,184,.18);
+  border-radius:7px;
+  background:rgba(255,255,255,.025);
+  color:#dbe7f4!important;
+  cursor:pointer;
+}
+#setcaContingenciesPanel .fake-plots-target input{width:14px;height:14px;min-height:14px;margin:0;flex:0 0 auto;}
+#setcaContingenciesPanel .fake-plots-target span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+#setcaContingenciesPanel .fake-plots-empty{grid-column:1 / -1;color:#94a3b8;font:600 9.5px/1.3 system-ui,sans-serif;text-align:center;padding:5px;}
 @media (max-width: 760px){
   #setcaContingenciesPanel{left:8px;right:8px;width:auto;top:64px;}
   #setcaContingenciesPanel .cont-grid{grid-template-columns:1fr;}
@@ -6820,10 +6898,14 @@ body.setca-access-locked #setcaGlobalPauseBootNote{display:none!important;}
 #gateExcsBriefingStatus{color:#aab5be;font-size:10px;line-height:1.35;}
 #gateExcsBriefingSave{flex:0 0 auto;min-width:150px!important;}
 body.setca-excs-pseudo-pilot #pUnitMgr{display:none!important;}
+/* En EXCS el Centro de Mando y las contingencias pertenecen únicamente a WHITE. */
+body.setca-excs-session:not(.setca-excs-white-preparation) #pCmd,
+body.setca-excs-session:not(.setca-excs-white-preparation) #contingenciesBtn{display:none!important;}
+body.setca-excs-white-preparation #pNav{display:none!important;}
 body.setca-excs-white-preparation #pUnitMgrBody>.btn-grid:not(.setca-export-import-row){display:none!important;}
 body.setca-excs-white-preparation .gtcPresetBtn[data-gtc-preset]{display:none!important;}
-body.setca-excs-white-preparation #start,
-body.setca-excs-white-preparation #pause{display:none!important;}
+body.setca-excs-white-preparation #start{display:none!important;}
+body.setca-excs-white-preparation #pause{display:inline-flex!important;}
 body[data-setca-role="white"] #setcaAccessChip{box-shadow:0 0 0 1px rgba(255,255,255,.12) inset;}
 @media(max-width:560px){
   #gateLobbyFields .setca-room-list{grid-template-columns:repeat(2,minmax(0,1fr));}
@@ -7058,10 +7140,14 @@ body[data-setca-role="odt"] #pGTC.setca-odt-gtc-open #pGTCBody{
 #pGTCBody .gtc-toolbar{
   display:grid !important;
   grid-template-columns:minmax(0,1fr) auto !important;
+  grid-template-areas:
+    "presets status"
+    "asset asset" !important;
   align-items:start !important;
   gap:6px !important;
 }
 #pGTCBody .gtcPresetStack{
+  grid-area:presets !important;
   display:grid !important;
   gap:4px !important;
   min-width:0 !important;
@@ -7128,6 +7214,7 @@ body[data-setca-role="odt"] #pGTC.setca-odt-gtc-open #pGTCBody{
   box-shadow:0 0 0 1px rgba(255,96,96,.14), 0 0 13px rgba(255,96,96,.20) !important;
 }
 #pGTCBody .gtc-toolbar-side{
+  grid-area:status !important;
   min-width:0 !important;
   display:flex !important;
   align-items:center !important;
@@ -7136,8 +7223,10 @@ body[data-setca-role="odt"] #pGTC.setca-odt-gtc-open #pGTCBody{
   padding-top:0 !important;
 }
 #gtcAssetListBtn{
-  width:auto !important;
-  min-width:92px !important;
+  grid-area:asset !important;
+  width:100% !important;
+  min-width:0 !important;
+  justify-content:center !important;
   padding:0 9px !important;
 }
 #gtcAssetListBtn.active{
@@ -8926,6 +9015,176 @@ body.setca-modern-ui :is(
 }
 </style>
 
+<style id="setca-gtc-professional-order">
+/* GTC: jerarquía visual técnica, uniforme y fácil de reconocer. */
+body.setca-modern-ui #pGTCBody{padding:9px!important;gap:7px!important;}
+body.setca-modern-ui #pGTCBody .gtc-toolbar{gap:7px 9px!important;}
+body.setca-modern-ui #pGTCBody .gtcPresetStack{
+  gap:0!important;overflow:hidden;border:1px solid rgba(148,163,184,.22)!important;
+  border-radius:8px!important;background:rgba(2,10,15,.58)!important;
+  box-shadow:inset 0 1px 0 rgba(255,255,255,.025)!important;
+}
+body.setca-modern-ui #pGTCBody .gtcPresetRow{
+  grid-template-columns:52px minmax(0,1fr)!important;gap:7px!important;
+  min-height:34px!important;padding:5px 6px!important;
+}
+body.setca-modern-ui #pGTCBody .gtcPresetRow + .gtcPresetRow{border-top:1px solid rgba(148,163,184,.16)!important;}
+body.setca-modern-ui #pGTCBody .gtcPresetLbl{
+  align-self:stretch;display:flex!important;align-items:center!important;
+  padding-right:7px!important;border-right:1px solid rgba(148,163,184,.20)!important;
+  color:#c8d4dc!important;font:800 8.5px/1 ui-monospace,SFMono-Regular,Consolas,monospace!important;
+  letter-spacing:.11em!important;
+}
+body.setca-modern-ui #pGTCBody .gtcPresetRow:first-child .gtcPresetLbl{color:#9bdcff!important;border-right-color:rgba(56,189,248,.34)!important;}
+body.setca-modern-ui #pGTCBody .gtcPresetRow:nth-child(2) .gtcPresetLbl{color:#fda4af!important;border-right-color:rgba(248,113,113,.30)!important;}
+body.setca-modern-ui #pGTCBody .gtcPresetBtns{
+  display:grid!important;grid-template-columns:repeat(5,minmax(34px,1fr))!important;
+  align-items:center!important;gap:4px!important;
+}
+body.setca-modern-ui #pGTCBody .gtcPresetBtn.btn.mini{
+  width:100%!important;min-width:0!important;height:25px!important;min-height:25px!important;
+  padding:0 4px!important;border-radius:5px!important;
+  font:800 9px/1 ui-monospace,SFMono-Regular,Consolas,monospace!important;
+  letter-spacing:.02em!important;text-align:center!important;
+}
+body.setca-modern-ui #pGTCBody .gtcPresetBtn:not(.active){
+  --setca-local-button-bg:linear-gradient(180deg,#12364a 0%,#0a2331 100%);
+  --setca-local-button-border:#397b9b;
+  --setca-local-button-color:#e7f7ff;
+  --setca-local-button-shadow:inset 0 1px 0 rgba(255,255,255,.07),0 2px 6px rgba(0,0,0,.18);
+}
+body.setca-modern-ui #pGTCBody .gtcPresetBtn.gtcPresetBtn-missile:not(.active){
+  --setca-local-button-bg:linear-gradient(180deg,#4a2025 0%,#2d1217 100%);
+  --setca-local-button-border:#8f4650;
+  --setca-local-button-color:#ffe9ec;
+}
+body.setca-modern-ui #pGTCBody .gtc-toolbar-side{align-self:start!important;padding-top:0!important;}
+body.setca-modern-ui #pGTCBody #gtcCount.pill{height:25px!important;min-height:25px!important;padding:0 7px!important;display:inline-flex!important;align-items:center!important;}
+body.setca-modern-ui #pGTCBody #gtcCount.pill::before{content:'MEDIOS ';margin-right:4px;color:#79b7c9;font-size:7.5px;letter-spacing:.08em;}
+body.setca-modern-ui #pGTCBody #gtcModeChip:empty{display:none!important;}
+body.setca-modern-ui #gtcAssetListBtn{
+  height:29px!important;min-height:29px!important;border-radius:6px!important;
+  font:800 9px/1 ui-monospace,SFMono-Regular,Consolas,monospace!important;
+  letter-spacing:.10em!important;
+}
+body.setca-modern-ui #gtcAssetListBtn:not(.active){
+  --setca-local-button-bg:linear-gradient(180deg,#24323b 0%,#172229 100%);
+  --setca-local-button-border:#5d7685;
+  --setca-local-button-color:#f1f5f7;
+  --setca-local-button-shadow:inset 0 1px 0 rgba(255,255,255,.07),0 3px 8px rgba(0,0,0,.20);
+}
+@media(max-width:420px){
+  body.setca-modern-ui #pGTCBody .gtcPresetRow{grid-template-columns:46px minmax(0,1fr)!important;}
+  body.setca-modern-ui #pGTCBody .gtcPresetBtns{grid-template-columns:repeat(3,minmax(40px,1fr))!important;}
+}
+</style>
+
+<style id="setca-drawing-professional-order">
+/* Herramientas de dibujo: disposición técnica consistente con el panel GTC. */
+body.setca-modern-ui #pDrawBody{
+  padding:9px!important;gap:7px!important;
+}
+body.setca-modern-ui #pDrawBody .setca-draw-stack{
+  display:flex;flex-direction:column;gap:0;overflow:hidden;
+  border:1px solid rgba(148,163,184,.22);border-radius:8px;
+  background:rgba(2,10,15,.58);
+  box-shadow:inset 0 1px 0 rgba(255,255,255,.025);
+}
+body.setca-modern-ui #pDrawBody .setca-draw-row{
+  display:grid;grid-template-columns:58px minmax(0,1fr);gap:7px;
+  min-height:34px;padding:5px 6px;align-items:center;
+}
+body.setca-modern-ui #pDrawBody .setca-draw-row + .setca-draw-row{
+  border-top:1px solid rgba(148,163,184,.16);
+}
+body.setca-modern-ui #pDrawBody .setca-draw-label{
+  align-self:stretch;display:flex;align-items:center;padding-right:7px;
+  border-right:1px solid rgba(56,189,248,.28);color:#9bdcff;
+  font:800 8px/1 ui-monospace,SFMono-Regular,Consolas,monospace;
+  letter-spacing:.09em;white-space:nowrap;
+}
+body.setca-modern-ui #pDrawBody .setca-draw-row:nth-child(2) .setca-draw-label{
+  color:#c7d2da;border-right-color:rgba(148,163,184,.25);
+}
+body.setca-modern-ui #pDrawBody .setca-draw-row:nth-child(3) .setca-draw-label{
+  color:#b9e3cf;border-right-color:rgba(74,222,128,.24);
+}
+body.setca-modern-ui #pDrawBody .btn-grid.setca-draw-buttons{
+  display:grid!important;grid-template-columns:repeat(4,minmax(0,1fr))!important;
+  align-items:center!important;gap:4px!important;
+}
+body.setca-modern-ui #pDrawBody .setca-draw-row:nth-child(3) .setca-draw-buttons{
+  grid-template-columns:repeat(3,minmax(0,1fr))!important;
+}
+body.setca-modern-ui #pDrawBody button.tool.btn.mini{
+  width:100%!important;min-width:0!important;height:25px!important;min-height:25px!important;
+  padding:0 4px!important;border-radius:5px!important;
+  font:800 8.5px/1 ui-monospace,SFMono-Regular,Consolas,monospace!important;
+  letter-spacing:.025em!important;text-align:center!important;
+}
+body.setca-modern-ui #pDrawBody button.tool:not(.active):not(.hi){
+  --setca-local-button-bg:linear-gradient(180deg,#12364a 0%,#0a2331 100%);
+  --setca-local-button-border:#397b9b;
+  --setca-local-button-color:#e7f7ff;
+  --setca-local-button-shadow:inset 0 1px 0 rgba(255,255,255,.07),0 2px 6px rgba(0,0,0,.18);
+}
+body.setca-modern-ui #pDrawBody .setca-draw-coordinates{
+  padding:6px;border:1px solid rgba(148,163,184,.22);border-radius:8px;
+  background:rgba(2,10,15,.58);
+}
+body.setca-modern-ui #pDrawBody .setca-draw-coordinates-head{
+  display:flex;align-items:center;justify-content:space-between;gap:8px;
+  margin:0 1px 5px;color:#c8d4dc;
+  font:800 8px/1 ui-monospace,SFMono-Regular,Consolas,monospace;
+  letter-spacing:.11em;
+}
+body.setca-modern-ui #pDrawBody .setca-draw-coordinates-head small{
+  color:#71909f;font:700 7.5px/1 ui-monospace,SFMono-Regular,Consolas,monospace;
+  letter-spacing:.06em;
+}
+body.setca-modern-ui #pDrawBody .coord-grid{
+  display:grid!important;grid-template-columns:minmax(0,1fr) minmax(0,1fr) minmax(92px,.72fr)!important;
+  gap:5px!important;margin:0!important;
+}
+body.setca-modern-ui #pDrawBody .coord-grid input{
+  min-width:0!important;height:28px!important;padding:0 7px!important;
+  border:1px solid #395364!important;border-radius:5px!important;
+  background:#07151d!important;color:#dbeaf1!important;
+  box-shadow:inset 0 1px 3px rgba(0,0,0,.34)!important;
+  font:700 9px/1 ui-monospace,SFMono-Regular,Consolas,monospace!important;
+}
+body.setca-modern-ui #pDrawBody .coord-grid input::placeholder{color:#718792!important;opacity:1;}
+body.setca-modern-ui #pDrawBody #placeLL{
+  min-width:0!important;height:28px!important;min-height:28px!important;padding:0 7px!important;
+  border:1px solid #5d7685!important;border-radius:5px!important;
+  background:linear-gradient(180deg,#24323b 0%,#172229 100%)!important;color:#f1f5f7!important;
+  box-shadow:inset 0 1px 0 rgba(255,255,255,.07),0 2px 6px rgba(0,0,0,.18)!important;
+  font:800 8.5px/1 ui-monospace,SFMono-Regular,Consolas,monospace!important;
+  letter-spacing:.035em!important;
+}
+body.setca-modern-ui #pDrawBody #drawingScopeOpenBtn{
+  width:100%!important;height:29px!important;min-height:29px!important;margin:0!important;
+  border:1px solid #5d7685!important;border-radius:6px!important;
+  background:linear-gradient(180deg,#24323b 0%,#172229 100%)!important;color:#f1f5f7!important;
+  box-shadow:inset 0 1px 0 rgba(255,255,255,.07),0 3px 8px rgba(0,0,0,.20)!important;
+  font:800 9px/1 ui-monospace,SFMono-Regular,Consolas,monospace!important;
+  letter-spacing:.10em!important;
+}
+body.setca-modern-ui #pDrawBody #placeLL:hover,
+body.setca-modern-ui #pDrawBody #drawingScopeOpenBtn:hover{
+  filter:brightness(1.12)!important;border-color:#7893a3!important;
+}
+@media(max-width:440px){
+  body.setca-modern-ui #pDrawBody .setca-draw-row{grid-template-columns:50px minmax(0,1fr)!important;}
+  body.setca-modern-ui #pDrawBody .btn-grid.setca-draw-buttons,
+  body.setca-modern-ui #pDrawBody .setca-draw-row:nth-child(3) .setca-draw-buttons{
+    grid-template-columns:repeat(2,minmax(0,1fr))!important;
+  }
+  body.setca-modern-ui #pDrawBody .coord-grid{grid-template-columns:repeat(2,minmax(0,1fr))!important;}
+  body.setca-modern-ui #pDrawBody #placeLL{grid-column:1/-1;}
+}
+</style>
+
 <style id="setca-drawing-context-compact">
 /* Menú de gráficos compacto, con el mismo lenguaje visual de Configuración. */
 body.setca-modern-ui #drawingCtxMenu,
@@ -8993,6 +9252,61 @@ body.setca-instructor-overlay #status{left:calc(var(--setca-instructor-left) + 2
   body.setca-instructor-overlay #status{left:10px;}
 }
 </style>
+
+<style id="setca-white-header-single-row">
+/* Cabecera EXCS WHITE: una sola fila estable, compacta y sin saltos al cambiar de estado. */
+body.setca-modern-ui.setca-excs-white-preparation .app > header{
+  display:flex!important;
+  flex-wrap:nowrap!important;
+  align-items:center!important;
+  align-content:center!important;
+  gap:6px!important;
+  min-height:42px!important;
+  height:42px!important;
+  padding:4px 7px!important;
+  white-space:nowrap;
+}
+body.setca-excs-white-preparation header > *{flex:0 0 auto;min-width:0;}
+body.setca-excs-white-preparation header h1{margin-right:2px!important;}
+body.setca-excs-white-preparation header .setca-subtitle{display:none!important;}
+body.setca-excs-white-preparation header .timer{margin-left:0!important;padding:5px 8px!important;font-size:10px!important;}
+body.setca-excs-white-preparation #setcaRoleConsole{
+  max-width:205px;overflow:hidden;text-overflow:ellipsis;padding:4px 8px;font-size:9px;
+}
+body.setca-excs-white-preparation #setcaAccessChip{
+  flex:1 1 260px!important;min-width:150px!important;max-width:430px!important;
+  margin-left:auto!important;
+  overflow:hidden;text-overflow:ellipsis;padding:5px 9px!important;font-size:10px!important;
+}
+body.setca-excs-white-preparation #stateChip{display:none!important;}
+body.setca-modern-ui.setca-excs-white-preparation #pause{
+  display:inline-flex!important;align-items:center!important;justify-content:center!important;
+  flex:0 0 142px!important;width:142px!important;min-width:142px!important;height:32px!important;
+  border:1px solid #ef4444!important;background:linear-gradient(180deg,#b91c1c,#7f1d1d)!important;
+  color:#fff!important;box-shadow:inset 0 1px 0 rgba(255,255,255,.16),0 0 0 1px rgba(127,29,29,.28)!important;
+}
+body.setca-modern-ui.setca-excs-white-preparation #pause.setca-general-running{
+  border-color:#4ade80!important;background:linear-gradient(180deg,#15803d,#14532d)!important;
+  box-shadow:inset 0 1px 0 rgba(255,255,255,.14),0 0 0 1px rgba(20,83,45,.30)!important;
+}
+body[data-setca-role="white"] #pPlanes{display:none!important;}
+
+/* Identificación inmediata del bando en la cabecera de EXCS. */
+body.setca-modern-ui.setca-excs-session[data-setca-team="blue"] .app > header{
+  border-color:#3b82f6!important;
+  background:linear-gradient(180deg,rgba(18,65,105,.98),rgba(6,27,48,.98))!important;
+  box-shadow:0 10px 28px rgba(0,0,0,.42),inset 0 1px 0 rgba(191,219,254,.16),0 0 0 1px rgba(59,130,246,.14)!important;
+}
+body.setca-modern-ui.setca-excs-session[data-setca-team="red"] .app > header{
+  border-color:#ef5b6b!important;
+  background:linear-gradient(180deg,rgba(105,27,41,.98),rgba(48,8,17,.98))!important;
+  box-shadow:0 10px 28px rgba(0,0,0,.42),inset 0 1px 0 rgba(254,202,202,.15),0 0 0 1px rgba(239,68,68,.14)!important;
+}
+body.setca-excs-session[data-setca-team="blue"] header h1{color:#dbeafe!important;text-shadow:0 0 12px rgba(96,165,250,.38)!important;}
+body.setca-excs-session[data-setca-team="red"] header h1{color:#fee2e2!important;text-shadow:0 0 12px rgba(248,113,113,.38)!important;}
+body.setca-modern-ui.setca-excs-session[data-setca-team="blue"] header :is(#setcaRoleConsole,#setcaAccessChip,.timer){border-color:rgba(147,197,253,.72)!important;background:rgba(5,25,44,.78)!important;}
+body.setca-modern-ui.setca-excs-session[data-setca-team="red"] header :is(#setcaRoleConsole,#setcaAccessChip,.timer){border-color:rgba(252,165,165,.72)!important;background:rgba(48,8,17,.78)!important;}
+</style>
 </head>
 <body class="setca-access-locked setca-modern-ui">
 
@@ -9026,11 +9340,10 @@ body.setca-instructor-overlay #status{left:calc(var(--setca-instructor-left) + 2
     </div>
     <button class="cont-btn focusable" type="button" data-contingency="fake_plots">FAKE PLOTS</button>
     <div id="fakePlotsConfig" class="cont-config" hidden>
-      <label>Segundos · máximo 10
-        <input id="fakePlotsSeconds" class="focusable" type="number" min="1" max="10" step="1" value="10">
-      </label>
+      <div class="cont-note">PARTICIPANTES QUE RECIBIRÁN LA CONTINGENCIA</div>
+      <div id="fakePlotsTargets" class="fake-plots-targets" role="group" aria-label="Participantes para Fake Plots"></div>
       <button id="applyFakePlots" class="cont-apply focusable" type="button">Generar FAKE PLOTS</button>
-      <div class="cont-note">12 ecos amarillos dentro de la cobertura de tu bando. Desaparecen sin generar aeronaves. WHITE puede observarlos.</div>
+      <div class="cont-note">Ecos amarillos intermitentes aparecen aleatoriamente durante 30 segundos dentro de coberturas radar, GTC o AWACS. No generan aeronaves.</div>
       <div id="fakePlotsStatus" class="cont-note" role="status"></div>
     </div>
     <button class="cont-btn focusable" type="button" data-contingency="display_failure_blank_display">Display Failure / Blank Display</button>
@@ -9052,7 +9365,6 @@ body.setca-instructor-overlay #status{left:calc(var(--setca-instructor-left) + 2
 <div class="app">
 <header>
   <h1>SETCA</h1>
-  <div class="setca-subtitle">Sistema de Entrenamiento Táctico de Control de Aeronaves</div>
   <button id="start" style="display:none" class="btn focusable">▶️ Iniciar</button>
   <button id="pause" class="btn focusable">⏸️ Pausar</button>
   <div class="setcaSystemsWrap">
@@ -9217,23 +9529,41 @@ body.setca-instructor-overlay #status{left:calc(var(--setca-instructor-left) + 2
 <section class="panel" id="pDraw">
       <div class="panel-header"><h3>Herramientas de Dibujo</h3><span class="toggle" data-target="#pDrawBody">▾</span></div>
       <div id="pDrawBody" class="panel-body">
-        <div class="btn-grid small">
-          <button class="btn mini tool focusable" data-tool="point">Punto</button>
-          <button class="btn mini tool focusable" data-tool="line">Línea</button>
-          <button class="btn mini tool focusable" data-tool="route">Ruta</button>
-          <button class="btn mini tool focusable" data-tool="arwy">ARWY</button>
-          <button class="btn mini tool focusable" data-tool="circle">Círculo</button>
-          <button class="btn mini tool focusable" data-tool="square">Cuadrado</button>
-          <button class="btn mini tool focusable" data-tool="polygon">Polígono</button>
-          <button class="btn mini tool focusable" data-tool="bullseye">Bullseye</button>
-          <button class="btn mini tool focusable" data-tool="cap_l">CAP L</button>
-          <button class="btn mini tool focusable" data-tool="cap_s">CAP S</button>
-          <button class="btn mini tool focusable" data-tool="label">Etiqueta</button>
+        <div class="setca-draw-stack">
+          <div class="setca-draw-row">
+            <span class="setca-draw-label">TRAZADO</span>
+            <div class="btn-grid small setca-draw-buttons">
+              <button class="btn mini tool focusable" data-tool="point">Punto</button>
+              <button class="btn mini tool focusable" data-tool="line">Línea</button>
+              <button class="btn mini tool focusable" data-tool="route">Ruta</button>
+              <button class="btn mini tool focusable" data-tool="arwy">ARWY</button>
+            </div>
+          </div>
+          <div class="setca-draw-row">
+            <span class="setca-draw-label">ÁREAS</span>
+            <div class="btn-grid small setca-draw-buttons">
+              <button class="btn mini tool focusable" data-tool="circle">Círculo</button>
+              <button class="btn mini tool focusable" data-tool="square">Cuadrado</button>
+              <button class="btn mini tool focusable" data-tool="polygon">Polígono</button>
+              <button class="btn mini tool focusable" data-tool="bullseye">Bullseye</button>
+            </div>
+          </div>
+          <div class="setca-draw-row">
+            <span class="setca-draw-label">APOYO</span>
+            <div class="btn-grid small setca-draw-buttons">
+              <button class="btn mini tool focusable" data-tool="cap_l">CAP L</button>
+              <button class="btn mini tool focusable" data-tool="cap_s">CAP S</button>
+              <button class="btn mini tool focusable" data-tool="label">Etiqueta</button>
+            </div>
+          </div>
         </div>
-<div class="coord-grid">
-          <input id="coordLat" class="ghost focusable" type="text" placeholder="Lat DMS: 12°01'20&quot;S">
-          <input id="coordLon" class="ghost focusable" type="text" placeholder="Lon DMS: 77°06'50&quot;W">
-          <button id="placeLL" class="btn mini focusable">Crear (Coord)</button>
+        <div class="setca-draw-coordinates">
+          <div class="setca-draw-coordinates-head"><span>COORDENADAS</span><small>FORMATO DMS</small></div>
+          <div class="coord-grid">
+            <input id="coordLat" class="ghost focusable" type="text" placeholder="Lat DMS: 12°01'20&quot;S">
+            <input id="coordLon" class="ghost focusable" type="text" placeholder="Lon DMS: 77°06'50&quot;W">
+            <button id="placeLL" class="btn mini focusable">Crear (Coord)</button>
+          </div>
         </div>
         <button id="drawingScopeOpenBtn" class="btn mini focusable drawingScopeLauncher" type="button" title="Abrir relación de gráficos">Relación de gráficos</button>
 
@@ -9267,9 +9597,9 @@ body.setca-instructor-overlay #status{left:calc(var(--setca-instructor-left) + 2
           </div>
           <div class="gtc-toolbar-side">
             <span id="gtcCount" class="pill">0</span>
-            <button id="gtcAssetListBtn" class="btn mini focusable" type="button" title="Abrir lista de radares y misiles">Ground Asset List</button>
             <span id="gtcModeChip" class="mini"></span>
           </div>
+          <button id="gtcAssetListBtn" class="btn mini focusable" type="button" title="Abrir lista de radares y misiles">Ground Asset List</button>
         </div>
         <div id="gtcList" class="gtc-list"></div>
       </div>
@@ -9863,7 +10193,8 @@ window.__SETCA_getActiveFadeLost = function(plane){
 function __SETCA_canUseContingencies(){
   try{
     const a = window.__setcaAccess || {};
-    return String(a.role || 'default').toLowerCase() === 'default' && !a.planning && !a.freeplay;
+    return !a.planning && !a.freeplay && (String(a.role || 'default').toLowerCase() === 'default' ||
+      !!(window.__SETCA_isExcsWhiteController && window.__SETCA_isExcsWhiteController(a)));
   }catch(_){ return false; }
 }
 function __SETCA_syncContingenciesGlobal(){
@@ -9909,33 +10240,64 @@ function __SETCA_applyDelayLag(planeId, seconds){
   __SETCA_syncContingenciesGlobal();
   return true;
 }
-function __SETCA_applyFakePlots(seconds=10){
+function __SETCA_applyFakePlots(targetCallsigns){
   if(!__SETCA_canUseContingencies()) return false;
   const access = window.__setcaAccess || {};
-  const team = window.__SETCA_getCurrentTeam();
-  if(!['blue','red'].includes(team)) return false;
-  const sensors = [];
-  (st.gtc || []).forEach(u=>{
-    if(u && !u._hit && window.__SETCA_entityTeam(u) === team && Number(u.covR)>0 && Number(u.covH)>0 &&
-      [u.x,u.y,u.covR,u.covH].every(v=>v !== null && v !== '' && Number.isFinite(Number(v))))
-      sensors.push({x:+u.x,y:+u.y,r:+u.covR});
+  const issuerTeam = window.__SETCA_getCurrentTeam();
+  const white = issuerTeam === 'white' && !!(window.__SETCA_isExcsWhiteController && window.__SETCA_isExcsWhiteController(access));
+  const wanted = new Set((Array.isArray(targetCallsigns) ? targetCallsigns : []).map(__SETCA_normCallsignKey).filter(Boolean));
+  if(!wanted.size){ window.__SETCA_lastFakePlotsResult = {ok:false,reason:'targets',count:0}; return false; }
+  const room = String(window.__setcaCurrentRoom || access.room || (location.hash||'').replace(/^#/,'').trim() || 'sala-default');
+  const presence = (window.__setcaPresence && Array.isArray(window.__setcaPresence[room])) ? window.__setcaPresence[room] : [];
+  const targetsByTeam = {blue:[],red:[]};
+  presence.forEach(row=>{
+    const cs = String(row && (row.callsign || row.name) || '').trim();
+    const team = window.__SETCA_participantTeam(row && row.team);
+    if(!wanted.has(__SETCA_normCallsignKey(cs)) || !['blue','red'].includes(team)) return;
+    if(!white && team !== issuerTeam) return;
+    targetsByTeam[team].push(cs);
   });
-  (st.planes || []).forEach(aw=>{
-    if(aw && !aw._hit && window.__SETCA_entityTeam(aw) === team && isAwacsPlane(aw) && !isPlaneKillConfirmed(aw) && aw.awacsCoverage !== false &&
-      [aw.x,aw.y].every(v=>v !== null && v !== '' && Number.isFinite(Number(v)))){
-      const r = window.__SETCA_awacsRangeNm(aw);
-      if(r > 0) sensors.push({x:+aw.x,y:+aw.y,r});
-    }
-  });
-  if(!sensors.length) return false;
-  const sec = Math.max(1, Math.min(10, Math.round(Number(seconds) || 10)));
+  // El Instructor también puede seleccionarse aunque la presencia tarde un instante en refrescar.
+  const ownCs = String(access.callsign || '').trim();
+  if(ownCs && wanted.has(__SETCA_normCallsignKey(ownCs)) && ['blue','red'].includes(issuerTeam) &&
+    !targetsByTeam[issuerTeam].some(v=>__SETCA_normCallsignKey(v) === __SETCA_normCallsignKey(ownCs))) targetsByTeam[issuerTeam].push(ownCs);
+  const sensorsForTeam = team=>{
+    const sensors = [];
+    (st.gtc || []).forEach(u=>{
+      if(u && !u._hit && window.__SETCA_entityTeam(u) === team && Number(u.covR)>0 && Number(u.covH)>0 &&
+        [u.x,u.y,u.covR,u.covH].every(v=>v !== null && v !== '' && Number.isFinite(Number(v))))
+        sensors.push({x:+u.x,y:+u.y,r:+u.covR});
+    });
+    (st.planes || []).forEach(aw=>{
+      if(aw && !aw._hit && window.__SETCA_entityTeam(aw) === team && isAwacsPlane(aw) && !isPlaneKillConfirmed(aw) && aw.awacsCoverage !== false &&
+        [aw.x,aw.y].every(v=>v !== null && v !== '' && Number.isFinite(Number(v)))){
+        const r = window.__SETCA_awacsRangeNm(aw);
+        if(r > 0) sensors.push({x:+aw.x,y:+aw.y,r});
+      }
+    });
+    return sensors;
+  };
   const now = Date.now();
-  const points = Array.from({length:12}, (_,i)=>{
-    const sensor = sensors[i % sensors.length];
-    const angle = Math.random()*Math.PI*2, r = Math.sqrt(Math.random())*sensor.r*0.9;
-    return {x:sensor.x+Math.cos(angle)*r,y:sensor.y+Math.sin(angle)*r};
+  const until = now + 30000;
+  let generated = 0, selected = 0;
+  ['blue','red'].forEach(team=>{
+    const targets = Array.from(new Set(targetsByTeam[team].map(__SETCA_normCallsignKey))).filter(Boolean);
+    if(!targets.length) return;
+    selected += targets.length;
+    const sensors = sensorsForTeam(team);
+    if(!sensors.length) return;
+    const points = Array.from({length:30}, (_,i)=>{
+      const sensor = sensors[Math.floor(Math.random()*sensors.length)];
+      const angle = Math.random()*Math.PI*2, r = Math.sqrt(Math.random())*sensor.r*0.9;
+      const revealAt = now + Math.floor(Math.random()*28500);
+      const hideAt = Math.min(until, revealAt + 1400 + Math.floor(Math.random()*2600));
+      return {x:sensor.x+Math.cos(angle)*r,y:sensor.y+Math.sin(angle)*r,revealAt,hideAt};
+    }).sort((a,b)=>a.revealAt-b.revealAt);
+    __SETCA_ensureContingencies().fakePlots[team] = {team,startedAt:now,until,seconds:30,points,targets,by:String(access.callsign || '')};
+    generated++;
   });
-  __SETCA_ensureContingencies().fakePlots[team] = {team,startedAt:now,until:now+sec*1000,seconds:sec,points,by:String(access.callsign || '')};
+  if(!generated){ window.__SETCA_lastFakePlotsResult = {ok:false,reason:selected ? 'coverage' : 'targets',count:selected}; return false; }
+  window.__SETCA_lastFakePlotsResult = {ok:true,reason:'',count:selected,seconds:30};
   __SETCA_syncContingenciesGlobal();
   return true;
 }
@@ -9946,16 +10308,21 @@ function __SETCA_drawFakePlots(){
   if(!Object.keys(events).length) return;
   const team = window.__SETCA_getCurrentTeam();
   const white = team === 'white' && (window.__setcaAccess || {}).whiteAccess === true;
+  const myCallsign = __SETCA_normCallsignKey((window.__setcaAccess && window.__setcaAccess.callsign) || window.__setcaUsername || localStorage.getItem('setca_username') || '');
   ctx.save();
   ctx.fillStyle = '#ffff00';
   Object.values(events).forEach(e=>{
     if(!white && e.team !== team) return;
-    const progress = Math.max(0, Math.min(1,(now-e.startedAt)/(e.until-e.startedAt)));
+    if(!white && (!myCallsign || !Array.isArray(e.targets) || !e.targets.includes(myCallsign))) return;
     e.points.forEach((p,i)=>{
+      if(now < p.revealAt || now >= p.hideAt) return;
       const sp = toScreen(p.x,p.y);
-      const pulse = 0.8 + 0.2*Math.sin((now-e.startedAt)/450+i);
-      ctx.globalAlpha = (0.3 + progress*0.5)*pulse;
-      ctx.beginPath(); ctx.arc(sp.x,sp.y,0.9+progress*1.5,0,Math.PI*2); ctx.fill();
+      const life = Math.max(1,p.hideAt-p.revealAt);
+      const progress = Math.max(0,Math.min(1,(now-p.revealAt)/life));
+      const envelope = Math.sin(Math.PI*progress);
+      const pulse = 0.78 + 0.22*Math.sin((now-p.revealAt)/170+i);
+      ctx.globalAlpha = Math.max(0.12,envelope)*pulse;
+      ctx.beginPath(); ctx.arc(sp.x,sp.y,1.15+envelope*1.35,0,Math.PI*2); ctx.fill();
     });
   });
   ctx.restore();
@@ -11102,11 +11469,10 @@ function __refreshLocalDelaySnapshot(force){
 }
 
 function __SETCA_isInstructorSession(){
-  try{ return !!(window.__setcaAccess && (String(window.__setcaAccess.role || '') === 'default' || (window.__SETCA_isExcsWhitePreparation && window.__SETCA_isExcsWhitePreparation()))); }catch(_){ return false; }
+  try{ return !!(window.__SETCA_canControlGlobalPause && window.__SETCA_canControlGlobalPause()); }catch(_){ return false; }
 }
 function __SETCA_enforcePlanningPause(){
-  const whitePreparation = !!(window.__SETCA_isExcsWhitePreparation && window.__SETCA_isExcsWhitePreparation());
-  if(!(window.__SETCA_isPlanningMode && window.__SETCA_isPlanningMode()) && !whitePreparation) return false;
+  if(!(window.__SETCA_isPlanningMode && window.__SETCA_isPlanningMode())) return false;
   // Se edita el estado vivo local; una instantánea de pausa ocultaría los cambios.
   st.paused = true;
   st.localPause = false;
@@ -11115,8 +11481,8 @@ function __SETCA_enforcePlanningPause(){
   st.serverPause = null;
   const chip = document.getElementById('stateChip');
   const simst = document.getElementById('simstate');
-  const chipText = whitePreparation ? 'WHITE · PREPARACIÓN PAUSADA' : 'Planning local · PAUSADO';
-  const simText = whitePreparation ? 'PREPARACIÓN EXCS · PAUSA' : 'PLAN · PAUSA';
+  const chipText = 'Planning local · PAUSADO';
+  const simText = 'PLAN · PAUSA';
   if(chip && chip.textContent !== chipText) chip.textContent = chipText;
   if(simst && simst.textContent !== simText) simst.textContent = simText;
   for(const id of ['start','pause']){
@@ -11153,9 +11519,18 @@ function __setServerPauseUI(){
   if(paused){
     if(chip){ chip.textContent = 'Pausa servidor'; chip.style.borderColor = '#ffe066'; chip.style.color = '#ffe066'; }
     if(simst) simst.textContent = 'PAUSA SERVIDOR';
-    if(btn && __SETCA_isInstructorSession()){
-      btn.textContent = '▶️ Reanudar servidor';
-      btn.title = 'Reanudar la misión para toda la sala';
+    if(btn){
+      if(__SETCA_isInstructorSession()){
+        const white = !!(window.__SETCA_isExcsWhiteController && window.__SETCA_isExcsWhiteController());
+        btn.classList.toggle('setca-general-paused', white);
+        btn.classList.remove('setca-general-running');
+        btn.textContent = white ? '▶️ GO' : '▶️ Reanudar servidor';
+        btn.title = white ? 'Liberar la pausa general e iniciar EXCS sin recargar el mapa' : 'Reanudar la misión para toda la sala';
+      }else{
+        btn.classList.remove('setca-general-paused','setca-general-running');
+        btn.textContent = st && st.localPause ? '▶️ Reanudar local' : '⏸️ Pausa local';
+        btn.title = 'En EXCS esta pausa afecta únicamente a esta pantalla';
+      }
     }
   }
 }
@@ -11191,9 +11566,13 @@ function __setLocalPauseUI(){
   if(simst) simst.textContent = paused ? 'PAUSA LOCAL' : 'RUN';
   if(btn){
     if(__SETCA_isInstructorSession()){
-      btn.textContent = paused ? '▶️ Reanudar local' : '⏸️ Pausar servidor';
-      btn.title = 'El Instructor pausa o reanuda la misión para toda la sala';
+      const white = !!(window.__SETCA_isExcsWhiteController && window.__SETCA_isExcsWhiteController());
+      btn.classList.toggle('setca-general-running', white);
+      btn.classList.remove('setca-general-paused');
+      btn.textContent = white ? '⏸️ PAUSA GENERAL' : '⏸️ Pausar servidor';
+      btn.title = white ? 'WHITE detiene el ejercicio para BLUE y RED' : 'El Instructor pausa o reanuda la misión para toda la sala';
     }else{
+      btn.classList.remove('setca-general-paused','setca-general-running');
       btn.textContent = paused ? '▶️ Reanudar local' : '⏸️ Pausa local';
       btn.title = paused
         ? 'Reanudar la vista local en tiempo real'
@@ -19829,15 +20208,14 @@ requestAnimationFrame(()=>{ repaintPlanesList(); repaintNav(); repaintStudent();
 (function(){
   const st = (window.st = window.st || {});
 
-  // Title / Subtitle
+  // Título compacto: el subtítulo largo se retira para mantener una sola fila.
   try{
     const hdr = document.querySelector('header') || document.body;
     let title = hdr.querySelector('h1');
     if (!title){ title = document.createElement('h1'); hdr.prepend(title); }
     title.textContent = 'SETCA';
-    let sub = hdr.querySelector('.setca-subtitle');
-    if(!sub){ sub = document.createElement('div'); sub.className = 'setca-subtitle'; title.insertAdjacentElement('afterend', sub); }
-    sub.textContent = 'Sistema de Entrenamiento Táctico de Control de Aeronaves';
+    const sub = hdr.querySelector('.setca-subtitle');
+    if(sub) sub.remove();
   }catch(e){ console.warn('SETCA title patch:', e); }
 
   // Alumno button
@@ -20280,9 +20658,45 @@ requestAnimationFrame(()=>{ repaintPlanesList(); repaintNav(); repaintStudent();
         sel.innerHTML = items.map(cs=>'<option value="'+__escOpt(cs)+'">'+__escOpt(cs)+'</option>').join('');
         if(old && Array.from(sel.options).some(o=>o.value===old)) sel.value = old;
       };
+      const refreshFakePlotsTargetOptions = ()=>{
+        const box = document.getElementById('fakePlotsTargets');
+        if(!box) return;
+        const checked = new Set(Array.from(box.querySelectorAll('input[data-fake-plots-target]:checked')).map(input=>__SETCA_normCallsignKey(input.value)));
+        const room = String(window.__setcaCurrentRoom || (window.__setcaAccess && window.__setcaAccess.room) || (location.hash||'').replace(/^#/,'').trim() || 'sala-default');
+        const access = window.__setcaAccess || {};
+        const myTeam = window.__SETCA_getCurrentTeam();
+        const white = !!(window.__SETCA_isExcsWhiteController && window.__SETCA_isExcsWhiteController(access));
+        const seen = new Set();
+        const items = [];
+        const add = row=>{
+          const cs = String(row && (row.callsign || row.name) || row || '').trim();
+          const team = row && typeof row === 'object' ? window.__SETCA_participantTeam(row.team) : myTeam;
+          const key = __SETCA_normCallsignKey(cs);
+          if(!cs || !key || seen.has(key) || !['blue','red'].includes(team) || (!white && team !== myTeam)) return;
+          seen.add(key); items.push({callsign:cs,key,team});
+        };
+        try{
+          const raw = window.__setcaPresence && window.__setcaPresence[room];
+          if(Array.isArray(raw)) raw.forEach(add);
+        }catch(_){ }
+        if(['blue','red'].includes(myTeam)) add({callsign:access.callsign || window.__setcaUsername || localStorage.getItem('setca_username'),team:myTeam});
+        items.sort((a,b)=>a.team.localeCompare(b.team) || a.callsign.localeCompare(b.callsign,undefined,{numeric:true,sensitivity:'base'}));
+        if(!items.length){ box.innerHTML = '<div class="fake-plots-empty">No hay participantes conectados disponibles.</div>'; return; }
+        box.innerHTML = '<label class="fake-plots-target"><input type="checkbox" data-fake-plots-all="1"><span>SELECCIONAR TODOS</span></label>' + items.map(item=>
+          `<label class="fake-plots-target"><input type="checkbox" data-fake-plots-target="1" value="${__escOpt(item.callsign)}"${checked.has(item.key) ? ' checked' : ''}><span>${__escOpt(item.callsign)} · ${item.team.toUpperCase()}</span></label>`
+        ).join('');
+        const all = box.querySelector('[data-fake-plots-all]');
+        const targets = Array.from(box.querySelectorAll('[data-fake-plots-target]'));
+        if(all){
+          all.checked = targets.length > 0 && targets.every(input=>input.checked);
+          all.addEventListener('change', ()=>targets.forEach(input=>{ input.checked = all.checked; }));
+        }
+        targets.forEach(input=>input.addEventListener('change', ()=>{ if(all) all.checked = targets.every(item=>item.checked); }));
+      };
       window.__SETCA_refreshDelayLagPlaneOptions = refreshDelayPlaneOptions;
       window.__SETCA_refreshFadeLostPlaneOptions = refreshFadeLostPlaneOptions;
       window.__SETCA_refreshDisplayFailureCallsignOptions = refreshDisplayFailureCallsignOptions;
+      window.__SETCA_refreshFakePlotsTargetOptions = refreshFakePlotsTargetOptions;
       panel && panel.addEventListener('click', (ev)=>{
         const btn = ev.target && ev.target.closest ? ev.target.closest('[data-contingency]') : null;
         if(!btn) return;
@@ -20290,7 +20704,7 @@ requestAnimationFrame(()=>{ repaintPlanesList(); repaintNav(); repaintStudent();
         const map = {
           delay_lag: { id:'delayLagConfig', refresh:refreshDelayPlaneOptions },
           fade_lost_contact: { id:'fadeLostConfig', refresh:refreshFadeLostPlaneOptions },
-          fake_plots: { id:'fakePlotsConfig' },
+          fake_plots: { id:'fakePlotsConfig', refresh:refreshFakePlotsTargetOptions },
           display_failure_blank_display: { id:'displayFailureConfig', refresh:refreshDisplayFailureCallsignOptions }
         };
         const item = map[key];
@@ -20329,9 +20743,11 @@ requestAnimationFrame(()=>{ repaintPlanesList(); repaintNav(); repaintStudent();
             const cfg = document.getElementById('delayLagConfig');
             const fadeCfg = document.getElementById('fadeLostConfig');
             const displayCfg = document.getElementById('displayFailureConfig');
+            const fakeCfg = document.getElementById('fakePlotsConfig');
             if(p && p.classList.contains('open') && cfg && !cfg.hidden) refreshDelayPlaneOptions();
             if(p && p.classList.contains('open') && fadeCfg && !fadeCfg.hidden) refreshFadeLostPlaneOptions();
             if(p && p.classList.contains('open') && displayCfg && !displayCfg.hidden) refreshDisplayFailureCallsignOptions();
+            if(p && p.classList.contains('open') && fakeCfg && !fakeCfg.hidden) refreshFakePlotsTargetOptions();
           }catch(_){ }
         }, 900);
       }
@@ -20340,12 +20756,14 @@ requestAnimationFrame(()=>{ repaintPlanesList(); repaintNav(); repaintStudent();
       if(applyFakePlotsBtn && !applyFakePlotsBtn.dataset.bound){
         applyFakePlotsBtn.dataset.bound = '1';
         applyFakePlotsBtn.addEventListener('click', ()=>{
-          const input = document.getElementById('fakePlotsSeconds');
-          const seconds = Math.max(1,Math.min(10,Math.round(Number(input && input.value) || 10)));
-          if(input) input.value = String(seconds);
-          const ok = __SETCA_applyFakePlots(seconds);
+          const box = document.getElementById('fakePlotsTargets');
+          const targets = box ? Array.from(box.querySelectorAll('input[data-fake-plots-target]:checked')).map(input=>input.value) : [];
+          const ok = __SETCA_applyFakePlots(targets);
+          const result = window.__SETCA_lastFakePlotsResult || {};
           const status = document.getElementById('fakePlotsStatus');
-          if(status) status.textContent = ok ? `12 ecos generados · duración ${seconds} s.` : 'Se necesita un radar, GTC o AWACS operativo de tu bando.';
+          if(status) status.textContent = ok
+            ? `Contingencia enviada a ${result.count || targets.length} participante(s) · duración 30 s.`
+            : (result.reason === 'targets' ? 'Selecciona al menos un participante.' : 'Se necesita un radar, GTC o AWACS operativo del bando seleccionado.');
         });
       }
       if(applyDelayLagBtn && !applyDelayLagBtn.dataset.bound){
@@ -23136,6 +23554,8 @@ import { getDatabase, ref, onValue, set } from "https://www.gstatic.com/firebase
   const db = getDatabase();
   const modal = document.getElementById('setcaBriefRoom');
   const closeBtn = document.getElementById('setcaBriefClose');
+  const titleEl = document.getElementById('setcaBriefTitle');
+  const kickerEl = modal && modal.querySelector('.setca-brief-kicker');
   const roomNameEl = document.getElementById('setcaBriefRoomName');
   const rosterEl = document.getElementById('setcaBriefRoster');
   const countEl = document.getElementById('setcaBriefLiveCount');
@@ -23160,6 +23580,7 @@ import { getDatabase, ref, onValue, set } from "https://www.gstatic.com/firebase
     { label:'3. SAM ALLOCATOR / OBSERVADOR', roles:['samallocator','observer'] },
     { label:'4. ODI-CO / ATC / ODT', roles:['odi','atc','odt'] }
   ]);
+  const EXCS_TEAM_ROLES = Object.freeze(['default','odi','atc','odt','samallocator','observer']);
 
   let roomId = '';
   let usersValue = {};
@@ -23176,6 +23597,7 @@ import { getDatabase, ref, onValue, set } from "https://www.gstatic.com/firebase
       team:window.__SETCA_participantTeam(value.team),
       callsign:String(value.callsign || '').trim(),
       room:String(value.room || '').trim(),
+      exerciseName:String(value.exerciseName || '').trim(),
       planning:!!value.planning,
       freeplay:!!value.freeplay
     };
@@ -23212,16 +23634,79 @@ import { getDatabase, ref, onValue, set } from "https://www.gstatic.com/firebase
       };
     }).filter(row=>row.role && row.t > 0 && now - row.t <= ACTIVE_MS);
   }
-  function appendPerson(container, person){
+  function appendPerson(container, person, showTeam=true){
     const row = document.createElement('div');
     row.className = 'setca-brief-person';
     const dot = document.createElement('span');
     dot.className = 'setca-brief-live-dot';
     const callsign = document.createElement('span');
     callsign.className = 'setca-brief-callsign';
-    callsign.textContent = person.callsign + ' · ' + window.__SETCA_teamLabel(person.team);
+    callsign.textContent = person.callsign + (showTeam ? ' · ' + window.__SETCA_teamLabel(person.team) : '');
     row.append(dot, callsign);
     container.appendChild(row);
+  }
+  function renderExcsRoster(users){
+    const combatants = users.filter(user=>user.team === 'red' || user.team === 'blue');
+    const whiteUsers = users.filter(user=>user.role === 'white' || user.team === 'white');
+    const redTotal = combatants.filter(user=>user.team === 'red').length;
+    const blueTotal = combatants.filter(user=>user.team === 'blue').length;
+    countEl.textContent = `${redTotal} RED · ${blueTotal} BLUE · ${users.length} TOTAL`;
+    rosterEl.replaceChildren();
+    const board = document.createElement('div');
+    board.className = 'setca-brief-excs-board';
+    ['red','blue'].forEach(team=>{
+      const teamUsers = combatants.filter(user=>user.team === team);
+      const section = document.createElement('section');
+      section.className = 'setca-brief-excs-team';
+      section.dataset.team = team;
+      const teamHead = document.createElement('div');
+      teamHead.className = 'setca-brief-excs-team-head';
+      const teamName = document.createElement('span');
+      teamName.textContent = team === 'red' ? 'RED TEAM' : 'BLUE TEAM';
+      const teamTotal = document.createElement('span');
+      teamTotal.className = 'setca-brief-excs-team-total';
+      teamTotal.textContent = `${teamUsers.length} EN LÍNEA`;
+      teamHead.append(teamName, teamTotal);
+      const roleList = document.createElement('div');
+      roleList.className = 'setca-brief-excs-roles';
+      EXCS_TEAM_ROLES.forEach(roleKey=>{
+        const members = teamUsers.filter(user=>user.role === roleKey);
+        const role = document.createElement('div');
+        role.className = 'setca-brief-excs-role';
+        const head = document.createElement('div');
+        head.className = 'setca-brief-role-head';
+        const roleName = document.createElement('span');
+        roleName.className = 'setca-brief-role-name';
+        roleName.textContent = ROLE_LABELS[roleKey] || roleKey.toUpperCase();
+        const roleCount = document.createElement('span');
+        roleCount.className = 'setca-brief-role-count';
+        roleCount.textContent = String(members.length);
+        head.append(roleName, roleCount);
+        const memberGrid = document.createElement('div');
+        memberGrid.className = 'setca-brief-role-members';
+        if(members.length) members.forEach(person=>appendPerson(memberGrid, person, false));
+        else{
+          const empty = document.createElement('div');
+          empty.className = 'setca-brief-empty';
+          empty.textContent = 'Sin asignación';
+          memberGrid.appendChild(empty);
+        }
+        role.append(head, memberGrid);
+        roleList.appendChild(role);
+      });
+      section.append(teamHead, roleList);
+      board.appendChild(section);
+    });
+    rosterEl.appendChild(board);
+    const whiteBar = document.createElement('section');
+    whiteBar.className = 'setca-brief-excs-white';
+    const whiteTitle = document.createElement('strong');
+    whiteTitle.textContent = `WHITE TEAM · ${whiteUsers.length}`;
+    const whiteList = document.createElement('div');
+    whiteList.className = 'setca-brief-excs-white-list';
+    whiteList.textContent = whiteUsers.length ? whiteUsers.map(user=>user.callsign).join(' · ') : 'SIN ÁRBITRO EN LÍNEA';
+    whiteBar.append(whiteTitle, whiteList);
+    rosterEl.appendChild(whiteBar);
   }
   function renderRoster(){
     const a = access();
@@ -23236,6 +23721,10 @@ import { getDatabase, ref, onValue, set } from "https://www.gstatic.com/firebase
       const roleOrder = tier.roles.indexOf(left.role) - tier.roles.indexOf(right.role);
       return roleOrder || left.callsign.localeCompare(right.callsign, 'es', {sensitivity:'base'});
     });
+    if(String(currentRoom(a) || '').toLowerCase() === 'excs'){
+      renderExcsRoster(users);
+      return;
+    }
     countEl.textContent = `${users.length} EN LÍNEA`;
     rosterEl.replaceChildren();
     TIERS.forEach(tier=>{
@@ -23312,7 +23801,11 @@ import { getDatabase, ref, onValue, set } from "https://www.gstatic.com/firebase
     stopListening();
     const a = access();
     roomId = currentRoom(a);
-    roomNameEl.textContent = isLocal(a) ? 'MODO LOCAL' : roomId.toUpperCase();
+    const excsView = String(roomId || '').toLowerCase() === 'excs';
+    modal.classList.toggle('setca-brief-excs-view', excsView);
+    if(titleEl) titleEl.textContent = excsView ? 'BRIEFING EXCS' : 'BRIEF ROOM';
+    if(kickerEl) kickerEl.textContent = excsView ? 'Situación de fuerzas · visualización' : 'Coordinación de sala';
+    roomNameEl.textContent = isLocal(a) ? 'MODO LOCAL' : (excsView ? (a.exerciseName || 'EXCS') : roomId.toUpperCase());
     usersValue = {};
     briefingValue = null;
     dirty = false;
@@ -23336,6 +23829,7 @@ import { getDatabase, ref, onValue, set } from "https://www.gstatic.com/firebase
     refreshTimer = setInterval(renderRoster, 5000);
   }
   function open(){
+    if(modal.classList.contains('open')) return;
     modal.classList.add('open');
     modal.setAttribute('aria-hidden','false');
     startListening();
@@ -28141,15 +28635,10 @@ import { getAuth } from "https://www.gstatic.com/firebasejs/10.12.3/firebase-aut
     return counts;
   }
   function __excsReadiness(){
-    const config = excsConfig || __excsDefaultConfig();
     const counts = __excsCounts();
-    const missing = [];
-    ['red','blue'].forEach(team=>EXCS_ROLES.forEach(role=>{
-      const need = Number(config[team][role] || 0);
-      const have = Number(counts[team][role] || 0);
-      if(have < need) missing.push(`${window.__SETCA_teamLabel(team)} ${roleToLabel(role)} ${have}/${need}`);
-    }));
-    return {ready:missing.length === 0, missing, counts};
+    // La dotación configura cupos máximos, no mínimos obligatorios.
+    // WHITE puede iniciar con cualquier cantidad de participantes conectados.
+    return {ready:true, missing:[], counts};
   }
   function __renderExcsRoster(target, team, rows){
     if(!target) return;
@@ -28163,7 +28652,7 @@ import { getAuth } from "https://www.gstatic.com/firebasejs/10.12.3/firebase-aut
     excsConfig = __normalizeExcsConfig(excsConfig);
     const rows = __freshExcsRows();
     const state = __excsReadiness();
-    if(excsModeLabel) excsModeLabel.textContent = excsMode === 'white' ? '' : 'Selecciona bando y rol; WHITE TEAM autoriza la salida';
+    if(excsModeLabel) excsModeLabel.textContent = excsMode === 'white' ? '' : 'Selecciona bando y rol; entrarás al mapa bajo control de WHITE TEAM';
     if(excsTitleEditor) excsTitleEditor.hidden = excsMode !== 'white';
     if(excsTitleInput){
       if(!excsTitleDirty) excsTitleInput.value = __normalizeExcsTitle(excsTitleValue);
@@ -28179,7 +28668,9 @@ import { getAuth } from "https://www.gstatic.com/firebasejs/10.12.3/firebase-aut
       const value = excsConfig[team] && excsConfig[team][role];
       if(document.activeElement !== input) input.value = String(value == null ? 0 : value);
       input.disabled = excsMode !== 'white' || gateEntryBusy;
-      input.title = excsMode === 'white' ? (role === 'default' ? 'WHITE TEAM puede habilitar de 1 a 20 pseudo-pilotos por bando.' : 'Cupo requerido para autorizar GO.') : 'Solo WHITE TEAM puede cambiar cupos.';
+      input.title = excsMode === 'white'
+        ? (role === 'default' ? 'Cupo máximo de pseudo-pilotos por bando. No es necesario completarlo para iniciar.' : 'Cupo máximo disponible. No es necesario completarlo para iniciar.')
+        : 'Cupo máximo definido por WHITE TEAM; no es necesario que se complete para iniciar.';
     });
     __renderExcsRoster(excsRosterRed, 'red', rows);
     __renderExcsRoster(excsRosterBlue, 'blue', rows);
@@ -28187,7 +28678,7 @@ import { getAuth } from "https://www.gstatic.com/firebasejs/10.12.3/firebase-aut
       excsStatus.className = 'setca-excs-status ' + (state.ready ? 'ready' : (excsAwaitingStart ? 'waiting' : ''));
       excsStatus.hidden = excsMode === 'white';
       if(excsMode === 'white') excsStatus.textContent = '';
-      else if(excsAwaitingStart) excsStatus.textContent = excsExercise && excsExercise.phase === 'running' ? 'Ejercicio autorizado. Ingresando…' : 'Puesto confirmado. Esperando que WHITE TEAM complete la dotación y pulse GO.';
+      else if(excsAwaitingStart) excsStatus.textContent = 'Puesto confirmado. Abriendo el mapa de tu bando…';
       else excsStatus.textContent = 'Elige TEAM BLUE o TEAM RED y un rol. Confirma tu puesto para aparecer en este Briefing Room.';
     }
     if(excsBriefingText){
@@ -28292,8 +28783,31 @@ import { getAuth } from "https://www.gstatic.com/firebasejs/10.12.3/firebase-aut
       const beat = __instructorNow();
       set(mine, {uid, callsign:gateState.callsign.trim(), team, role, ready:true, t:beat, expiresAt:beat+18000}).catch(()=>{});
     }, 5000);
-    if(excsExercise && excsExercise.phase === 'running') __completeExcsEntry(false);
     return {ok:true};
+  }
+  async function __setExcsGlobalPause(active){
+    const paused = !!active;
+    const callsign = gateState.callsign.trim() || String((window.__setcaAccess && window.__setcaAccess.callsign) || 'WHITE TEAM');
+    const now = Date.now();
+    await runTransaction(ref(db, `rooms/${EXCS_ROOM_ID}/state`), current=>{
+      const next = current && typeof current === 'object' ? {...current} : {};
+      next.serverPause = paused ? {active:true,callsign,startedAt:now,whiteControlled:true} : null;
+      next.globalStarted = !paused;
+      next.lastWriteBy = (auth.currentUser && auth.currentUser.uid) || 'white-team';
+      next.lastWriteRole = 'white';
+      next.instructorAuthority = true;
+      next.lastUpdate = now;
+      return next;
+    });
+    try{
+      if(window.st){
+        st.serverPause = paused ? {active:true,callsign,startedAt:now,whiteControlled:true} : null;
+        st.globalStarted = !paused;
+        st.paused = false;
+        if(typeof __setLocalPauseUI === 'function') __setLocalPauseUI();
+      }
+    }catch(_){ }
+    return true;
   }
   async function __completeExcsEntry(isWhite, preparation=false){
     if(excsEntryCompleting) return;
@@ -28305,7 +28819,7 @@ import { getAuth } from "https://www.gstatic.com/firebasejs/10.12.3/firebase-aut
       // En EXCS los cupos de pseudo-piloto los controla WHITE en el Briefing Room;
       // no se aplica el bloqueo ordinario de un instructor por bando.
       const access = {side:'neutral', role, team, callsign, room:EXCS_ROOM_ID, planning:false, freeplay:false, excs:true, whiteAccess:!!isWhite,
-        excsPreparation:!!(isWhite && preparation), exerciseName:__currentExcsTitle(), ts:Date.now()};
+        excsPreparation:!!isWhite, exerciseName:__currentExcsTitle(), ts:Date.now()};
       saveSession(access);
       try{ localStorage.setItem('setca_username', callsign); }catch(_){ }
       if(!isWhite){ try{ await set(ref(db, `rooms/${EXCS_ROOM_ID}/briefRoom/waiting/${__getClientUid()}`), null); }catch(_){ } }
@@ -28322,22 +28836,42 @@ import { getAuth } from "https://www.gstatic.com/firebasejs/10.12.3/firebase-aut
   async function __handleExcsGo(){
     if(excsMode === 'participant'){
       const result = await __publishExcsWaiting();
-      if(!result.ok) setError(result.message || 'No se pudo confirmar el puesto.');
-      updateGateUI();
+      if(!result.ok){ setError(result.message || 'No se pudo confirmar el puesto.'); updateGateUI(); return; }
+      // BLUE/RED entran al mapa ya cargado y esperan allí bajo la pausa general de WHITE.
+      await __completeExcsEntry(false);
       return;
     }
     if(excsMode !== 'white'){ setError('Acceso EXCS no autorizado.'); return; }
+    // GO nunca depende de completar los cupos: quienes falten pueden ingresar
+    // progresivamente al ejercicio ya iniciado y recibir el estado vivo.
     await __saveExcsWhiteDrafts();
-    const readiness = __excsReadiness();
-    if(!readiness.ready){ setError('No se puede iniciar: completa todos los cupos definidos por WHITE TEAM.'); return; }
     await set(ref(db, `rooms/${EXCS_ROOM_ID}/briefRoom/exercise`), {phase:'running', roundId:'excs-'+Date.now().toString(36), startedAt:Date.now(), startedBy:gateState.callsign.trim(), limits:excsConfig, title:__currentExcsTitle()});
-    await __completeExcsEntry(true, false);
+    await __setExcsGlobalPause(false);
+    // No se cambia de rol ni se recarga: WHITE continúa como Instructor superior.
+    try{
+      const access = window.__setcaAccess || {};
+      access.excsPreparation = true;
+      access.exerciseName = __currentExcsTitle();
+      saveSession({...access,ts:Date.now()});
+      buildHeaderChip(access);
+    }catch(_){ }
+    __stopExcsBriefListeners(false);
+    gate.classList.remove('open');
+    gate.setAttribute('aria-hidden','true');
+    body.classList.remove('setca-access-locked');
+    editMode = false;
   }
   async function __handleExcsPreparation(){
     if(excsMode !== 'white'){ setError('Acceso EXCS no autorizado.'); return; }
     await __saveExcsWhiteDrafts();
     await set(ref(db, `rooms/${EXCS_ROOM_ID}/briefRoom/exercise`), {phase:'preparing', preparedAt:Date.now(), preparedBy:gateState.callsign.trim(), limits:excsConfig, title:__currentExcsTitle()});
-    await __completeExcsEntry(true, true);
+    await __setExcsGlobalPause(true);
+    // El escenario se prepara sobre el mismo mapa vivo, sin reinicios.
+    __stopExcsBriefListeners(false);
+    gate.classList.remove('open');
+    gate.setAttribute('aria-hidden','true');
+    body.classList.remove('setca-access-locked');
+    editMode = false;
   }
   function updateGateUI(){
     const team = window.__SETCA_normalizeTeam(gateState.team);
@@ -28352,10 +28886,11 @@ import { getAuth } from "https://www.gstatic.com/firebasejs/10.12.3/firebase-aut
     const callsignReady = gateState.callsign.trim().length >= 2;
     const roomReady = !!roomModeValid();
     const selectedRoomMeta = roomsCache.find(room=>String(room && room.id || '') === String(gateState.room || '')) || null;
-    const selectedInstructor = training && gateMode === 'join' && gateState.room && teamReady ? __activeInstructorForRoom(gateState.room, team) : null;
-    const instructorOccupied = chosenRole === 'default' && !!selectedInstructor;
-    const excsReadiness = excs ? __excsReadiness() : {ready:false};
-    const ready = whiteExcs ? excsReadiness.ready : (teamReady && roleReady && !instructorOccupied && !excsAwaitingStart && (planning || (callsignReady && (!training || roomReady))));
+    // EXCS no usa el bloqueo de instructor único de las salas normales:
+    // cada participante puede elegir directamente cualquier rol habilitado.
+    const selectedInstructor = !excs && training && gateMode === 'join' && gateState.room && teamReady ? __activeInstructorForRoom(gateState.room, team) : null;
+    const instructorOccupied = !excs && chosenRole === 'default' && !!selectedInstructor;
+    const ready = whiteExcs ? true : (teamReady && roleReady && !instructorOccupied && !excsAwaitingStart && (planning || (callsignReady && (!training || roomReady))));
 
     lobbyFields.hidden = inBrief;
     lobbyActions.hidden = inBrief;
@@ -28368,7 +28903,7 @@ import { getAuth } from "https://www.gstatic.com/firebasejs/10.12.3/firebase-aut
     gateDescription.textContent = !inBrief
       ? ''
       : planning ? 'Elige el equipo para tu planificación. Entrarás como instructor, con todo pausado.'
-      : excs ? (whiteExcs ? '' : 'Elige bando y rol, confirma tu puesto y espera la autorización de WHITE TEAM.')
+      : excs ? (whiteExcs ? '' : 'Elige bando y rol. Entrarás a tu mapa; el ejercicio seguirá en pausa hasta que WHITE TEAM pulse GO.')
       : 'Elige tu bando y el rol que vas a desempeñar. Pulsa GO cuando estés listo.';
     gateDescription.hidden = !gateDescription.textContent;
     teamSelect.value = team;
@@ -28382,7 +28917,7 @@ import { getAuth } from "https://www.gstatic.com/firebasejs/10.12.3/firebase-aut
     roleCards.forEach(card=>{
       const cap = excs && teamReady && ['blue','red'].includes(team) ? Number((excsConfig || __excsDefaultConfig())[team][card.dataset.gateRole] || 0) : Infinity;
       const used = excs && teamReady && ['blue','red'].includes(team) ? Number(__excsCounts()[team][card.dataset.gateRole] || 0) : 0;
-      const occupied = card.dataset.gateRole === 'default' && !!selectedInstructor;
+      const occupied = !excs && card.dataset.gateRole === 'default' && !!selectedInstructor;
       const full = excs && cap <= used && card.dataset.gateRole !== chosenRole;
       card.setAttribute('aria-pressed', String(card.dataset.gateRole === chosenRole));
       card.disabled = !teamReady || gateEntryBusy || occupied || full || whiteExcs || excsAwaitingStart;
@@ -28394,12 +28929,10 @@ import { getAuth } from "https://www.gstatic.com/firebasejs/10.12.3/firebase-aut
     briefCallsign.textContent = 'CALLSIGN · ' + (gateState.callsign.trim() || (planning ? 'PLANIFICADOR' : '—'));
     briefRoom.textContent = training ? 'SALA · ' + roomLabel(gateMode === 'join' ? gateState.room : sanitizeRoomId(gateState.createRoom)) : 'SESIÓN LOCAL · PLANNING';
     briefNote.textContent = planning ? 'INSTRUCTOR DE PLANIFICACIÓN · Visibilidad completa y simulación siempre pausada. Sin conexión a salas.'
-      : whiteExcs ? ''
-      : excs ? 'EXCS · El rival permanece oculto salvo cuando sus aeronaves entran en la cobertura radar, AWACS o GTC de tu bando.'
       : '';
     briefNote.hidden = !briefNote.textContent;
     briefSummary.textContent = whiteExcs ? ''
-      : excsAwaitingStart ? window.__SETCA_teamLabel(team) + ' · ' + roleToLabel(chosenRole) + ' · ESPERANDO WHITE TEAM'
+      : excsAwaitingStart ? window.__SETCA_teamLabel(team) + ' · ' + roleToLabel(chosenRole) + ' · ABRIENDO MAPA'
       : ready ? window.__SETCA_teamLabel(team) + ' · ' + roleToLabel(chosenRole) + ' · LISTO PARA INGRESAR' : '';
     briefSummary.hidden = !!whiteExcs;
     if(excsPrepareBtn){
@@ -28408,7 +28941,7 @@ import { getAuth } from "https://www.gstatic.com/firebasejs/10.12.3/firebase-aut
       excsPrepareBtn.textContent = gateEntryBusy ? 'PROCESANDO…' : 'COMPILAR MISIONES';
     }
     goBtn.disabled = !inBrief || !ready || gateEntryBusy;
-    goBtn.textContent = gateEntryBusy ? 'PROCESANDO…' : (excs && !whiteExcs ? (excsAwaitingStart ? 'ESPERANDO WHITE TEAM' : 'CONFIRMAR PUESTO') : 'GO');
+    goBtn.textContent = gateEntryBusy ? 'PROCESANDO…' : (excs && !whiteExcs ? (excsAwaitingStart ? 'ABRIENDO MAPA…' : 'CONFIRMAR PUESTO') : 'GO');
     briefBackBtn.disabled = gateEntryBusy;
 
     setStepState(stepEls.callsign, callsignReady ? 'done' : 'active');
@@ -28480,9 +29013,24 @@ import { getAuth } from "https://www.gstatic.com/firebasejs/10.12.3/firebase-aut
         excsTitleDirty = false;
         excsBriefingValue = null;
         excsBriefingDirty = false;
-        if(excsMode === 'white') safeSetGateState({team:'white', role:'white'});
-        else if(!['blue','red'].includes(window.__SETCA_normalizeTeam(gateState.team))) safeSetGateState({team:'', role:''});
-        __startExcsBriefListeners();
+        if(excsMode === 'white'){
+          safeSetGateState({team:'white', role:'white'});
+          // WHITE abre primero el mapa en pausa; el Briefing Room queda disponible
+          // encima del mapa desde su botón de acceso, sin pantalla intermedia.
+          await runTransaction(ref(db, `rooms/${EXCS_ROOM_ID}/briefRoom/exercise`), current=>({
+            ...((current && typeof current === 'object') ? current : {}),
+            phase:'preparing', preparedAt:Date.now(), preparedBy:gateState.callsign.trim() || 'WHITE TEAM'
+          }));
+          await __setExcsGlobalPause(true);
+          await __completeExcsEntry(true, true);
+          return;
+        }else{
+          const selectedTeam = window.__SETCA_normalizeTeam(gateState.team);
+          // No heredar INSTRUCTOR ni ningún rol de una sesión anterior.
+          // Primero se elige el color y luego cualquiera de los roles disponibles.
+          safeSetGateState({team:['blue','red'].includes(selectedTeam) ? selectedTeam : '', role:''});
+          __startExcsBriefListeners();
+        }
       }finally{
         gateEntryBusy = false;
       }
@@ -28630,7 +29178,7 @@ import { getAuth } from "https://www.gstatic.com/firebasejs/10.12.3/firebase-aut
       return;
     }
     if(window.__SETCA_isExcsWhitePreparation && window.__SETCA_isExcsWhitePreparation(access)){
-      chip.innerHTML = `<strong>WHITE TEAM · PREPARACIÓN EXCS</strong> · ${callsign} · ${__escapeGateHtml(access.exerciseName || 'EXCS')}`;
+      chip.innerHTML = `<strong>WHITE TEAM · INSTRUCTOR SUPERIOR</strong> · ${callsign} · ${__escapeGateHtml(access.exerciseName || 'EXCS')}`;
       return;
     }
     chip.innerHTML = `<strong>${teamLabel} · ${accessRoleLabel}</strong> · ${callsign} · ${__escapeGateHtml(access.exerciseName || roomLabel(access.room))}`;
@@ -28744,10 +29292,12 @@ import { getAuth } from "https://www.gstatic.com/firebasejs/10.12.3/firebase-aut
     body.setAttribute('data-setca-team', window.__SETCA_participantTeam(access.team));
     const planning = !!(access && access.planning);
     const freeplay = !!(access && access.freeplay);
+    const excsSession = !planning && !freeplay && String(access && access.room || '').toLowerCase() === 'excs';
     const excsPseudoPilot = !!(window.__SETCA_isExcsPseudoPilot && window.__SETCA_isExcsPseudoPilot(access));
     const whitePreparation = !!(window.__SETCA_isExcsWhitePreparation && window.__SETCA_isExcsWhitePreparation(access));
     body.classList.toggle('setca-planning-mode', planning);
     body.classList.toggle('setca-freeplay-mode', freeplay);
+    body.classList.toggle('setca-excs-session', excsSession);
     body.classList.toggle('setca-excs-pseudo-pilot', excsPseudoPilot);
     body.classList.toggle('setca-excs-white-preparation', whitePreparation);
     const accessRole = String(access.role || 'default').toLowerCase();
@@ -28766,7 +29316,8 @@ import { getAuth } from "https://www.gstatic.com/firebasejs/10.12.3/firebase-aut
     try{
       const contBtn = document.getElementById('contingenciesBtn');
       const contPanel = document.getElementById('setcaContingenciesPanel');
-      const allowCont = String(access.role || 'default').toLowerCase() === 'default' && !planning && !freeplay;
+      const allowCont = !planning && !freeplay && (!excsSession || whitePreparation) && (String(access.role || 'default').toLowerCase() === 'default' ||
+        !!(window.__SETCA_isExcsWhiteController && window.__SETCA_isExcsWhiteController(access)));
       if(contBtn){ contBtn.style.display = allowCont ? '' : 'none'; contBtn.disabled = !allowCont; }
       if(!allowCont && contPanel){ contPanel.classList.remove('open'); contPanel.setAttribute('aria-hidden','true'); }
     }catch(_){ }
@@ -28784,12 +29335,12 @@ import { getAuth } from "https://www.gstatic.com/firebasejs/10.12.3/firebase-aut
     const salasBtn = document.getElementById('salasBtn');
     if(salasBtn){
       if(!salasBtn.dataset.setcaTitle) salasBtn.dataset.setcaTitle = salasBtn.title || salasBtn.textContent || '';
-      const showAccessBtn = whitePreparation;
+      const showAccessBtn = excsSession;
       salasBtn.disabled = !showAccessBtn;
       salasBtn.style.opacity = showAccessBtn ? '' : '0';
       salasBtn.style.pointerEvents = showAccessBtn ? '' : 'none';
       salasBtn.style.display = showAccessBtn ? '' : 'none';
-      salasBtn.title = planning ? 'Planning tool local: sin sala ni sincronización.' : (freeplay ? 'FREE PLAY local: sin sala ni sincronización.' : (whitePreparation ? 'Volver al Briefing Room de EXCS.' : (showAccessBtn ? (salasBtn.dataset.setcaTitle || 'Cambiar acceso / sala') : 'Acceso oculto para Instructor')));
+      salasBtn.title = whitePreparation ? 'Volver al Briefing Room de EXCS.' : (excsSession ? 'Ver dotación, roles y callsigns de BLUE y RED.' : 'Acceso oculto para Instructor');
     }
     const unitMgr = document.getElementById('pUnitMgr');
     if(unitMgr){
@@ -28804,7 +29355,7 @@ import { getAuth } from "https://www.gstatic.com/firebasejs/10.12.3/firebase-aut
       if(addMission){ addMission.textContent = '2 · SUMAR MISIÓN'; addMission.title = 'Importa la misión del otro bando y la suma al escenario.'; }
       if(exportMission){ exportMission.textContent = '💾 ESCENARIO COMPILADO'; exportMission.title = 'Exporta el escenario BLUE + RED ya compilado.'; }
     }
-    const removePlanesPanel = freeplay || (!planning && ['default','odi','odico','atc','odt','samallocator'].includes(accessRole));
+    const removePlanesPanel = freeplay || accessRole === 'white' || (!planning && ['default','odi','odico','atc','odt','samallocator'].includes(accessRole));
     const planesPanel = document.getElementById('pPlanes');
     if(removePlanesPanel){
       if(planesPanel) planesPanel.remove();
@@ -28812,15 +29363,21 @@ import { getAuth } from "https://www.gstatic.com/firebasejs/10.12.3/firebase-aut
       window.__SETCA_ensurePlanesPanel();
     }
     const navPanel = document.getElementById('pNav');
-    if(navPanel) navPanel.style.display = (!planning && !freeplay && accessRole === 'default') ? 'none' : '';
+    if(navPanel) navPanel.style.display = (whitePreparation || (!planning && !freeplay && accessRole === 'default')) ? 'none' : '';
     try{ __SETCA_refreshLocalWorkstationPanels(access); }catch(_){ }
     try{ if(window.__SETCA_refreshLocalDrawingLauncher) window.__SETCA_refreshLocalDrawingLauncher(); }catch(_){ }
     if(planning || freeplay || whitePreparation){
       try{
         const chip = document.getElementById('stateChip');
         const simst = document.getElementById('simstate');
-        if(planning || whitePreparation){
+        if(planning){
           __SETCA_enforcePlanningPause();
+        }else if(whitePreparation){
+          st.paused = false;
+          st.localPause = false;
+          if(chip) chip.textContent = 'WHITE · CONTROL GENERAL';
+          if(simst) simst.textContent = st.serverPause && st.serverPause.active ? 'EXCS · PAUSA GENERAL' : 'EXCS · EN CURSO';
+          if(typeof __setLocalPauseUI === 'function') __setLocalPauseUI();
         }else if(freeplay){
           st.paused = false;
           st.t0 = performance.now() - (Number(st.elapsed || 0) || 0);
@@ -29070,7 +29627,7 @@ import { getAuth } from "https://www.gstatic.com/firebasejs/10.12.3/firebase-aut
       freeplay: !access.planning && !!access.freeplay,
       excs: !access.planning && !access.freeplay && String(access.room || '').toLowerCase() === EXCS_ROOM_ID,
       whiteAccess: role === 'white' && access.whiteAccess === true,
-      excsPreparation: role === 'white' && access.whiteAccess === true && access.excsPreparation === true,
+      excsPreparation: role === 'white' && access.whiteAccess === true && String(access.room || '').toLowerCase() === EXCS_ROOM_ID,
       exerciseName: String(access.exerciseName || '').replace(/\s+/g,' ').trim().slice(0,64)
     };
     try{ localStorage.setItem('setca_username', window.__setcaAccess.callsign); }catch(_){ }
@@ -29089,11 +29646,14 @@ import { getAuth } from "https://www.gstatic.com/firebasejs/10.12.3/firebase-aut
     }
 
     const salasBtn = document.getElementById('salasBtn');
-    const openCurrentAccess = ()=>window.__setcaAccess.excsPreparation ? openExcsWhiteBrief() : openGate(true, true);
+    const excsSession = String(window.__setcaAccess.room || '').toLowerCase() === EXCS_ROOM_ID;
+    const whiteExcs = !!(window.__SETCA_isExcsWhiteController && window.__SETCA_isExcsWhiteController(window.__setcaAccess));
+    const openCurrentAccess = ()=> whiteExcs
+      ? openExcsWhiteBrief()
+      : (excsSession && typeof window.__SETCA_openBriefRoom === 'function' ? window.__SETCA_openBriefRoom() : openGate(true, true));
     if(salasBtn){
-      const preparation = !!window.__setcaAccess.excsPreparation;
-      salasBtn.textContent = preparation ? '⬅ BRIEFING EXCS' : '🔐 Acceso';
-      salasBtn.title = preparation ? 'Volver al Briefing Room de EXCS.' : 'Cambiar acceso / sala';
+      salasBtn.textContent = excsSession ? '⬅ BRIEFING EXCS' : '🔐 Acceso';
+      salasBtn.title = whiteExcs ? 'Volver al Briefing Room de EXCS.' : (excsSession ? 'Ver dotación, roles y callsigns de BLUE y RED.' : 'Cambiar acceso / sala');
       salasBtn.onclick = (ev)=>{ ev.preventDefault(); openCurrentAccess(); };
     }
     if(window.setcaRooms){
@@ -29479,7 +30039,7 @@ import { getAuth } from "https://www.gstatic.com/firebasejs/10.12.3/firebase-aut
     location.reload();
   }
 
-  function openExcsWhiteBrief(){
+  async function openExcsWhiteBrief(){
     const access = window.__setcaAccess || {};
     if(gateEntryBusy || !isValidWhiteAccess(access)) return;
     if(gateStage === 'brief' && excsMode === 'white' && gate.classList.contains('open')) return;
@@ -29496,6 +30056,8 @@ import { getAuth } from "https://www.gstatic.com/firebasejs/10.12.3/firebase-aut
     __startExcsBriefListeners();
     updateGateUI();
     entryBrief.scrollTop = 0;
+    try{ await __setExcsGlobalPause(true); }
+    catch(err){ console.warn('No se pudo activar la pausa general al abrir el briefing EXCS',err); setError('No se pudo activar la pausa general. Revisa la conexión.'); }
   }
   function openGate(isEdit, focusRoom){
     if(gateEntryBusy) return;
@@ -29543,7 +30105,9 @@ import { getAuth } from "https://www.gstatic.com/firebasejs/10.12.3/firebase-aut
   teamSelect.addEventListener('change', ()=>{ safeSetGateState({team:teamSelect.value}); setError(''); updateGateUI(); });
   teamCards.forEach(card=>card.addEventListener('click', ()=>{
     if(gateEntryBusy) return;
-    safeSetGateState({team:card.dataset.gateTeam}); setError(''); updateGateUI();
+    const nextTeam = card.dataset.gateTeam;
+    const teamChanged = window.__SETCA_normalizeTeam(gateState.team) !== window.__SETCA_normalizeTeam(nextTeam);
+    safeSetGateState({team:nextTeam, role:(excsMode === 'participant' && teamChanged) ? '' : gateState.role}); setError(''); updateGateUI();
   }));
   roleCards.forEach(card=>card.addEventListener('click', ()=>{
     if(card.disabled || gateEntryBusy || gateDestination === 'planning') return;
@@ -31443,7 +32007,7 @@ import { getDatabase, ref, get, set } from "https://www.gstatic.com/firebasejs/1
     const chip = $('#setcaRoleConsole');
     if(chip){
       const whitePreparation = !!(window.__SETCA_isExcsWhitePreparation && window.__SETCA_isExcsWhitePreparation());
-      const perm = whitePreparation ? 'PREPARACIÓN EXCS' : (canManageAircraft() ? 'CTRL AERONAVES' : (r === 'observer' ? 'SOLO OBS' : 'PUESTO LIMITADO'));
+      const perm = whitePreparation ? 'CONTROL SUPERIOR' : (canManageAircraft() ? 'CTRL AERONAVES' : (r === 'observer' ? 'SOLO OBS' : 'PUESTO LIMITADO'));
       chip.textContent = `${roleLabel(r)} · ${perm}`;
     }
     if(!$('#setcaSpawnBanner')){
@@ -31466,8 +32030,7 @@ import { getDatabase, ref, get, set } from "https://www.gstatic.com/firebasejs/1
     }
     const box = $('#setcaRoleAssistNav');
     if(box){
-      if(r === 'default'){ box.remove(); return; }
-      else if(window.__SETCA_isExcsWhitePreparation && window.__SETCA_isExcsWhitePreparation()) box.textContent = 'WHITE: carga la primera misión y suma la segunda. Prepara el escenario en pausa y vuelve a BRIEFING EXCS para iniciar con GO.';
+      if(r === 'default' || (window.__SETCA_isExcsWhitePreparation && window.__SETCA_isExcsWhitePreparation())){ box.remove(); return; }
       else if(r === 'odt') box.textContent = 'ODT: enfoque GTC, Ground Asset List, armas tierra-aire y seguimiento táctico.';
       else if(r === 'samallocator') box.textContent = 'SAM ALOCATOR: enfoque GTC, Ground Asset List, armas tierra-aire y seguimiento táctico.';
       else if(r === 'odi' || r === 'odico') box.textContent = 'ODI-CO: foco en vuelos, identificación y coordinación sin tomar autoridad total.';
@@ -31975,7 +32538,10 @@ import { getDatabase, ref, get, set } from "https://www.gstatic.com/firebasejs/1
     }catch(_){ return ''; }
   }
   function isOdtLike(){ const r = role(); return r === 'odt' || r === 'samallocator'; }
-  function isInstructor(){ return role() === 'default'; }
+  function isInstructor(){
+    try{ return !!(window.__SETCA_canControlGlobalPause && window.__SETCA_canControlGlobalPause()); }
+    catch(_){ return false; }
+  }
   function roomId(){ return String((location.hash || '').replace(/^#/,'').trim() || 'sala-default'); }
   function globalPauseKey(){ return 'setca_global_started_v43_3_' + roomId(); }
   function canUseSharedRoom(){
