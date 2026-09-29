@@ -37,6 +37,33 @@
   // El equipo nunca se deduce de Friend/Hostile: los archivos antiguos son BLUE.
   window.__SETCA_entityTeam = entity => normalizeTeam(entity && entity.team) || 'blue';
   window.__SETCA_isWhiteTeamSession = ()=>window.__SETCA_getCurrentTeam() === 'white';
+  window.__SETCA_isWhiteExcsView = function(){
+    const access = window.__setcaAccess || readSavedAccess() || {};
+    return String(access.room || '').toLowerCase() === 'excs'
+      && participantTeam(access.team) === 'white'
+      && (access.whiteAccess === true || String(access.role || '').toLowerCase() === 'white');
+  };
+  window.__SETCA_excsTeamColor = entity => window.__SETCA_entityTeam(entity) === 'red' ? '#ff4d5a' : '#38bdf8';
+  window.__SETCA_excsTeamPalette = function(entity){
+    const red = window.__SETCA_entityTeam(entity) === 'red';
+    return red ? {
+      team:'red', base:'#ff4d5a', bright:'#fb7185', brightRgb:'251,113,133', text:'#fecdd3', drawing:'#f43f5e', missile:'#e11d48', impact:'#fb7185',
+      unitFill:'rgba(159,18,57,0.18)', unitEdge:'rgba(251,113,133,0.82)', unitIcon:'rgba(255,77,90,0.98)', unitText:'rgba(254,205,211,0.98)',
+      detectionRgb:'251,113,133', fireRgb:'220,38,38',
+      detectionFill:'rgba(244,63,94,0.105)', detectionEdge:'rgba(251,113,133,0.64)', detectionText:'rgba(254,205,211,0.94)',
+      fireFill:'rgba(127,29,29,0.22)', fireEdge:'rgba(220,38,38,0.90)', fireText:'rgba(254,202,202,0.98)',
+      awacsFill:'rgba(225,29,72,0.075)', awacsEdge:'rgba(251,113,133,0.58)', awacsText:'rgba(254,205,211,0.96)',
+      link:'rgba(253,164,175,0.62)'
+    } : {
+      team:'blue', base:'#38bdf8', bright:'#7dd3fc', brightRgb:'125,211,252', text:'#bae6fd', drawing:'#0ea5e9', missile:'#2563eb', impact:'#60a5fa',
+      unitFill:'rgba(14,116,144,0.18)', unitEdge:'rgba(125,211,252,0.82)', unitIcon:'rgba(56,189,248,0.98)', unitText:'rgba(186,230,253,0.98)',
+      detectionRgb:'56,189,248', fireRgb:'37,99,235',
+      detectionFill:'rgba(14,165,233,0.105)', detectionEdge:'rgba(56,189,248,0.64)', detectionText:'rgba(186,230,253,0.94)',
+      fireFill:'rgba(30,64,175,0.22)', fireEdge:'rgba(37,99,235,0.90)', fireText:'rgba(191,219,254,0.98)',
+      awacsFill:'rgba(2,132,199,0.075)', awacsEdge:'rgba(125,211,252,0.58)', awacsText:'rgba(186,230,253,0.96)',
+      link:'rgba(125,211,252,0.62)'
+    };
+  };
   window.__SETCA_isOwnTeam = entity => !!entity && (window.__SETCA_isWhiteTeamSession() || window.__SETCA_entityTeam(entity) === window.__SETCA_getCurrentTeam());
   window.__SETCA_canSeeOwnedEntity = window.__SETCA_isOwnTeam;
   // Ecos sintéticos, separados de aeronaves y limitados por reloj de pared.
@@ -101,6 +128,7 @@
     return {id:p.id, team:p.team, name:'CONTACTO ' + String(p.id || '').slice(-6),
       tipo:'Desconocido', x:p.x, y:p.y, alt:p.alt, spd:p.spd, hdg:p.hdg,
       tgtAlt:p.alt, tgtSpd:p.spd, tgtHdg:p.hdg, turn:0, ghosts:[], lastDet:p.lastDet,
+      tagDx:p.tagDx, tagDy:p.tagDy,
       fail:{}, xpdr:'', awacsCoverage:false, __setcaContactView:true};
   };
   window.__SETCA_ownedMissileStats = function(scene){
@@ -526,6 +554,8 @@
     'id','team','name','launcher','launcherType','launcherName','targetName','tgt',
     'tx','ty','x','y','alt','spd','drift','travKM','rangeKM','maxAltFt',
     'launchedAt','launcherShotNumber','launcherRemainingShots','status',
+    'flightTimeSec','lifeMs','expiresAt','initialSpdKmh','maxSpdKmh','minSpdKmh',
+    'boostSec','dragCoefficient','dragLossKmh','turnRateDegSec','targetSpdKmh','targetLeadSec',
     'courseDeg','validationStatus','validationCompletedPhases','validationBy',
     'validationTargetId','validationAssetId'
   ]);
@@ -549,6 +579,7 @@
       const kmPerNm = 1.852;
       const ageSec = Math.max(0, Number(ageMs || 0)) / 1000;
       if(!missile || ageSec < 0.1) return missile;
+      missile.flightTimeSec = Math.max(Number(missile.flightTimeSec || 0), ageSec);
       const target = (window.st && Array.isArray(st.planes))
         ? st.planes.find(p=>p && String(p.id || '') === String(missile.tgt || ''))
         : null;
@@ -584,7 +615,7 @@
       }
       const missileId = String(event.missileId || event.missile.id || '').trim();
       if(!missileId || String(event.sourceClientId || '') === __setcaGtcClientId) return false;
-      const ttlMs = Math.max(30000, Math.min(600000, Number(event.ttlMs || 240000) || 240000));
+      const ttlMs = Math.max(30000, Math.min(900000, Number(event.ttlMs || 240000) || 240000));
       const serverAt = Number(event.serverAt || 0);
       const ageMs = serverAt > 0
         ? Math.max(0, __SETCA_serverNow() - serverAt)
@@ -609,6 +640,8 @@
       missile.__setcaGlobalSourceClientId = String(event.sourceClientId || '');
       missile.sourceLaunchedAt = Number(event.missile.launchedAt || event.publishedAt || Date.now()) || Date.now();
       missile.launchedAt = Date.now() - ageMs;
+      if(window.__SETCA_prepareMissileLifecycle) window.__SETCA_prepareMissileLifecycle(missile);
+      if(ageMs >= Number(missile.lifeMs || ttlMs)) return false;
       if(event.missile.samDualLaunch && typeof event.missile.samDualLaunch === 'object'){
         try{ missile.samDualLaunch = JSON.parse(JSON.stringify(event.missile.samDualLaunch)); }catch(_){ }
       }
@@ -668,7 +701,9 @@
       const missileId = String(missile.id || '').trim();
       if(!missileId || missile.__setcaGlobalLaunchPublished) return false;
       missile.__setcaGlobalLaunchPublished = true;
+      if(window.__SETCA_prepareMissileLifecycle) window.__SETCA_prepareMissileLifecycle(missile);
       const now = Date.now();
+      const launchTtlMs = Math.max(60000, Math.min(900000, Number(missile.lifeMs || 240000) + 30000));
       const compact = {};
       __SETCA_GTC_LAUNCH_FIELDS.forEach(key=>{
         if(Object.prototype.hasOwnProperty.call(missile, key)) compact[key] = missile[key];
@@ -690,11 +725,11 @@
         byRole:role,
         publishedAt:now,
         serverAt:serverTimestamp(),
-        ttlMs:240000,
-        expiresAt:now + 240000
+        ttlMs:launchTtlMs,
+        expiresAt:now + launchTtlMs
       };
       await set(launchRef, payload);
-      setTimeout(()=>{ try{ set(launchRef, null); }catch(_){ } }, 240000);
+      setTimeout(()=>{ try{ set(launchRef, null); }catch(_){ } }, launchTtlMs);
       return true;
     }catch(e){
       try{ if(missile) missile.__setcaGlobalLaunchPublished = false; }catch(_){ }
@@ -2159,7 +2194,7 @@ let __setcaLastAppliedRemoteTs = 0;
         const completedMissileIds = __setcaCompletedMissileIds([].concat(Array.isArray(st.impactMarks) ? st.impactMarks : [], Array.isArray(v.impactMarks) ? v.impactMarks : []));
         const remoteActiveMissiles = v.missiles.filter(m=>{
           const id = String(m && m.id || '');
-          return __SETCA_isSharedMissile(m) && (!m.status || String(m.status).toLowerCase() === 'fly') && (!id || !completedMissileIds.has(id));
+          return __SETCA_isSharedMissile(m) && __setcaIsActiveMissile(m, completedMissileIds) && (!id || !completedMissileIds.has(id));
         }).map(m=>{
           const q = {...m};
           delete q.__syncAfter;
@@ -11705,13 +11740,19 @@ function __navDrawCoverage(c, ptScreen, mode3d){
   ['detection','fire'].forEach(layer=>units.forEach(u=>{
     const profile = __navCoverageProfile(u,layer); if(!profile) return;
     const fire = layer === 'fire';
-    c.strokeStyle = fire ? 'rgba(190,60,66,.80)' : 'rgba(73,146,181,.48)';
+    const whitePalette = (window.__SETCA_isWhiteExcsView && window.__SETCA_isWhiteExcsView() && window.__SETCA_excsTeamPalette)
+      ? window.__SETCA_excsTeamPalette(u) : null;
+    c.strokeStyle = whitePalette
+      ? (fire ? whitePalette.fireEdge : whitePalette.detectionEdge)
+      : (fire ? 'rgba(190,60,66,.80)' : 'rgba(73,146,181,.48)');
     c.lineWidth = fire ? 1.25 : 1;
     const paths = __navCoverageMesh(u,mode3d,layer).map(path=>path.map(ptScreen));
-    if(fire){
+    if(fire || whitePalette){
       const hull = __navCoverageHull(paths.flat());
       if(hull.length>=3){
-        c.fillStyle = 'rgba(103,18,28,.26)'; c.beginPath();
+        c.fillStyle = whitePalette
+          ? (fire ? whitePalette.fireFill : whitePalette.detectionFill)
+          : 'rgba(103,18,28,.26)'; c.beginPath();
         hull.forEach((s,i)=>{if(i)c.lineTo(s.x,s.y);else c.moveTo(s.x,s.y);});c.closePath();c.fill();
       }
     }
@@ -11723,7 +11764,9 @@ function __navDrawCoverage(c, ptScreen, mode3d){
     });
     c.setLineDash([]);
     const top = ptScreen({x:+u.x,y:+u.y,alt:mode3d ? profile.h : 0});
-    c.fillStyle = fire ? '#db858b' : '#73b8d7'; c.font='10px ui-monospace,monospace'; c.textAlign='center';
+    c.fillStyle = whitePalette
+      ? (fire ? whitePalette.fireText : whitePalette.detectionText)
+      : (fire ? '#db858b' : '#73b8d7'); c.font='10px ui-monospace,monospace'; c.textAlign='center';
     c.fillText(`${u.name || u.id || 'SENSOR'} · ${fire ? 'FUEGO' : 'DET'} · R ${profile.r.toFixed(1)} NM / H ${Math.round(profile.h)} FT`,top.x,top.y+(fire ? 14 : -10));
   }));
   c.restore();
@@ -12018,6 +12061,7 @@ function __navEnsureTrack(p){
       pts:[]
     };
   }
+  track.team = window.__SETCA_entityTeam(p);
   track.name = String(p.name || track.name || id);
   track.tipo = String((typeof getPlaneTipoDisplay === 'function' ? getPlaneTipoDisplay(p) : (p.tipo || track.tipo || '')) || '');
   track.color = __navGetTrackColor(id, track.color || __navColorForId(id));
@@ -12050,6 +12094,9 @@ function __navRecordPlane(p, force=false, nowTs=null){
   }
 }
 function __navMissileColor(m){
+  if(window.__SETCA_isWhiteExcsView && window.__SETCA_isWhiteExcsView() && window.__SETCA_excsTeamPalette){
+    return window.__SETCA_excsTeamPalette(m).missile;
+  }
   const lt = String(m && m.launcherType || '').toLowerCase();
   if(lt === 'gtc' || lt === 'ground') return '#EF4444';
   return '#F97316';
@@ -12626,11 +12673,12 @@ function __navCollectRenderData(){
     const pts = (Array.isArray(track.pts) ? track.pts : []).filter(pt=>!Number.isFinite(cutoff) || pt.t <= cutoff);
     const plane = replayActive ? null : planeMap.get(String(track.id || ''));
     const replayPoint = replayActive ? __navPointAtCutoff(track.pts, cutoff) : null;
+    const whiteTeamColor = !!(window.__SETCA_isWhiteExcsView && window.__SETCA_isWhiteExcsView() && window.__SETCA_excsTeamColor);
     return {
       id:String(track.id || ''),
       name:String(track.name || track.id || ''),
       tipo:String(track.tipo || ''),
-      color:String(__navGetTrackColor(track.id, track.color || '#7feeff')),
+      color:String(whiteTeamColor ? window.__SETCA_excsTeamColor(plane || track) : __navGetTrackColor(track.id, track.color || '#7feeff')),
       pts,
       current: replayActive
         ? replayPoint
@@ -12645,6 +12693,9 @@ function __navCollectRenderData(){
   const missiles = Object.values(__NAV_STORE.missileTracks || {}).filter(track=>window.__SETCA_canSeeOwnedEntity(track)).map(track=>{
     const pts = (Array.isArray(track.pts) ? track.pts : []).filter(pt=>!Number.isFinite(cutoff) || pt.t <= cutoff);
     const live = replayActive ? null : missileMap.get(String(track.id || ''));
+    // En LIVE, una traza histórica no puede mantener un misil consumido en pantalla.
+    // Las trayectorias terminadas permanecen disponibles únicamente en REPLAY.
+    if(!replayActive && !live) return null;
     const replayPoint = replayActive ? __navPointAtCutoff(track.pts, cutoff) : null;
     const current = replayActive
       ? replayPoint
@@ -12663,11 +12714,13 @@ function __navCollectRenderData(){
       launcherName:String(track.launcherName || track.launcher || ''),
       launcherType:String(track.launcherType || ''),
       targetName:String(track.targetName || ''),
-      color:String(track.color || '#F97316'),
+      color:String((window.__SETCA_isWhiteExcsView && window.__SETCA_isWhiteExcsView() && window.__SETCA_excsTeamPalette)
+        ? window.__SETCA_excsTeamPalette(live || track).missile
+        : (track.color || '#F97316')),
       pts,
       current
     };
-  }).filter(track=>track.pts.length || track.current);
+  }).filter(track=>track && (track.pts.length || track.current));
   return { cutoff, tracks, missiles, replayActive, mode3d:__navIs3DEnabled() };
 }
 function __navDrawMissileMarker(c, x, y, color, hdgDeg, mode3d=false){
@@ -14585,14 +14638,16 @@ function drawPlane(p){
     const awacsRangeNm = window.__SETCA_awacsRangeNm(p);
     const rPx = awacsRangeNm * zoom * PX_PER_NM;
     if(isFinite(rPx) && rPx > 1){
+      const __whiteAwacsPalette = (window.__SETCA_isWhiteExcsView && window.__SETCA_isWhiteExcsView() && window.__SETCA_excsTeamPalette)
+        ? window.__SETCA_excsTeamPalette(__livePlaneRef || p) : null;
       ctx.save();
-      ctx.fillStyle = 'rgba(77,227,255,0.055)';
+      ctx.fillStyle = __whiteAwacsPalette ? __whiteAwacsPalette.awacsFill : 'rgba(77,227,255,0.055)';
       ctx.beginPath();
       ctx.arc(s.x, s.y, rPx, 0, 2*Math.PI);
       ctx.fill();
 
       // Sin haz visual: solo permanece la cobertura circular efectiva del AWACS.
-      ctx.strokeStyle = 'rgba(77,227,255,0.34)';
+      ctx.strokeStyle = __whiteAwacsPalette ? __whiteAwacsPalette.awacsEdge : 'rgba(77,227,255,0.34)';
       ctx.lineWidth = 1;
       ctx.setLineDash([6,6]);
       ctx.beginPath();
@@ -14602,7 +14657,7 @@ function drawPlane(p){
       if(st.showLabels && st.labelMode !== 2){
         ctx.font = '10px monospace';
         ctx.textAlign = 'center';
-        ctx.fillStyle = 'rgba(77,227,255,0.9)';
+        ctx.fillStyle = __whiteAwacsPalette ? __whiteAwacsPalette.awacsText : 'rgba(77,227,255,0.9)';
         ctx.fillText(`AWACS ${Math.round(awacsRangeNm * NM2KM)} km`, s.x, s.y + rPx + 12);
       }
       ctx.restore();
@@ -14622,7 +14677,10 @@ function drawPlane(p){
     return;
   }
   const role=syncPlaneRoleState(p);
-  const color=getRoleUiColor(role);
+  const __whiteExcsTeamTint = !!(window.__SETCA_isWhiteExcsView && window.__SETCA_isWhiteExcsView());
+  const color = __whiteExcsTeamTint && window.__SETCA_excsTeamColor
+    ? window.__SETCA_excsTeamColor(__livePlaneRef || p)
+    : getRoleUiColor(role);
   const visualScale = getTacticalVisualScale(zoom);
   const planeVisualScale = ((typeof window.__SETCA_getPlaneVisualUserScale === 'function') ? window.__SETCA_getPlaneVisualUserScale() : 1) * visualScale;
   const ghostSize = 2 * planeVisualScale;
@@ -14643,7 +14701,14 @@ function drawPlane(p){
     return Math.max(minLen, Math.min(maxLen, len));
   })();
   const headingStroke = Math.max(1.15, 1.35 * planeVisualScale);
-  p.ghosts.forEach((g,i)=>{const sg=toScreen(g.x,g.y);const op=(i+1)/p.ghosts.length*.35;ctx.fillStyle=`rgba(179,0,255,${op})`;ctx.fillRect(sg.x-ghostSize/2,sg.y-ghostSize/2,ghostSize,ghostSize);});
+  p.ghosts.forEach((g,i)=>{
+    const sg=toScreen(g.x,g.y),op=(i+1)/p.ghosts.length*.35;
+    if(__whiteExcsTeamTint){
+      ctx.save();ctx.globalAlpha=op;ctx.fillStyle=color;ctx.fillRect(sg.x-ghostSize/2,sg.y-ghostSize/2,ghostSize,ghostSize);ctx.restore();
+    }else{
+      ctx.fillStyle=`rgba(179,0,255,${op})`;ctx.fillRect(sg.x-ghostSize/2,sg.y-ghostSize/2,ghostSize,ghostSize);
+    }
+  });
   const lr=(p.hdg-90)*Math.PI/180;
   const isKillConfirm = (role === 'Kill-confirm');
   if(role === 'Unknown' || isKillConfirm){
@@ -15042,6 +15107,231 @@ function __entityName(ref, fallbackId=''){
   const e = ref && ref.entity;
   return String((e && (e.name || e.id)) || fallbackId || '');
 }
+function __setcaMissileRangeKM(m){
+  const explicit = Number(m && m.rangeKM);
+  if(Number.isFinite(explicit) && explicit > 0) return explicit;
+  const ground = String(m && m.launcherType || '').toLowerCase() === 'gtc';
+  if(ground){
+    const launcher = __resolveMissileLauncher(m && m.launcher);
+    const rNm = Number(launcher && launcher.entity && launcher.entity.misR);
+    if(Number.isFinite(rNm) && rNm > 0) return rNm * NM2KM;
+  }
+  return /R-?77/i.test(String(m && m.name || '')) ? 110 : 90;
+}
+function __setcaMissileLifeMs(m){
+  const explicit = Number(m && m.lifeMs);
+  if(Number.isFinite(explicit) && explicit > 0) return Math.max(30000, Math.min(900000, explicit));
+  const rangeKM = __setcaMissileRangeKM(m);
+  const referenceSpeed = Math.max(700, Number(m && (m.maxSpdKmh || m.initialSpdKmh || m.spd)) || 1800);
+  const estimated = (rangeKM / referenceSpeed) * 3600000 * 1.8 + 15000;
+  return Math.max(30000, Math.min(900000, estimated));
+}
+function __SETCA_prepareMissileLifecycle(m){
+  if(!m || typeof m !== 'object') return m;
+  const ground = String(m.launcherType || '').toLowerCase() === 'gtc';
+  if(!(Number.isFinite(+m.rangeKM) && +m.rangeKM > 0)) m.rangeKM = __setcaMissileRangeKM(m);
+  if(!(Number.isFinite(+m.launchedAt) && +m.launchedAt > 0)) m.launchedAt = Date.now();
+  if(!(Number.isFinite(+m.flightTimeSec) && +m.flightTimeSec >= 0)) m.flightTimeSec = 0;
+  if(!(Number.isFinite(+m.spd) && +m.spd > 0)) m.spd = String(m.launcherType || '').toLowerCase() === 'gtc' ? 1800 : 2500;
+  if(!Number.isFinite(+m.drift)) m.drift = 0;
+  m.lifeMs = __setcaMissileLifeMs(m);
+  m.expiresAt = Number.isFinite(+m.expiresAt) && +m.expiresAt > 0 ? +m.expiresAt : (+m.launchedAt + m.lifeMs);
+  if(!(Number.isFinite(+m.launchAltFt) && +m.launchAltFt >= 0)) m.launchAltFt = Math.max(0, Number(m.alt) || 0);
+  if(!(Number.isFinite(+m.navConstant) && +m.navConstant > 0)) m.navConstant = ground ? 3.2 : 3.8;
+  if(!Number.isFinite(+m.slipDeg)) m.slipDeg = 0;
+  if(!Number.isFinite(+m.slipPhase)){
+    const seed = String(m.id || 'MISIL').split('').reduce((sum,ch)=>(sum + ch.charCodeAt(0)) % 997, 0);
+    m.slipPhase = (seed / 997) * Math.PI * 2;
+  }
+  m.guidance = 'PROPORTIONAL_NAVIGATION';
+  m.guidanceModel = 'PN_LEAD_SLIP_V2';
+  m.__setcaUnifiedProportionalGuidance = true;
+  if(ground){
+    if(!(Number.isFinite(+m.initialSpdKmh) && +m.initialSpdKmh > 0)) m.initialSpdKmh = +m.spd;
+    if(!(Number.isFinite(+m.maxSpdKmh) && +m.maxSpdKmh > 0)) m.maxSpdKmh = Math.max(2500, +m.spd);
+    if(!(Number.isFinite(+m.minSpdKmh) && +m.minSpdKmh > 0)) m.minSpdKmh = 1100;
+    if(!(Number.isFinite(+m.boostSec) && +m.boostSec > 0)) m.boostSec = 5;
+    if(!(Number.isFinite(+m.dragCoefficient) && +m.dragCoefficient > 0)) m.dragCoefficient = 4.2;
+    if(!(Number.isFinite(+m.turnRateDegSec) && +m.turnRateDegSec > 0)) m.turnRateDegSec = 24;
+    if(!(Number.isFinite(+m.climbDurationSec) && +m.climbDurationSec > 0)) m.climbDurationSec = 8;
+  }else{
+    if(!(Number.isFinite(+m.initialSpdKmh) && +m.initialSpdKmh > 0)) m.initialSpdKmh = +m.spd;
+    if(!(Number.isFinite(+m.maxSpdKmh) && +m.maxSpdKmh > 0)) m.maxSpdKmh = Math.max(2800, +m.spd);
+    if(!(Number.isFinite(+m.minSpdKmh) && +m.minSpdKmh > 0)) m.minSpdKmh = 1400;
+    if(!(Number.isFinite(+m.boostSec) && +m.boostSec > 0)) m.boostSec = 3;
+    if(!(Number.isFinite(+m.dragCoefficient) && +m.dragCoefficient > 0)) m.dragCoefficient = 3.2;
+    if(!(Number.isFinite(+m.turnRateDegSec) && +m.turnRateDegSec > 0)) m.turnRateDegSec = 42;
+    if(!(Number.isFinite(+m.climbDurationSec) && +m.climbDurationSec > 0)) m.climbDurationSec = 4;
+  }
+  return m;
+}
+function __setcaMissileElapsedMs(m){
+  if(!m) return Infinity;
+  const simulated = Number.isFinite(+m.flightTimeSec) ? Math.max(0, +m.flightTimeSec * 1000) : 0;
+  const wall = Number.isFinite(+m.launchedAt) && +m.launchedAt > 0 ? Math.max(0, Date.now() - +m.launchedAt) : 0;
+  return Math.max(simulated, wall);
+}
+function __setcaGroundMissileKinetics(m, dt, target){
+  __SETCA_prepareMissileLifecycle(m);
+  const stepSec = Math.max(0, Number(dt) || 0);
+  const ageSec = Math.max(0, Number(m.flightTimeSec) || 0);
+  const maxSpd = Math.max(1200, Number(m.maxSpdKmh) || 2500);
+  const minSpd = Math.min(maxSpd, Math.max(600, Number(m.minSpdKmh) || 1100));
+  let speed = Math.max(minSpd, Number(m.spd) || Number(m.initialSpdKmh) || 1800);
+  if(ageSec <= Number(m.boostSec || 5)){
+    speed += (maxSpd - speed) * Math.min(1, stepSec * 1.35);
+  }else{
+    const altitudeFt = Math.max(0, Number(m.alt) || 0);
+    const density = 0.28 + 0.72 * Math.exp(-altitudeFt / 30000);
+    const speedRatio = Math.max(0.2, speed / maxSpd);
+    const targetSpeed = Math.max(0, Number(target && target.spd) || 0);
+    const pursuitLoad = 1 + Math.min(0.16, targetSpeed / 7000);
+    const dragKmhPerSec = (1.2 + Number(m.dragCoefficient || 4.2) * density * speedRatio * speedRatio) * pursuitLoad;
+    speed = Math.max(minSpd, speed - dragKmhPerSec * stepSec);
+    m.dragLossKmh = Math.max(0, maxSpd - speed);
+  }
+  m.targetSpdKmh = Math.max(0, Number(target && target.spd) || 0);
+  m.spd = speed;
+  return speed;
+}
+function __setcaAirMissileKinetics(m, dt, target){
+  __SETCA_prepareMissileLifecycle(m);
+  const stepSec = Math.max(0, Number(dt) || 0);
+  const ageSec = Math.max(0, Number(m.flightTimeSec) || 0);
+  const maxSpd = Math.max(1800, Number(m.maxSpdKmh) || 2800);
+  const minSpd = Math.min(maxSpd, Math.max(900, Number(m.minSpdKmh) || 1400));
+  let speed = Math.max(minSpd, Number(m.spd) || Number(m.initialSpdKmh) || 2500);
+  if(ageSec <= Number(m.boostSec || 3)){
+    speed += (maxSpd - speed) * Math.min(1, stepSec * 1.55);
+  }else{
+    const altitudeFt = Math.max(0, Number(m.alt) || 0);
+    const density = 0.24 + 0.76 * Math.exp(-altitudeFt / 32000);
+    const speedRatio = Math.max(0.25, speed / maxSpd);
+    const targetSpeed = Math.max(0, Number(target && target.spd) || 0);
+    const pursuitLoad = 1 + Math.min(0.14, targetSpeed / 8000);
+    const dragKmhPerSec = (0.9 + Number(m.dragCoefficient || 3.2) * density * speedRatio * speedRatio) * pursuitLoad;
+    speed = Math.max(minSpd, speed - dragKmhPerSec * stepSec);
+    m.dragLossKmh = Math.max(0, maxSpd - speed);
+  }
+  m.targetSpdKmh = Math.max(0, Number(target && target.spd) || 0);
+  m.spd = speed;
+  return speed;
+}
+function __setcaInterceptPoint(m, target){
+  const px = Number(target && target.x) || 0, py = Number(target && target.y) || 0;
+  const mx = Number(m && m.x) || 0, my = Number(m && m.y) || 0;
+  const targetSpeedNmps = Math.max(0, Number(target && target.spd) || 0) / NM2KM / 3600;
+  const targetAngle = ((Number(target && target.hdg) || 0) - 90) * Math.PI / 180;
+  const vx = Math.cos(targetAngle) * targetSpeedNmps, vy = Math.sin(targetAngle) * targetSpeedNmps;
+  const missileSpeedNmps = Math.max(0.001, Number(m && m.spd) || 1800) / NM2KM / 3600;
+  const rx = px - mx, ry = py - my;
+  const a = vx*vx + vy*vy - missileSpeedNmps*missileSpeedNmps;
+  const b = 2 * (rx*vx + ry*vy);
+  const c = rx*rx + ry*ry;
+  let leadSec = Math.hypot(rx,ry) / missileSpeedNmps;
+  const disc = b*b - 4*a*c;
+  if(Math.abs(a) > 1e-8 && disc >= 0){
+    const root = Math.sqrt(disc), t1 = (-b-root)/(2*a), t2 = (-b+root)/(2*a);
+    const positives = [t1,t2].filter(t=>Number.isFinite(t) && t > 0);
+    if(positives.length) leadSec = Math.min(...positives);
+  }else if(Math.abs(b) > 1e-8){
+    const t = -c/b;
+    if(Number.isFinite(t) && t > 0) leadSec = t;
+  }
+  leadSec = Math.max(0, Math.min(30, leadSec));
+  m.targetLeadSec = leadSec;
+  return {x:px + vx*leadSec, y:py + vy*leadSec, leadSec};
+}
+function __setcaTurnMissile(currentDeg, desiredDeg, maxDeltaDeg){
+  const current = Number.isFinite(+currentDeg) ? +currentDeg : +desiredDeg || 0;
+  const desired = Number.isFinite(+desiredDeg) ? +desiredDeg : current;
+  let delta = ((desired-current+540)%360)-180;
+  const limit = Math.max(0, Number(maxDeltaDeg) || 0);
+  delta = Math.max(-limit, Math.min(limit, delta));
+  return ((current + delta) % 360 + 360) % 360;
+}
+function __setcaAngleDeltaDeg(fromDeg, toDeg){
+  return ((Number(toDeg || 0) - Number(fromDeg || 0) + 540) % 360) - 180;
+}
+function __setcaProportionalGuidanceStep(m, desiredDeg, losDeg, dt, isGround){
+  const stepSec = Math.max(0.001, Number(dt) || 0.001);
+  const desired = Number.isFinite(+desiredDeg) ? +desiredDeg : 0;
+  const los = Number.isFinite(+losDeg) ? +losDeg : desired;
+  const current = Number.isFinite(+m.courseDeg) ? +m.courseDeg : desired;
+  const previousLos = Number.isFinite(+m.lastLosDeg) ? +m.lastLosDeg : los;
+  const rawLosRate = __setcaAngleDeltaDeg(previousLos, los) / stepSec;
+  const losRate = Math.max(-80, Math.min(80, rawLosRate));
+  const headingError = __setcaAngleDeltaDeg(current, desired);
+  const navN = Math.max(2, Math.min(6, Number(m.navConstant) || (isGround ? 3.2 : 3.8)));
+  const errorGain = isGround ? 0.45 : 0.65;
+  const losGain = isGround ? 0.45 : 0.55;
+  const maxTurnRate = Math.max(4, Number(m.turnRateDegSec) || (isGround ? 24 : 42));
+  const commandRate = Math.max(-maxTurnRate, Math.min(maxTurnRate, headingError * errorGain + losRate * navN * losGain));
+  const course = ((current + commandRate * stepSec) % 360 + 360) % 360;
+
+  const ageSec = Math.max(0, Number(m.flightTimeSec) || 0);
+  const wave = Math.sin(ageSec * (isGround ? 1.35 : 1.8) + (Number(m.slipPhase) || 0));
+  const disturbance = Math.max(-4, Math.min(4, Number(m.drift) || 0));
+  const slipTarget = wave * (isGround ? 1.8 : 1.1)
+    + Math.max(-2, Math.min(2, losRate * 0.06))
+    + disturbance * 0.25;
+  const slipBlend = Math.min(1, stepSec * (isGround ? 0.9 : 1.25));
+  m.slipDeg = (Number(m.slipDeg) || 0) + (slipTarget - (Number(m.slipDeg) || 0)) * slipBlend;
+  m.drift = disturbance * Math.exp(-stepSec * 0.45);
+  m.lastLosDeg = los;
+  m.losRateDegSec = losRate;
+  m.guidanceCommandDegSec = commandRate;
+  m.courseDeg = course;
+  m.velocityCourseDeg = course + m.slipDeg;
+  return m.velocityCourseDeg;
+}
+function __setcaMissileAltitudeCommand(m, targetAltFt, distNM, dt, isGround, maxAltFt){
+  const stepSec = Math.max(0, Number(dt) || 0);
+  const currentAlt = Math.max(0, Number(m.alt) || 0);
+  const targetAlt = Math.max(0, Number(targetAltFt) || 0);
+  const launchAlt = Math.max(0, Number(m.launchAltFt) || 0);
+  const age = Math.max(0, Number(m.flightTimeSec) || 0);
+  const rangeNm = Math.max(1, (Number(m.rangeKM) || 1) / NM2KM);
+  let desiredAlt = targetAlt;
+  let maxVerticalFtSec = isGround ? 3400 : 4600;
+
+  if(isGround){
+    const climbDuration = Math.max(3, Number(m.climbDurationSec) || 8);
+    const loftFt = Math.max(3000, Math.min(18000, Math.max(0, Number(distNM) || 0) * 220));
+    if(age < climbDuration){
+      const t = Math.max(0, Math.min(1, age / climbDuration));
+      const smooth = t * t * (3 - 2 * t);
+      desiredAlt = Math.max(targetAlt, launchAlt) + loftFt * smooth;
+      m.flightPhase = 'ASCENSO';
+    }else{
+      const remainingFactor = Math.max(0, Math.min(1, (Number(distNM) || 0) / Math.max(1, rangeNm * 0.35)));
+      desiredAlt = targetAlt + loftFt * remainingFactor;
+      m.flightPhase = (Number(distNM) || 0) <= 5 ? 'TERMINAL' : 'PERSECUCION';
+    }
+    const speedRatio = Math.max(0.45, Math.min(1.15, (Number(m.spd) || 0) / Math.max(1, Number(m.maxSpdKmh) || 2500)));
+    maxVerticalFtSec *= speedRatio;
+  }else{
+    const loftFt = Math.max(0, Math.min(4500, Math.max(0, Number(distNM) || 0) * 90));
+    const remainingFactor = Math.max(0, Math.min(1, (Number(distNM) || 0) / Math.max(1, rangeNm * 0.45)));
+    desiredAlt = targetAlt + loftFt * remainingFactor;
+    m.flightPhase = (Number(distNM) || 0) <= 4 ? 'TERMINAL' : (age < Math.max(2, Number(m.climbDurationSec) || 4) ? 'ASCENSO' : 'GUIADO');
+  }
+  if(Number.isFinite(+maxAltFt) && +maxAltFt > 0) desiredAlt = Math.min(desiredAlt, +maxAltFt);
+  const maxStep = maxVerticalFtSec * stepSec;
+  const delta = desiredAlt - currentAlt;
+  return Math.max(0, currentAlt + Math.max(-maxStep, Math.min(maxStep, delta)));
+}
+function __SETCA_aircraftEngagementGeometry(launcher, target){
+  const dx = Number(target && target.x || 0) - Number(launcher && launcher.x || 0);
+  const dy = Number(target && target.y || 0) - Number(launcher && launcher.y || 0);
+  const heading = ((Number(launcher && launcher.hdg || 0) % 360) + 360) % 360;
+  const bearing = Math.hypot(dx, dy) < 1e-9 ? heading : ((Math.atan2(dx, -dy) * 180 / Math.PI) + 360) % 360;
+  const signedAngle = ((bearing - heading + 540) % 360) - 180;
+  const offBoresight = Math.abs(signedAngle);
+  return {heading, bearing, signedAngle, offBoresight, maxAngle:30, inside:offBoresight <= 30.000001};
+}
+try{ window.__SETCA_prepareMissileLifecycle = __SETCA_prepareMissileLifecycle; }catch(_){ }
+try{ window.__SETCA_aircraftEngagementGeometry = __SETCA_aircraftEngagementGeometry; }catch(_){ }
 function launch(launcherId,targetId,type){
   if(window.__SETCA_isPlanningMode && window.__SETCA_isPlanningMode()) return false;
   const L = (Array.isArray(st.planes) ? st.planes : []).find(p=>p && p.id===launcherId);
@@ -15050,6 +15340,13 @@ function launch(launcherId,targetId,type){
   if(!L || !T) return;
   if(!window.__SETCA_isOwnTeam(L)) return;
   if(TRef.kind === 'plane' ? !isPlaneVisibleToCurrentRole(T) : !window.__SETCA_canSeeOwnedEntity(T)) return;
+  const engagement = __SETCA_aircraftEngagementGeometry(L, T);
+  if(!engagement.inside){
+    const angleLabel = engagement.offBoresight.toFixed(1);
+    logEvent(`LANZAMIENTO BLOQUEADO: ${L.name || L.id} tiene el blanco fuera del cono frontal de 30° (${angleLabel}°).`);
+    try{ alert(`Blanco fuera del cono de enfrentamiento de 30° (${angleLabel}°).`); }catch(_){ }
+    return false;
+  }
   const missile = {
     id:'MS'+Date.now(),
     team:window.__SETCA_entityTeam(L),
@@ -15068,11 +15365,15 @@ function launch(launcherId,targetId,type){
     launcherName:String(L.name || L.id || launcherId),
     rangeKM:type==='R77'?110:90,
     travKM:0,
+    flightTimeSec:0,
     launchedAt:Date.now(),
     status:'fly',
     drift:0,
-    courseDeg:(Math.atan2((+T.y||0)-(+L.y||0), (+T.x||0)-(+L.x||0))*180/Math.PI)
+    courseDeg:(((Number(L.hdg)||0) - 90) % 360 + 360) % 360,
+    launchOffBoresightDeg:engagement.offBoresight,
+    engagementConeDeg:30
   };
+  __SETCA_prepareMissileLifecycle(missile);
   st.missileStats = __normalizeMissileStats(st.missileStats);
   st.missileStats.aircraft += 1;
   st.missiles.push(missile);
@@ -15080,6 +15381,7 @@ function launch(launcherId,targetId,type){
   try{ if(document.getElementById('navReport') && document.getElementById('navReport').style.display==='block' && typeof renderNavReport === 'function') renderNavReport(false); }catch(_){ }
   try{ if(typeof __setcaMarkSyncStaged === 'function') __setcaMarkSyncStaged(missile, (__SETCA_SYNC_STAGING && __SETCA_SYNC_STAGING.missileAddMs) || 900); }catch(_){ }
   logEvent(`LANZAMIENTO: ${L.name} lanzó ${missile.name} a ${__entityName(TRef, targetId)}`);
+  return true;
 }
 function __registerMissileImpact(target, missile, targetKind='plane'){
   if(!target) return null;
@@ -15226,6 +15528,11 @@ function __setcaIsActiveMissile(m, completedIds=null){
   const status = String(m.status || 'fly').toLowerCase();
   if(status !== 'fly') return false;
   if(completedIds && id && completedIds.has(id)) return false;
+  __SETCA_prepareMissileLifecycle(m);
+  const rangeKM = __setcaMissileRangeKM(m);
+  if(rangeKM > 0 && Number(m.travKM || 0) >= rangeKM - 0.0001) return false;
+  if(Number.isFinite(+m.expiresAt) && Date.now() >= +m.expiresAt) return false;
+  if(__setcaMissileElapsedMs(m) >= __setcaMissileLifeMs(m)) return false;
   const targetRef = (typeof __resolveMissileTarget === 'function') ? __resolveMissileTarget(m.tgt) : null;
   const launcherRef = (typeof __resolveMissileLauncher === 'function') ? __resolveMissileLauncher(m.launcher) : null;
   const hasTiming = Number.isFinite(+m.launchedAt) || Number.isFinite(+m.syncAt) || Number.isFinite(+m.createdAt);
@@ -15255,9 +15562,30 @@ function updateMissiles(dt, options={}){
     if(__localGtcOnly && !__isGtcMissile) return;
     if(__excludeGtc && __isGtcMissile) return;
     if(m.status!=='fly') return;
+    __SETCA_prepareMissileLifecycle(m);
+    const __stepSec = Math.max(0, Number(dt) || 0);
+    m.flightTimeSec = Math.max(0, Number(m.flightTimeSec) || 0) + __stepSec;
     const TRef = __resolveMissileTarget(m.tgt);
     const T = TRef && TRef.entity;
     const hasLiveTarget = !!T;
+    const __rangeLimitKM = __setcaMissileRangeKM(m);
+    const __expiredByRange = __rangeLimitKM > 0 && Number(m.travKM || 0) >= __rangeLimitKM - 0.0001;
+    const __expiredByTime = (Number.isFinite(+m.expiresAt) && Date.now() >= +m.expiresAt)
+      || __setcaMissileElapsedMs(m) >= __setcaMissileLifeMs(m);
+    if(__expiredByRange || __expiredByTime){
+      const reason = __expiredByRange ? 'range' : 'time';
+      if(__SETCA_finishGlobalGtcReplica(m, 'miss', reason)) return;
+      if(__isGtcMissile){
+        __registerMissileMiss(m, reason);
+        __SETCA_finalizeLocalGtcOutcome(m, 'miss', reason, T);
+        __impactChanged = true;
+        __gtcImpactChanged = true;
+      }
+      m.status = reason === 'range' ? 'oor' : 'expired';
+      m.consumedAt = Date.now();
+      try{ logEvent(`MISIL CONSUMIDO: ${(m.name||'MISIL')} (${reason === 'range' ? 'distancia máxima' : 'tiempo de vuelo'})`); }catch(_){ }
+      return;
+    }
 
     const maxAlt = (m.maxAltFt!==undefined && isFinite(m.maxAltFt) && +m.maxAltFt>0) ? (+m.maxAltFt) : Infinity;
     const tgtAltNow = hasLiveTarget ? __entityAltFt(TRef) : Number.isFinite(+m.alt) ? +m.alt : 0;
@@ -15266,31 +15594,62 @@ function updateMissiles(dt, options={}){
 
     if(hasLiveTarget && TRef && TRef.kind === 'plane' && T.jamming && Math.random()<0.25*dt){m.drift+=(Math.random()-0.5)*10;}
 
-    let dx = 0, dy = 0, angDeg = Number.isFinite(+m.courseDeg) ? +m.courseDeg : 0;
+    if(__isGtcMissile) __setcaGroundMissileKinetics(m, __stepSec, hasLiveTarget ? T : null);
+    else __setcaAirMissileKinetics(m, __stepSec, hasLiveTarget ? T : null);
+
+    let dx = 0, dy = 0, actualDx = 0, actualDy = 0, angDeg = Number.isFinite(+m.courseDeg) ? +m.courseDeg : 0;
     if(hasLiveTarget){
-      dx=(+T.x||0)-(+m.x||0);
-      dy=(+T.y||0)-(+m.y||0);
-      m.tx = +T.x||0;
-      m.ty = +T.y||0;
+      actualDx=(+T.x||0)-(+m.x||0);
+      actualDy=(+T.y||0)-(+m.y||0);
+      let aimX = +T.x||0, aimY = +T.y||0;
+      if(TRef && TRef.kind === 'plane'){
+        const intercept = __setcaInterceptPoint(m, T);
+        aimX = intercept.x;
+        aimY = intercept.y;
+      }
+      dx=aimX-(+m.x||0);
+      dy=aimY-(+m.y||0);
+      m.tx = aimX;
+      m.ty = aimY;
       m.targetName = __entityName(TRef, m.targetName || m.tgt);
-      angDeg=(Math.atan2(dy,dx)*180/Math.PI)+m.drift;
-      m.courseDeg = angDeg;
+      const desiredDeg=Math.atan2(dy,dx)*180/Math.PI;
+      const losDeg=Math.atan2(actualDy,actualDx)*180/Math.PI;
+      angDeg = __setcaProportionalGuidanceStep(m, desiredDeg, losDeg, __stepSec, __isGtcMissile);
     }else{
       dx=(+m.tx||+m.x||0)-(+m.x||0);
       dy=(+m.ty||+m.y||0)-(+m.y||0);
+      actualDx=dx;
+      actualDy=dy;
       if(!Number.isFinite(+m.courseDeg)) m.courseDeg = (Math.atan2(dy,dx)*180/Math.PI) || 0;
-      angDeg = (+m.courseDeg||0) + (Number.isFinite(+m.drift) ? +m.drift : 0);
+      const desiredDeg = Math.atan2(dy,dx)*180/Math.PI;
+      angDeg = __setcaProportionalGuidanceStep(m, desiredDeg, desiredDeg, __stepSec, __isGtcMissile);
       m.targetDestroyed = true;
     }
     const ang=angDeg*Math.PI/180;
 
-    const nmps=(m.spd/NM2KM)/3600; const step=nmps*dt;
+    const nmps=(m.spd/NM2KM)/3600; const step=nmps*__stepSec;
     const rangeKM = Number.isFinite(+m.rangeKM) ? +m.rangeKM : 0;
     const travelledKM = Number.isFinite(+m.travKM) ? +m.travKM : 0;
     const stepKM = step * NM2KM;
+    const currentAltFt = Number.isFinite(+m.alt) ? +m.alt : 0;
+    let nextAltFt = currentAltFt;
+    if(hasLiveTarget){
+      nextAltFt = __setcaMissileAltitudeCommand(
+        m,
+        tgtAltNow,
+        Math.hypot(actualDx, actualDy),
+        __stepSec,
+        __isGtcMissile,
+        maxAlt
+      );
+    }
+    const verticalStepKM = Math.abs(nextAltFt-currentAltFt) * 0.0003048;
+    const pathStepKM = Math.hypot(stepKM, verticalStepKM);
     const remainingKM = rangeKM > 0 ? Math.max(0, rangeKM - travelledKM) : Infinity;
-    const distBeforeHitNM = hasLiveTarget ? Math.hypot(dx, dy) : Infinity;
-    const canReachTargetBeforeRange = (rangeKM <= 0) || ((distBeforeHitNM * NM2KM) <= (remainingKM + 0.05)) || distBeforeHitNM < 1.0;
+    const distBeforeHitNM = hasLiveTarget ? Math.hypot(actualDx, actualDy) : Infinity;
+    const targetVerticalKM = hasLiveTarget ? Math.abs(tgtAltNow-currentAltFt) * 0.0003048 : 0;
+    const distBeforeHitKM = hasLiveTarget ? Math.hypot(distBeforeHitNM * NM2KM, targetVerticalKM) : Infinity;
+    const canReachTargetBeforeRange = (rangeKM <= 0) || (distBeforeHitKM <= (remainingKM + 0.05)) || distBeforeHitNM < 1.0;
     if(hasLiveTarget && !altitudeBlocked && canReachTargetBeforeRange && distBeforeHitNM <= Math.max(1.0, step)){
       const targetName = TRef.kind === 'plane' ? window.__SETCA_contactView(T).name : __entityName(TRef, m.targetName || m.tgt);
       const targetX = +T.x||0;
@@ -15299,7 +15658,8 @@ function updateMissiles(dt, options={}){
       m.y = targetY;
       m.tx = targetX;
       m.ty = targetY;
-      m.travKM = Math.min(rangeKM > 0 ? rangeKM : Infinity, travelledKM + (distBeforeHitNM * NM2KM));
+      m.alt = tgtAltNow;
+      m.travKM = Math.min(rangeKM > 0 ? rangeKM : Infinity, travelledKM + distBeforeHitKM);
       if(__SETCA_finishGlobalGtcReplica(m, 'hit', 'impact')) return;
       m.status='hit';
       m.consumedAt = Date.now();
@@ -15319,10 +15679,12 @@ function updateMissiles(dt, options={}){
       if(L) L.kills=(L.kills||0)+1;
       return;
     }
-    if(rangeKM > 0 && stepKM >= remainingKM){
-      const finalStepNM = Math.max(0, remainingKM / NM2KM);
+    if(rangeKM > 0 && pathStepKM >= remainingKM){
+      const finalFraction = pathStepKM > 0 ? Math.max(0, Math.min(1, remainingKM / pathStepKM)) : 0;
+      const finalStepNM = Math.max(0, step * finalFraction);
       m.x += Math.cos(ang) * finalStepNM;
       m.y += Math.sin(ang) * finalStepNM;
+      m.alt = currentAltFt + (nextAltFt-currentAltFt) * finalFraction;
       m.travKM = rangeKM;
       const reason = (altitudeBlocked || m.outOfAlt) ? 'alt' : 'range';
       if(__SETCA_finishGlobalGtcReplica(m, 'miss', reason)) return;
@@ -15337,15 +15699,16 @@ function updateMissiles(dt, options={}){
       m.consumedAt = Date.now();
       return;
     }
-    m.travKM = travelledKM + stepKM;
+    m.travKM = travelledKM + pathStepKM;
 
-    const distNM=Math.hypot(dx,dy);
+    const distNM=Math.hypot(actualDx,actualDy);
     if(hasLiveTarget && !altitudeBlocked && distNM<1.0){
       const targetName = TRef.kind === 'plane' ? window.__SETCA_contactView(T).name : __entityName(TRef, m.targetName || m.tgt);
       const targetX = +T.x||0;
       const targetY = +T.y||0;
       m.x = targetX;
       m.y = targetY;
+      m.alt = tgtAltNow;
       m.tx = targetX;
       m.ty = targetY;
       if(__SETCA_finishGlobalGtcReplica(m, 'hit', 'impact')) return;
@@ -15370,12 +15733,7 @@ function updateMissiles(dt, options={}){
 
     m.x+=Math.cos(ang)*step;
     m.y+=Math.sin(ang)*step;
-
-    // guía de altura (capada por maxAlt)
-    if(hasLiveTarget){
-      m.alt += (tgtAltNow - (m.alt||0)) * 0.5 * dt;
-      if(isFinite(maxAlt) && maxAlt<Infinity) m.alt = Math.min(m.alt, maxAlt);
-    }
+    m.alt = nextAltFt;
   });
   try{ (Array.isArray(st.missiles) ? st.missiles : []).forEach(m=>{ if(m && m.id && (!__localGtcOnly || __setcaIsLocalGtcAnimation(m)) && typeof __navRecordMissile === 'function') __navRecordMissile(m, true); }); }catch(_){ }
   if(typeof __setcaPruneConsumedMissiles === 'function') __setcaPruneConsumedMissiles();
@@ -15398,25 +15756,31 @@ function updateMissiles(dt, options={}){
   }
 }
 function drawMissiles(){
+  try{ __setcaPruneConsumedMissiles(); }catch(_){ }
   st.missiles.forEach(m=>{
     if(!window.__SETCA_canSeeOwnedEntity(m)) return;
+    const __whiteMissilePalette = (window.__SETCA_isWhiteExcsView && window.__SETCA_isWhiteExcsView() && window.__SETCA_excsTeamPalette)
+      ? window.__SETCA_excsTeamPalette(m) : null;
+    const __missileColor = __whiteMissilePalette ? __whiteMissilePalette.missile : '#ffe066';
     const s=toScreen(m.x,m.y);
     const TRef = __resolveMissileTarget(m.tgt);
     const T = TRef && TRef.entity;
     const tx = T ? (+T.x||0) : (+m.tx||+m.x||0);
     const ty = T ? (+T.y||0) : (+m.ty||+m.y||0);
     const t=toScreen(tx,ty);
-    ctx.fillStyle='#ffe066';ctx.beginPath();ctx.arc(s.x,s.y,4,0,2*Math.PI);ctx.fill();
-    ctx.strokeStyle='#ffe066';ctx.setLineDash([2,4]);ctx.beginPath();ctx.moveTo(s.x,s.y);ctx.lineTo(t.x,t.y);ctx.stroke();ctx.setLineDash([]);
-    ctx.fillStyle='#ffe066';ctx.font='10px monospace';ctx.textAlign='center';ctx.fillText(m.name,s.x,s.y-8);
+    ctx.fillStyle=__missileColor;ctx.beginPath();ctx.arc(s.x,s.y,4,0,2*Math.PI);ctx.fill();
+    ctx.strokeStyle=__missileColor;ctx.setLineDash([2,4]);ctx.beginPath();ctx.moveTo(s.x,s.y);ctx.lineTo(t.x,t.y);ctx.stroke();ctx.setLineDash([]);
+    ctx.fillStyle=__whiteMissilePalette ? __whiteMissilePalette.text : '#ffe066';ctx.font='10px monospace';ctx.textAlign='center';ctx.fillText(m.name,s.x,s.y-8);
   });
-  st.splashes.forEach(sp=>{sp.t+=1/60;if(!window.__SETCA_canSeeOwnedEntity(sp)) return;const r=(sp.t*60);const s=toScreen(sp.x,sp.y);ctx.strokeStyle=`rgba(255,100,100,${Math.max(0,1-sp.t)})`;ctx.beginPath();ctx.arc(s.x,s.y,r,0,2*Math.PI);ctx.stroke();});
+  st.splashes.forEach(sp=>{sp.t+=1/60;if(!window.__SETCA_canSeeOwnedEntity(sp)) return;const r=(sp.t*60);const s=toScreen(sp.x,sp.y);const pal=(window.__SETCA_isWhiteExcsView&&window.__SETCA_isWhiteExcsView()&&window.__SETCA_excsTeamPalette)?window.__SETCA_excsTeamPalette(sp):null;ctx.save();ctx.globalAlpha=Math.max(0,1-sp.t);ctx.strokeStyle=pal?pal.impact:'rgba(255,100,100,1)';ctx.beginPath();ctx.arc(s.x,s.y,r,0,2*Math.PI);ctx.stroke();ctx.restore();});
   st.splashes=st.splashes.filter(sp=>sp.t<1.2);
   (Array.isArray(st.impactMarks) ? st.impactMarks : []).forEach(mark=>{
     if(!window.__SETCA_canSeeOwnedEntity(mark)) return;
     const s = toScreen(mark.x, mark.y);
     ctx.save();
-    ctx.strokeStyle = 'rgba(255,72,72,0.96)';
+    const __whiteImpactPalette = (window.__SETCA_isWhiteExcsView && window.__SETCA_isWhiteExcsView() && window.__SETCA_excsTeamPalette)
+      ? window.__SETCA_excsTeamPalette(mark) : null;
+    ctx.strokeStyle = __whiteImpactPalette ? __whiteImpactPalette.impact : 'rgba(255,72,72,0.96)';
     ctx.lineWidth = 2.2;
     ctx.beginPath();
     ctx.moveTo(s.x-8, s.y-8);
@@ -15474,8 +15838,10 @@ function drawPairs(){
   st.pairs.forEach(pr=>{
     if(!window.__SETCA_canSeeOwnedEntity(pr)) return;
     const A=st.planes.find(p=>p.id===pr.a),B=st.planes.find(p=>p.id===pr.b); if(!A||!B) return;
+    const __whitePairPalette = (window.__SETCA_isWhiteExcsView && window.__SETCA_isWhiteExcsView() && window.__SETCA_excsTeamPalette)
+      ? window.__SETCA_excsTeamPalette(pr || A) : null;
     const s1=toScreen(A.x,A.y),s2=toScreen(B.x,B.y);
-    ctx.beginPath();ctx.moveTo(s1.x,s1.y);ctx.lineTo(s2.x,s2.y);ctx.strokeStyle='#eaffea';ctx.lineWidth=1;ctx.stroke();
+    ctx.beginPath();ctx.moveTo(s1.x,s1.y);ctx.lineTo(s2.x,s2.y);ctx.strokeStyle=__whitePairPalette?__whitePairPalette.link:'#eaffea';ctx.lineWidth=1;ctx.stroke();
     const midX=(s1.x+s2.x)/2,midY=(s1.y+s2.y)/2;
     const brg=String(Math.round(pr.rel||0)).padStart(3,'0')+'°';
     const dist=st.metric?(pr.dKM||0).toFixed(1)+' KM':(pr.dNM||0).toFixed(1)+' NM';
@@ -15501,7 +15867,7 @@ const AAinfo = computeAspectAngle360(B, A);
       const hemi = AAinfo.hemi;
       const txt = `${brg} / ${dist} / ${BALT} / (${AA}°${hemi}) SNAP (${snapInfo})`;
     ctx.fillStyle='rgba(0,0,0,.6)';ctx.fillRect(midX-95,midY-10,190,20);
-    ctx.fillStyle='#eaffea';ctx.font='12px monospace';ctx.textAlign='center';ctx.fillText(txt,midX,midY+5);
+    ctx.fillStyle=__whitePairPalette?__whitePairPalette.text:'#eaffea';ctx.font='12px monospace';ctx.textAlign='center';ctx.fillText(txt,midX,midY+5);
   });
 }
 function repaintPairList(){
@@ -15762,7 +16128,9 @@ function drawFlightProcedureGuidance(){
     if(!target || !Number.isFinite(+target.x) || !Number.isFinite(+target.y)) continue;
     const a = toScreen(+p.x || 0,+p.y || 0);
     const b = toScreen(+target.x,+target.y);
-    ctx.strokeStyle = 'rgba(255,216,77,0.72)';
+    const __whiteProcedurePalette = (window.__SETCA_isWhiteExcsView && window.__SETCA_isWhiteExcsView() && window.__SETCA_excsTeamPalette)
+      ? window.__SETCA_excsTeamPalette(p) : null;
+    ctx.strokeStyle = __whiteProcedurePalette ? __whiteProcedurePalette.link : 'rgba(255,216,77,0.72)';
     ctx.lineWidth = 1;
     ctx.setLineDash([7,6]);
     ctx.beginPath();
@@ -15772,7 +16140,7 @@ function drawFlightProcedureGuidance(){
     ctx.setLineDash([]);
     ctx.beginPath();
     ctx.arc(b.x,b.y,7,0,Math.PI*2);
-    ctx.strokeStyle = 'rgba(255,216,77,0.94)';
+    ctx.strokeStyle = __whiteProcedurePalette ? __whiteProcedurePalette.bright : 'rgba(255,216,77,0.94)';
     ctx.lineWidth = 1.4;
     ctx.stroke();
     ctx.beginPath();
@@ -15781,7 +16149,7 @@ function drawFlightProcedureGuidance(){
     ctx.moveTo(b.x,b.y-10);
     ctx.lineTo(b.x,b.y+10);
     ctx.stroke();
-    ctx.fillStyle = '#ffe783';
+    ctx.fillStyle = __whiteProcedurePalette ? __whiteProcedurePalette.text : '#ffe783';
     ctx.font = '700 10px ui-monospace, SFMono-Regular, Consolas, monospace';
     ctx.textAlign = 'left';
     ctx.textBaseline = 'bottom';
@@ -15797,6 +16165,13 @@ const tool={tool:'none',drawing:false,a:null,b:null,poly:[]};
 
 function gtcUnitTheme(u){
   const canLaunch = __gtcCanLaunch(u);
+  const whitePalette = (window.__SETCA_isWhiteExcsView && window.__SETCA_isWhiteExcsView() && window.__SETCA_excsTeamPalette)
+    ? window.__SETCA_excsTeamPalette(u) : null;
+  if(whitePalette){
+    return canLaunch
+      ? { fill:whitePalette.fireFill, edge:whitePalette.fireEdge, icon:whitePalette.unitIcon, text:whitePalette.fireText, palette:whitePalette }
+      : { fill:whitePalette.unitFill, edge:whitePalette.unitEdge, icon:whitePalette.unitIcon, text:whitePalette.unitText, palette:whitePalette };
+  }
   return canLaunch
     ? { fill:'rgba(255,0,0,0.14)', edge:'rgba(255,0,0,0.62)', icon:'rgba(255,0,0,0.92)', text:'rgba(255,70,70,0.95)' }
     : { fill:'rgba(80,190,255,0.11)', edge:'rgba(80,190,255,0.62)', icon:'rgba(110,210,255,0.95)', text:'rgba(150,225,255,0.96)' };
@@ -15809,6 +16184,7 @@ function drawGTC(){
     if(!window.__SETCA_canSeeOwnedEntity(u)) continue;
     const s = toScreen(u.x, u.y);
     const theme = gtcUnitTheme(u);
+    const __whiteGtcPalette = theme.palette || null;
     const canLaunch = __gtcCanLaunch(u);
     const __pid = String(u && u.trackPlaneId ? u.trackPlaneId : '');
     if(__pid){
@@ -15817,7 +16193,7 @@ function drawGTC(){
       if(isPlaneVisibleToCurrentRole(__p)){
         const __t = toScreen(__p.x, __p.y);
         ctx.save();
-        ctx.strokeStyle = canLaunch ? 'rgba(255,255,255,0.55)' : 'rgba(150,225,255,0.48)';
+        ctx.strokeStyle = __whiteGtcPalette ? __whiteGtcPalette.link : (canLaunch ? 'rgba(255,255,255,0.55)' : 'rgba(150,225,255,0.48)');
         ctx.lineWidth = 0.5;
         ctx.setLineDash([6,6]);
         ctx.beginPath(); ctx.moveTo(s.x, s.y); ctx.lineTo(__t.x, __t.y); ctx.stroke();
@@ -15832,9 +16208,13 @@ function drawGTC(){
       const fillA = Math.max(0, Math.min(0.85, Number.isFinite(+u.covOpacity) ? +u.covOpacity : (0.05 + 0.08*hNorm)));
       const edgeA = 0.34 + 0.34*hNorm;
       const detectionFillA = canLaunch ? fillA * 0.42 : fillA;
-      ctx.fillStyle = `rgba(80,190,255,${detectionFillA.toFixed(3)})`;
+      ctx.fillStyle = __whiteGtcPalette
+        ? `rgba(${__whiteGtcPalette.detectionRgb},${Math.max(0.045,detectionFillA).toFixed(3)})`
+        : `rgba(80,190,255,${detectionFillA.toFixed(3)})`;
       ctx.beginPath(); ctx.arc(s.x, s.y, rPx, 0, 2*Math.PI); ctx.fill();
-      ctx.strokeStyle = `rgba(80,190,255,${edgeA.toFixed(3)})`;
+      ctx.strokeStyle = __whiteGtcPalette
+        ? `rgba(${__whiteGtcPalette.detectionRgb},${Math.max(0.42,edgeA).toFixed(3)})`
+        : `rgba(80,190,255,${edgeA.toFixed(3)})`;
       ctx.lineWidth = 1;
       ctx.setLineDash([4,4]);
       ctx.beginPath(); ctx.arc(s.x, s.y, rPx, 0, 2*Math.PI); ctx.stroke();
@@ -15843,9 +16223,11 @@ function drawGTC(){
       if(fireRNm > 0){
         const firePx = fireRNm * zoom * PX_PER_NM;
         const fireFillA = Math.max(0.055, Math.min(0.28, fillA * 0.72));
-        ctx.fillStyle = `rgba(255,45,45,${fireFillA.toFixed(3)})`;
+        ctx.fillStyle = __whiteGtcPalette
+          ? `rgba(${__whiteGtcPalette.fireRgb},${Math.max(0.10,fireFillA).toFixed(3)})`
+          : `rgba(255,45,45,${fireFillA.toFixed(3)})`;
         ctx.beginPath(); ctx.arc(s.x, s.y, firePx, 0, 2*Math.PI); ctx.fill();
-        ctx.strokeStyle = 'rgba(255,64,64,0.78)';
+        ctx.strokeStyle = __whiteGtcPalette ? __whiteGtcPalette.fireEdge : 'rgba(255,64,64,0.78)';
         ctx.lineWidth = 1.2;
         ctx.setLineDash([]);
         ctx.beginPath(); ctx.arc(s.x, s.y, firePx, 0, 2*Math.PI); ctx.stroke();
@@ -15855,24 +16237,26 @@ function drawGTC(){
       const __dragFree = (typeof gtcRadiusDrag !== 'undefined' && gtcRadiusDrag && gtcRadiusDrag.id === u.id);
       const __showHandles = __sel || __dragHold || __dragFree;
       if(__showHandles){
-        ctx.fillStyle = 'rgba(110,210,255,0.95)';
+        ctx.fillStyle = __whiteGtcPalette ? __whiteGtcPalette.bright : 'rgba(110,210,255,0.95)';
         ctx.beginPath(); ctx.arc(s.x + rPx, s.y, 5, 0, 2*Math.PI); ctx.fill();
         ctx.fillStyle = 'rgba(0,0,0,0.55)';
         ctx.font = '9px monospace';
         ctx.textAlign = 'center';
         ctx.fillText('R', s.x + rPx, s.y + 3);
-        ctx.fillStyle = 'rgba(110,210,255,0.95)';
+        ctx.fillStyle = __whiteGtcPalette ? __whiteGtcPalette.bright : 'rgba(110,210,255,0.95)';
         ctx.beginPath(); ctx.rect(s.x - 5, s.y - 22, 10, 10); ctx.fill();
         ctx.fillStyle = 'rgba(0,0,0,0.55)';
         ctx.fillText('H', s.x, s.y - 14);
-        ctx.strokeStyle = 'rgba(80,190,255,0.72)';
+        ctx.strokeStyle = __whiteGtcPalette ? __whiteGtcPalette.detectionEdge : 'rgba(80,190,255,0.72)';
         ctx.lineWidth = 1;
         ctx.beginPath(); ctx.moveTo(s.x, s.y - 12); ctx.lineTo(s.x, s.y - 2); ctx.stroke();
       }
       if(isFinite(hFt) && hFt > 0 && st.showLabels){
         ctx.font = '10px monospace';
         ctx.textAlign = 'center';
-        ctx.fillStyle = canLaunch ? 'rgba(190,235,255,0.96)' : theme.text;
+        ctx.fillStyle = __whiteGtcPalette
+          ? (canLaunch ? __whiteGtcPalette.fireText : __whiteGtcPalette.detectionText)
+          : (canLaunch ? 'rgba(190,235,255,0.96)' : theme.text);
         const rTxt = st.metric ? `${(rNm*NM2KM).toFixed(0)}km` : `${rNm.toFixed(0)}NM`;
         const fireTxt = st.metric ? `${(fireRNm*NM2KM).toFixed(0)}km` : `${fireRNm.toFixed(0)}NM`;
         let hTxt = '';
@@ -16448,10 +16832,12 @@ function drawShapes(){
     __normalizeDrawingScope(d);
     try{ if(typeof isDrawingGroupHiddenLocal === 'function' && isDrawingGroupHiddenLocal(getDrawingGroupName(d))) return; }catch(_){ }
     ctx.save();
+    const __whiteDrawingPalette = (window.__SETCA_isWhiteExcsView && window.__SETCA_isWhiteExcsView() && window.__SETCA_excsTeamPalette)
+      ? window.__SETCA_excsTeamPalette(d) : null;
 
     // === NUEVO: color militar amarillo ===
-    ctx.strokeStyle = d.color || '#ffea00';
-    ctx.fillStyle   = d.color || '#ffea00';
+    ctx.strokeStyle = __whiteDrawingPalette ? __whiteDrawingPalette.drawing : (d.color || '#ffea00');
+    ctx.fillStyle   = __whiteDrawingPalette ? __whiteDrawingPalette.drawing : (d.color || '#ffea00');
 
     // === Grosor configurable por gráfico (clic derecho > Grosor de línea) ===
     const __baseLW = (typeof d.lw === 'number' && isFinite(d.lw)) ? d.lw : (d.type === 'arwy' ? 0.4 : 0.6);
@@ -16480,7 +16866,7 @@ function drawShapes(){
     // --- CAP HIPÓDROMO TÁCTICO ---
     if(__isCapDrawing(d)){
       const { straightHalfPx, halfWidthPx, angleRad } = __capGeometryPx(d);
-      const capColor = d.color || d.lineColor || '#4da3ff';
+      const capColor = __whiteDrawingPalette ? __whiteDrawingPalette.drawing : (d.color || d.lineColor || '#4da3ff');
       ctx.save();
       ctx.translate(s.x, s.y);
       ctx.rotate(angleRad);
@@ -16502,8 +16888,8 @@ function drawShapes(){
       const arrowStart = -arrowEnd;
       const arrowSign = capDirection === 'R' ? 1 : -1;
       ctx.save();
-      ctx.strokeStyle = '#ffe066';
-      ctx.fillStyle = '#ffe066';
+      ctx.strokeStyle = __whiteDrawingPalette ? __whiteDrawingPalette.bright : '#ffe066';
+      ctx.fillStyle = __whiteDrawingPalette ? __whiteDrawingPalette.bright : '#ffe066';
       ctx.lineWidth = Math.max(1.5,__lw*1.7);
       ctx.setLineDash([]);
       ctx.beginPath();
@@ -16521,7 +16907,7 @@ function drawShapes(){
     // --- PUNTO ---
     if(d.type === 'point'){
       // Punto normal o marcador "+" (para coordenadas manuales)
-      const __ptColor = d.dotColor || d.color || 'rgba(255,255,255,0.75)';
+      const __ptColor = __whiteDrawingPalette ? __whiteDrawingPalette.bright : (d.dotColor || d.color || 'rgba(255,255,255,0.75)');
       ctx.fillStyle = __ptColor;
       ctx.strokeStyle = __ptColor;
 
@@ -16657,7 +17043,7 @@ function drawShapes(){
       ctx.textAlign = 'center';
       ctx.textBaseline = 'bottom';
       ctx.globalAlpha = 0.9;
-      ctx.fillStyle = d.color || '#ffea00';
+      ctx.fillStyle = __whiteDrawingPalette ? __whiteDrawingPalette.text : (d.color || '#ffea00');
       ctx.fillText(d.name, ns.x, ns.y - 8);
       ctx.restore();
     }
@@ -24710,7 +25096,7 @@ document.querySelectorAll('#pCmdBody .btn').forEach(btn=>{
   addEventListener('blur',()=>{ zDown=false; stop(); },true);
 
   cvs.addEventListener('pointerdown',e=>{
-    if(e.button!==0 || !zDown || (window.st && st.modoObservador)) return;
+    if(e.button!==0 || !zDown) return;
     if(typeof window.__applyLocalTagOffsets === 'function') window.__applyLocalTagOffsets();
     const pt = canvasPoint(e);
     if(!pt || !window.st || !Array.isArray(st.planes)) return;
@@ -26032,8 +26418,10 @@ document.querySelectorAll('#pCmdBody .btn').forEach(btn=>{
   function drawRoutePath(ctx, plane, pts, routeIdx, enabled, isDraft){
     if(!ctx || !plane || !Array.isArray(pts) || !pts.length || typeof toScreen !== 'function') return;
 
-    const baseColor = isDraft ? '255,224,102' : '173,216,230';
-    const activeColor = isDraft ? '255,235,140' : '210,240,255';
+    const whitePalette = (!isDraft && window.__SETCA_isWhiteExcsView && window.__SETCA_isWhiteExcsView() && window.__SETCA_excsTeamPalette)
+      ? window.__SETCA_excsTeamPalette(plane) : null;
+    const baseColor = whitePalette ? whitePalette.detectionRgb : (isDraft ? '255,224,102' : '173,216,230');
+    const activeColor = whitePalette ? whitePalette.brightRgb : (isDraft ? '255,235,140' : '210,240,255');
 
     const start = toScreen(plane.x||0, plane.y||0);
     ctx.save();
@@ -27724,15 +28112,18 @@ function gtcLaunchMissile(u, opts={}){
       spd: 1800,
       drift: 0,
       travKM: 0,
+      flightTimeSec: 0,
       rangeKM: maxRNm * NM2KM,
       maxAltFt: maxHFt,
       launchedAt: Date.now(),
+      courseDeg: Math.atan2((+T.y||0)-(+u.y||0), (+T.x||0)-(+u.x||0))*180/Math.PI,
       launcherShotNumber: Number(u.missileShotsFired || 0),
       launcherRemainingShots: Math.max(0, Number(u.missileMaxShots || SETCA_GTC_LAUNCH_POLICY.maxShots) - Number(u.missileShotsFired || 0)),
       status: 'fly',
       localOnlyAnimation: true,
       __setcaLocalGtcAnimation: true
     };
+    if(window.__SETCA_prepareMissileLifecycle) window.__SETCA_prepareMissileLifecycle(__setcaLocalMissile);
     st.missiles.push(__setcaLocalMissile);
     try{
       if(window.__SETCA_publishGlobalGtcLaunch){
@@ -34585,7 +34976,7 @@ import { getDatabase, ref, get, set } from "https://www.gstatic.com/firebasejs/1
 
   function degToRad(v){ return (Number(v)||0) * Math.PI / 180; }
   function nosePoint(p, nm){
-    const h = degToRad(Number(p && p.hdg));
+    const h = degToRad(Number(p && p.hdg) - 90);
     const d = Number.isFinite(+nm) ? +nm : 0.65;
     return { x:(+p.x||0) + Math.cos(h)*d, y:(+p.y||0) + Math.sin(h)*d, alt:Number.isFinite(+p.alt) ? +p.alt : 0 };
   }
@@ -34609,17 +35000,17 @@ import { getDatabase, ref, get, set } from "https://www.gstatic.com/firebasejs/1
               const n = nosePoint(L, 0.70);
               m.x = n.x; m.y = n.y; m.alt = n.alt;
               m.__setcaNoseLaunch = true;
-              m.guidance = 'PROPORTIONAL_NAV_TO_TARGET_NOSE';
-              m.navConstant = 3.5;
+              m.__setcaUnifiedProportionalGuidance = true;
+              m.guidance = 'PROPORTIONAL_NAVIGATION';
+              m.guidanceModel = 'PN_LEAD_SLIP_V2';
+              m.navConstant = 3.8;
               m.launchNoseHdg = Number(L.hdg||0);
               const T = getPlane(m.tgt);
               if(T){
                 const tn = nosePoint(T, 0.40);
                 m.tx = tn.x; m.ty = tn.y;
-                m.courseDeg = angleDeg(m.x, m.y, tn.x, tn.y);
-              }else{
-                m.courseDeg = Number.isFinite(+m.courseDeg) ? +m.courseDeg : Number(L.hdg||0);
               }
+              m.courseDeg = (((Number(L.hdg)||0) - 90) % 360 + 360) % 360;
             });
           }
         }catch(_){ }
@@ -34642,6 +35033,7 @@ import { getDatabase, ref, get, set } from "https://www.gstatic.com/firebasejs/1
           const missiles = (window.st && Array.isArray(st.missiles)) ? st.missiles : [];
           missiles.forEach(m=>{
             if(!m || !m.__setcaNoseLaunch || m.status !== 'fly') return;
+            if(m.__setcaUnifiedProportionalGuidance) return;
             const T = getPlane(m.tgt);
             if(!T) return;
             const original = {p:T, x:T.x, y:T.y, alt:T.alt};
@@ -34855,6 +35247,8 @@ import { getDatabase, ref, get, set } from "https://www.gstatic.com/firebasejs/1
           const missiles=(window.st&&Array.isArray(st.missiles))?st.missiles:[];
           missiles.forEach(m=>{
             if(!m || m.status!=='fly') return;
+            if(m.__setcaUnifiedProportionalGuidance) return;
+            if(String(m.launcherType||'').toLowerCase()==='gtc') return; // GTC usa su propia cinemática, arrastre e intercepción.
             const p=planeById(m.tgt); if(!p) return;
             if(!originals.has(p.id)) originals.set(p.id,{p,x:p.x,y:p.y,alt:p.alt});
             const pp=projectedPoint(p,m);
@@ -35154,13 +35548,16 @@ import { getDatabase, ref, get, set } from "https://www.gstatic.com/firebasejs/1
       const p={x:+u.x||0,y:+u.y||0};
       const sp=ptScreen({x:p.x,y:p.y,alt:0,hdg:0});
       const launcher=(+u.misR>0)||u.canLaunch||String(u.kind||'').toLowerCase().includes('launch');
-      c.fillStyle=launcher?'#ef4444':'#38bdf8'; c.strokeStyle='rgba(255,255,255,.75)';
+      const whitePalette=(window.__SETCA_isWhiteExcsView&&window.__SETCA_isWhiteExcsView()&&window.__SETCA_excsTeamPalette)
+        ? window.__SETCA_excsTeamPalette(u) : null;
+      c.fillStyle=whitePalette?whitePalette.unitIcon:(launcher?'#ef4444':'#38bdf8');
+      c.strokeStyle=whitePalette?whitePalette.unitEdge:'rgba(255,255,255,.75)';
       if(launcher){
         c.beginPath(); c.moveTo(sp.x,sp.y-7); c.lineTo(sp.x+7,sp.y+6); c.lineTo(sp.x-7,sp.y+6); c.closePath(); c.fill(); c.stroke();
       }else{
         c.beginPath(); c.rect(sp.x-6,sp.y-6,12,12); c.fill(); c.stroke();
       }
-      c.font='700 10px ui-monospace,SFMono-Regular,Menlo,Consolas,monospace'; c.fillStyle='rgba(226,232,240,.88)'; c.textAlign='left';
+      c.font='700 10px ui-monospace,SFMono-Regular,Menlo,Consolas,monospace'; c.fillStyle=whitePalette?whitePalette.unitText:'rgba(226,232,240,.88)'; c.textAlign='left';
       c.fillText(String(u.name||u.id||'GTC').slice(0,20),sp.x+9,sp.y-7);
     });
     c.restore();
