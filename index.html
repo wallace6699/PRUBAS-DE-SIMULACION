@@ -135,6 +135,14 @@
     ['planes','gtc','drawings','pairs','missiles','impactMarks'].forEach(key=>{
       (Array.isArray(scene[key]) ? scene[key] : []).forEach(entity=>window.__SETCA_stampEntityTeam(entity, team));
     });
+    (Array.isArray(scene.planes)?scene.planes:[]).forEach(p=>{
+      if(!p || typeof p!=='object') return;
+      p.ghosts=Array.isArray(p.ghosts)?p.ghosts:[];
+      p.fail=p.fail && typeof p.fail==='object'?p.fail:{};
+      for(const key of ['x','y','hdg','alt','spd']) if(!Number.isFinite(Number(p[key]))) p[key]=0; else p[key]=Number(p[key]);
+      for(const [target,key] of [['tgtHdg','hdg'],['tgtAlt','alt'],['tgtSpd','spd']]) if(!Number.isFinite(Number(p[target]))) p[target]=p[key];
+      if(!Number.isFinite(Number(p.turn))) p.turn=2;
+    });
     scene.team = team;
     scene.teams = window.__SETCA_sceneTeams(scene);
     return scene;
@@ -149,7 +157,7 @@
       if(parsed.planning) return {...parsed, role:'default', room:'planning-local', freeplay:false};
       const role = String(parsed.role || '').toLowerCase();
       const validWhite = role === 'white' && parsed.team === 'white' && String(parsed.room || '').toLowerCase() === 'excs' && parsed.whiteAccess === true;
-      if(!validWhite && !['default','odi','atc','odt','samallocator','observer'].includes(role)){
+      if(!validWhite && !['default','pseudopilot','odi','atc','odt','samallocator','observer'].includes(role)){
         sessionStorage.removeItem(GATE_KEY);
         return null;
       }
@@ -173,7 +181,7 @@
     const access = value && typeof value === 'object' ? value : (window.__setcaAccess || readSavedAccess() || {});
     const team = participantTeam(access.team);
     return !access.planning && !access.freeplay && String(access.room || '').toLowerCase() === 'excs' &&
-      String(access.role || '').toLowerCase() === 'default' && (team === 'blue' || team === 'red');
+      ['default','pseudopilot'].includes(String(access.role || '').toLowerCase()) && (team === 'blue' || team === 'red');
   };
   window.__SETCA_canAddNewExerciseAssets = value=>!window.__SETCA_isExcsPseudoPilot(value);
   window.__SETCA_isExcsWhitePreparation = function(value){
@@ -231,6 +239,25 @@
   const gtcOutcomesRef = ref(db, `rooms/${ROOM_ID}/gtcOutcomes`);
   const aircraftAddsRef = ref(db, `rooms/${ROOM_ID}/aircraftAdds`);
   const __setcaGtcClientId = 'gtc_client_' + Date.now().toString(36) + '_' + Math.random().toString(36).slice(2, 9);
+  // Identifica esta pestaña, incluso cuando otras comparten el mismo usuario anónimo.
+  const __setcaStateClientId = 'state_' + Date.now().toString(36) + '_' + Math.random().toString(36).slice(2, 10);
+  window.__SETCA_stateClientId = __setcaStateClientId;
+  let __setcaStateHydrated = false;
+  const __setcaExcsPlaneBaseline = new Map();
+  const __setcaExcsGtcBaseline = new Map();
+  const __setcaExcsSentMissiles = new Set();
+  let __setcaExcsPilotSending = false;
+  const __setcaExcsRenderMotion = new Map();
+  window.__SETCA_interpolatedPlane = function(p){
+    if(!p || !__SETCA_isExcsSharedRoom() || window.__SETCA_isExcsWhiteController() || (window.st && (st.localPause || (st.serverPause && st.serverPause.active)))) return p;
+    const motion=__setcaExcsRenderMotion.get(String(p.id));
+    if(!motion) return p;
+    const t=Math.min(1,Math.max(0,(performance.now()-motion.at)/500));
+    const hdgDelta=((motion.to.hdg-motion.from.hdg+540)%360)-180;
+    return {...p,x:motion.from.x+(motion.to.x-motion.from.x)*t,y:motion.from.y+(motion.to.y-motion.from.y)*t,
+      hdg:(motion.from.hdg+hdgDelta*t+360)%360};
+  };
+  function __SETCA_isExcsSharedRoom(){ return ROOM_ID.toLowerCase() === 'excs' && !__localOnlyMode; }
   let __setcaServerTimeOffsetMs = 0;
   let __setcaServerMaintenanceActive = false;
   const __planningMode = !!(window.__SETCA_PLANNING_BOOT || (window.__SETCA_isPlanningMode && window.__SETCA_isPlanningMode()));
@@ -266,6 +293,7 @@
     const access = __SETCA_getAccessForSync();
     if(access && (access.planning || access.freeplay)) return false;
     const role = String((access && access.role) || '').toLowerCase();
+    if(window.__SETCA_isExcsWhiteController(access)) return true;
     return role === 'default' || role === 'odt' || role === 'samallocator';
   }
   function __SETCA_canWriteSharedState(){
@@ -324,6 +352,20 @@
       return false;
     }
   };
+  window.__SETCA_publishTacticalEvent = async function(event){
+    if(!__SETCA_isExcsSharedRoom() || !event || !event.id) return false;
+    const team=window.__SETCA_normalizeTeam(event.team);
+    if(!team || (!window.__SETCA_isExcsWhiteController() && team!==window.__SETCA_getCurrentTeam())) return false;
+    await set(ref(db,`rooms/${ROOM_ID}/reports/events/${team}/${event.id}`),event);
+    return true;
+  };
+  if(__SETCA_isExcsSharedRoom()){
+    const teams=window.__SETCA_isExcsWhiteController()?['blue','red','white']:[window.__SETCA_getCurrentTeam()];
+    teams.forEach(team=>onChildAdded(ref(db,`rooms/${ROOM_ID}/reports/events/${team}`),snap=>{
+      const event=snap.val();
+      if(event && typeof window.__SETCA_receiveTacticalEvent==='function') window.__SETCA_receiveTacticalEvent(event);
+    }));
+  }
   let __setcaGtcRefreshTimer = null;
   let __setcaGtcRefreshHit = false;
 
@@ -561,7 +603,7 @@
       missile.status = 'fly';
       missile.localOnlyAnimation = true;
       missile.__setcaLocalGtcAnimation = true;
-      const instructorAuthority = __SETCA_isInstructorAuthority();
+      const instructorAuthority = __SETCA_isExcsSharedRoom() ? window.__SETCA_isExcsWhiteController() : __SETCA_isInstructorAuthority();
       missile.__setcaGlobalGtcReplica = !instructorAuthority;
       missile.__setcaGlobalGtcAuthority = instructorAuthority;
       missile.__setcaGlobalSourceClientId = String(event.sourceClientId || '');
@@ -622,7 +664,7 @@
     try{
       if(__localOnlyMode || !missile || !missile.id || !__SETCA_canLaunchGtcMissile()) return false;
       const role = __SETCA_getSharedWriteRole() || '';
-      if(!['default','odt','samallocator'].includes(role)) return false;
+      if(!window.__SETCA_isExcsWhiteController() && !['default','odt','samallocator'].includes(role)) return false;
       const missileId = String(missile.id || '').trim();
       if(!missileId || missile.__setcaGlobalLaunchPublished) return false;
       missile.__setcaGlobalLaunchPublished = true;
@@ -636,7 +678,7 @@
       }
       const safeId = missileId.replace(/[^a-z0-9_-]/gi, '_').slice(0, 110);
       const launchRef = ref(db, `rooms/${ROOM_ID}/gtcLaunches/${safeId}`);
-      const sourceIsInstructor = __SETCA_isInstructorAuthority();
+      const sourceIsInstructor = __SETCA_isExcsSharedRoom() ? window.__SETCA_isExcsWhiteController() : __SETCA_isInstructorAuthority();
       missile.__setcaGlobalGtcReplica = !sourceIsInstructor;
       missile.__setcaGlobalGtcAuthority = sourceIsInstructor;
       const payload = {
@@ -993,7 +1035,7 @@
     'routeManualUntil','targetId','beAssignedId','ctxMissileType','vsFpm','verticalRateFpm',
     'speedRateKmhps','awacsSweepAng','xpdr','name','tipo','fail','fuel',
     'jamming','awacsCoverage','capAssignedId','capTrackDirection','capAssignedAt',
-    'arwyAssignedId','arwyTrackDirection','arwyAssignedAt','flightProcedure','__cmdAt'
+    'arwyAssignedId','arwyTrackDirection','arwyAssignedAt','flightProcedure','__cmdAt','__cmdPatch'
   ]);
 
   function __setcaPlaneWithDynamicFields(base, dynamicSrc){
@@ -1018,6 +1060,7 @@
   }
   async function __SETCA_publishAuthoritativeGtcOutcome(impact, result){
     try{
+      if(__SETCA_isExcsSharedRoom() && !window.__SETCA_isExcsWhiteController()) return false;
       if(__setcaServerMaintenanceActive || !impact || !impact.missileId || !__SETCA_isInstructorAuthority()) return false;
       const id = String(impact.missileId).replace(/[^a-z0-9_-]/gi, '_').slice(0, 110);
       const now = Date.now();
@@ -1027,6 +1070,7 @@
         launcherId:String(impact.launcherId || impact.by || ''),
         missileStats:__normalizeMissileStats(window.st && window.st.missileStats),
         by:currentUID || 'pending',
+        byClient:__setcaGtcClientId,
         byRole:'default',
         authoritativeAt:now,
         expiresAt:now + 120000
@@ -1141,7 +1185,7 @@
 
   function __SETCA_queueAuthoritativeGtcOutcome(event){
     try{
-      if(!event || String(event.by || '') === String(currentUID || '')) return false;
+      if(!event || String(event.byClient || '') === __setcaGtcClientId) return false;
       const eventId = String(event.missileId || event.id || '').trim();
       if(!eventId || __setcaAppliedGtcOutcomeIds.has(eventId)) return false;
       __setcaPendingGtcOutcomes.set(eventId, event);
@@ -1243,7 +1287,7 @@
     try{
       if(__localOnlyMode || __setcaServerMaintenanceActive) return false;
       const role = __SETCA_getSharedWriteRole() || '';
-      if(!['default','odt','samallocator'].includes(String(role).toLowerCase())) return false;
+      if(!window.__SETCA_isExcsWhiteController() && !['default','odt','samallocator'].includes(String(role).toLowerCase())) return false;
       const id = String(assetId || ''); if(!id) return false;
       await runTransaction(ref(db, `rooms/${ROOM_ID}/gtcValidation/${id}`), current=>{
         const previous = current && typeof current === 'object' && current.state ? current.state : current;
@@ -1252,6 +1296,7 @@
           assetId:id,
           state,
           by:currentUID || 'pending',
+          byClient:__setcaGtcClientId,
           byRole:role,
           updatedAt:Date.now()
         };
@@ -1268,12 +1313,13 @@
     try{
       if(__localOnlyMode || !unit || !unit.id || !__SETCA_canLaunchGtcMissile()) return false;
       const role = __SETCA_getSharedWriteRole() || '';
-      if(!['default','odt','samallocator'].includes(role)) return false;
+      if(!window.__SETCA_isExcsWhiteController() && !['default','odt','samallocator'].includes(role)) return false;
       const now = Date.now();
       unit.runtimeUpdatedAt = now;
       const payload = {
         assetId:String(unit.id),
         by:currentUID || 'pending',
+        byClient:__setcaGtcClientId,
         byRole:role,
         updatedAt:now
       };
@@ -1292,6 +1338,7 @@
   async function __SETCA_publishGtcGlobalState(local){
     try{
       if(__localOnlyMode || __setcaServerMaintenanceActive) return false;
+      if(__SETCA_isExcsSharedRoom()) return __SETCA_publishExcsPilotChanges(local);
       const role = __SETCA_getSharedWriteRole() || '';
       if(!__SETCA_isGtcGlobalWriterRole(role)) return false;
       const snap = (local && typeof local === 'object') ? local : (window.st || {});
@@ -1345,7 +1392,7 @@
     nextArr.forEach((p, idx)=>{
       const key = String((p && p.id) || idx);
       const cur = currentMap.get(key);
-      if(cur && __setcaPlaneCmdAt(cur) > __setcaPlaneCmdAt(p)){
+      if(!window.__SETCA_SCENE_LOADING && cur && __setcaPlaneCmdAt(cur) > __setcaPlaneCmdAt(p)){
         merged.push(__setcaPlaneWithDynamicFields(p, cur));
       }else{
         merged.push(p);
@@ -1391,10 +1438,11 @@
     const out = {...payload};
     // En EXCS solo WHITE controla el reloj global. Los escritores BLUE/RED
     // conservan la pausa que ya existe mientras maniobran sus propios medios.
-    if(window.__SETCA_canControlGlobalPause && !window.__SETCA_canControlGlobalPause()){
+    if((typeof ROOM_ID !== 'undefined' && ROOM_ID.toLowerCase() === 'excs') || (window.__SETCA_canControlGlobalPause && !window.__SETCA_canControlGlobalPause())){
       out.serverPause = (current.serverPause && current.serverPause.active) ? current.serverPause : null;
       out.globalStarted = !!current.globalStarted;
     }
+    if(current.excsClock) out.excsClock = current.excsClock;
     if(payload.contingencies) out.contingencies = {...payload.contingencies,
       fakePlots:window.__SETCA_mergeFakePlots(current.contingencies && current.contingencies.fakePlots, payload.contingencies.fakePlots)};
     out.roles = {...(current.roles || {})};
@@ -1415,8 +1463,252 @@
   }
   try{ window.__SETCA_markAircraftDirty = __SETCA_markAircraftDirty; }catch(_){ }
 
+  // Los puestos EXCS envían únicamente cambios de sus medios existentes.
+  // WHITE calcula el movimiento de ambos equipos y conserva un solo reloj.
+  const __SETCA_EXCS_COMMAND_FIELDS = ['x','y','hdg','alt','spd','tgtHdg','tgtAlt','tgtSpd','turn','turnBias',
+    'vsFpm','verticalRateFpm','speedRateKmhps','flightProcedure','targetId','beAssignedId','ctxMissileType',
+    'routePlan','routeIdx','routeEnabled','routeLoop','routeManualUntil','capAssignedId','capTrackDirection',
+    'arwyAssignedId','arwyTrackDirection','awacsCoverage','xpdr','name','fuel','jamming'];
+  const __SETCA_EXCS_GTC_FIELDS = ['x','y','name','hdg','speed','spd','heading','routePlan','routeIdx','routeEnabled','trackPlaneId',
+    'enabled','active','radarOn','targetId','samDual','covR','covH','misR','misH','covOpacity'];
+  function __setcaExcsDiff(entity, baseline, fields){
+    if(!baseline || !entity) return {};
+    const patch = {};
+    fields.forEach(key=>{
+      if(Object.prototype.hasOwnProperty.call(entity,key) && __setcaSafeJson(entity[key]) !== __setcaSafeJson(baseline[key])) patch[key] = entity[key];
+    });
+    return patch;
+  }
+  async function __SETCA_publishExcsPilotChanges(local){
+    if(!__setcaStateHydrated || !__SETCA_isExcsSharedRoom()) return false;
+    const role = __SETCA_getSharedWriteRole();
+    if(!['default','pseudopilot','odt','samallocator'].includes(role)) return false;
+    if(__setcaExcsPilotSending) return false;
+    __setcaExcsPilotSending=true;
+    try{
+    const scene = local || window.st || {};
+    const team = window.__SETCA_getCurrentTeam();
+    const collect=(items,baselines,fields)=> (Array.isArray(items)?items:[]).filter(window.__SETCA_isOwnTeam).map(entity=>({
+      id:entity.id, patch:__setcaExcsDiff(entity,baselines.get(String(entity.id)),fields)
+    })).filter(row=>Object.keys(row.patch).length);
+    const planes = (role === 'default' || role === 'pseudopilot') ? collect(scene.planes,__setcaExcsPlaneBaseline,__SETCA_EXCS_COMMAND_FIELDS) : [];
+    const gtc = role === 'pseudopilot' ? [] : collect(scene.gtc,__setcaExcsGtcBaseline,__SETCA_EXCS_GTC_FIELDS);
+    const missiles = role === 'pseudopilot' ? [] : (scene.missiles || []).filter(m=>m && window.__SETCA_isOwnTeam(m) && __SETCA_isSharedMissile(m) && !__setcaExcsSentMissiles.has(String(m.id)));
+    if(!planes.length && !gtc.length && !missiles.length) return false;
+    const now=Date.now();
+    await runTransaction(stateRef,current=>{
+      if(!current) return;
+      const next={...current};
+      for(const [key,changes] of [['planes',planes],['gtc',gtc]]){
+        const updates=new Map(changes.map(row=>[String(row.id),row.patch]));
+        next[key]=__setcaPlaneRosterArray(current[key]).map(entity=>{
+          const patch=updates.get(String(entity.id));
+          if(!patch || window.__SETCA_entityTeam(entity)!==team) return entity;
+          return {...entity,...patch,__cmdAt:now,__cmdPatch:patch};
+        });
+      }
+      const existing=new Set((current.missiles||[]).map(m=>String(m.id)));
+      next.missiles=(current.missiles||[]).concat(missiles.filter(m=>!existing.has(String(m.id))));
+      next.lastWriteBy=currentUID; next.lastWriteClient=__setcaStateClientId; next.lastWriteRole=role;
+      next.instructorAuthority=true; next.lastUpdate=serverTimestamp();
+      return next;
+    });
+    for(const [rows,baselines] of [[planes,__setcaExcsPlaneBaseline],[gtc,__setcaExcsGtcBaseline]]) rows.forEach(row=>{
+      const before=baselines.get(String(row.id));
+      if(before) baselines.set(String(row.id),{...before,...JSON.parse(JSON.stringify(row.patch))});
+    });
+    missiles.forEach(m=>__setcaExcsSentMissiles.add(String(m.id)));
+    planes.forEach(row=>{
+      const p=(scene.planes||[]).find(p=>p.id===row.id);
+      const labels={tgtHdg:'rumbo',tgtAlt:'altitud',tgtSpd:'velocidad',x:'posición E/O',y:'posición N/S',flightProcedure:'procedimiento',routePlan:'ruta',targetId:'objetivo'};
+      if(p && typeof window.logEvent==='function') window.logEvent(`MANIOBRA: ${p.name||p.id} · ${Object.entries(row.patch).map(([k,v])=>(labels[k]||k)+' '+((v && typeof v==='object')?'actualizado':v)).join(' · ')}`,p);
+    });
+    gtc.forEach(row=>{
+      const u=(scene.gtc||[]).find(u=>u.id===row.id);
+      if(u && typeof window.logEvent==='function') window.logEvent(`GTC: ${u.name||u.id} · ${Object.keys(row.patch).join(', ')}`,u);
+    });
+    return true;
+    }finally{ __setcaExcsPilotSending=false; }
+  }
+
+  // PSEUDO PILOTO publica solo el campo que acaba de comandar. La transacción
+  // conserva las órdenes simultáneas del instructor y jamás toca GTC, armas,
+  // inventario, pausas ni medios del equipo contrario.
+  const __SETCA_PSEUDO_PATCH_FIELDS = Object.freeze(['tgtHdg','tgtAlt','tgtSpd','name','turn','turnBias','routeManualUntil']);
+  const __SETCA_PSEUDO_LOCK_TTL_MS = 20000;
+  const __setcaPseudoLockMap = new Map();
+  const __setcaPseudoOwnedLocks = new Set();
+  let __setcaPseudoLockUnsub = null;
+  function __setcaPseudoLockKey(planeId){
+    try{return btoa(unescape(encodeURIComponent(String(planeId||'')))).replace(/\+/g,'-').replace(/\//g,'_').replace(/=+$/,'');}
+    catch(_){return String(planeId||'').replace(/[.#$\[\]\/]/g,'_');}
+  }
+  function __setcaPseudoLockRef(planeId){
+    return ref(db,`rooms/${ROOM_ID}/pseudoPilotLocks/${window.__SETCA_getCurrentTeam()}/${__setcaPseudoLockKey(planeId)}`);
+  }
+  function __setcaPseudoLockActive(row,now=Date.now()){
+    return !!(row&&row.planeId&&row.clientId&&now-Number(row.heartbeatAt||row.acquiredAt||0)<__SETCA_PSEUDO_LOCK_TTL_MS);
+  }
+  function __setcaPseudoPublishLocks(){
+    const rows=Array.from(__setcaPseudoLockMap.values()).filter(row=>__setcaPseudoLockActive(row));
+    window.dispatchEvent(new CustomEvent('setca:pseudo-locks',{detail:{team:window.__SETCA_getCurrentTeam(),locks:rows}}));
+  }
+  function __setcaStartPseudoLockFeed(){
+    if(__localOnlyMode||__setcaPseudoLockUnsub||__SETCA_getSharedWriteRole()!=='pseudopilot') return;
+    const team=window.__SETCA_getCurrentTeam();
+    __setcaPseudoLockUnsub=onValue(ref(db,`rooms/${ROOM_ID}/pseudoPilotLocks/${team}`),snap=>{
+      __setcaPseudoLockMap.clear();
+      Object.values(snap.val()||{}).forEach(row=>{if(__setcaPseudoLockActive(row)&&row.team===team)__setcaPseudoLockMap.set(String(row.planeId),row);});
+      __setcaPseudoPublishLocks();
+    },error=>console.warn('SETCA PSEUDO PILOTO: no se pudo leer la relación de aeronaves',error));
+  }
+  window.__SETCA_PSEUDO_LOCKS = Object.freeze({
+    list(){__setcaStartPseudoLockFeed();return Array.from(__setcaPseudoLockMap.values()).filter(row=>__setcaPseudoLockActive(row));},
+    owner(planeId){__setcaStartPseudoLockFeed();const row=__setcaPseudoLockMap.get(String(planeId));return __setcaPseudoLockActive(row)?row:null;},
+    isMine(planeId){const row=this.owner(planeId);return !!(row&&row.clientId===__setcaStateClientId);},
+    async acquire(plane){
+      __setcaStartPseudoLockFeed();
+      if(__localOnlyMode||__SETCA_getSharedWriteRole()!=='pseudopilot'||!plane||!plane.id||!window.__SETCA_isOwnTeam(plane))return {ok:false,reason:'not-authorized'};
+      const planeId=String(plane.id),team=window.__SETCA_getCurrentTeam(),callsign=String((__SETCA_getAccessForSync()||{}).callsign||'PSEUDO PILOTO').trim().slice(0,40)||'PSEUDO PILOTO';
+      const lockRef=__setcaPseudoLockRef(planeId),now=Date.now();
+      const result=await runTransaction(lockRef,current=>{
+        if(__setcaPseudoLockActive(current,now)&&current.clientId!==__setcaStateClientId)return;
+        return {planeId,planeName:String(plane.name||plane.id).slice(0,40),team,callsign,clientId:__setcaStateClientId,acquiredAt:current&&current.clientId===__setcaStateClientId?Number(current.acquiredAt||now):now,heartbeatAt:now};
+      });
+      const row=result&&result.snapshot&&result.snapshot.val?result.snapshot.val():null;
+      const ok=!!(result&&result.committed&&row&&row.clientId===__setcaStateClientId);
+      if(ok){
+        __setcaPseudoOwnedLocks.add(planeId);__setcaPseudoLockMap.set(planeId,row);
+        try{await onDisconnect(lockRef).remove();}catch(_){}
+        __setcaPseudoPublishLocks();
+      }
+      return {ok,owner:row};
+    },
+    async release(planeId){
+      const id=String(planeId||'');if(!id)return false;
+      const result=await runTransaction(__setcaPseudoLockRef(id),current=>current&&current.clientId===__setcaStateClientId?null:undefined);
+      if(result&&result.committed){__setcaPseudoOwnedLocks.delete(id);__setcaPseudoLockMap.delete(id);__setcaPseudoPublishLocks();return true;}
+      return false;
+    }
+  });
+  __setcaStartPseudoLockFeed();
+  setInterval(()=>{
+    if(__SETCA_getSharedWriteRole()!=='pseudopilot')return;
+    __setcaPseudoOwnedLocks.forEach(async planeId=>{
+      try{
+        const now=Date.now();
+        await runTransaction(__setcaPseudoLockRef(planeId),current=>current&&current.clientId===__setcaStateClientId?{...current,heartbeatAt:now}:undefined);
+      }catch(_){}
+    });
+  },5000);
+  window.__SETCA_publishPseudoPilotPatch = async function(plane, rawPatch, kind='aircraft-command'){
+    try{
+      if(__localOnlyMode || __setcaServerMaintenanceActive) return false;
+      if(__SETCA_getSharedWriteRole() !== 'pseudopilot') return false;
+      if(!plane || !plane.id || !window.__SETCA_isOwnTeam(plane)) return false;
+      const lockSnap=await get(__setcaPseudoLockRef(plane.id));
+      const lock=lockSnap&&lockSnap.val?lockSnap.val():null;
+      if(!__setcaPseudoLockActive(lock)||lock.clientId!==__setcaStateClientId) return false;
+      const patch = {};
+      const source = rawPatch && typeof rawPatch === 'object' ? rawPatch : {};
+      __SETCA_PSEUDO_PATCH_FIELDS.forEach(key=>{
+        if(!Object.prototype.hasOwnProperty.call(source,key)) return;
+        if(key === 'name'){
+          const value=String(source[key] || '').trim().slice(0,24);
+          if(value) patch.name=value;
+          return;
+        }
+        if(key === 'turnBias'){
+          const value=String(source[key] || '').toUpperCase();
+          patch.turnBias=(value==='L'||value==='R')?value:null;
+          return;
+        }
+        const value=Number(source[key]);
+        if(Number.isFinite(value)) patch[key]=value;
+      });
+      if(Object.prototype.hasOwnProperty.call(patch,'tgtHdg')) patch.tgtHdg=((patch.tgtHdg%360)+360)%360;
+      if(Object.prototype.hasOwnProperty.call(patch,'tgtAlt')) patch.tgtAlt=Math.max(0,Math.min(80000,patch.tgtAlt));
+      if(Object.prototype.hasOwnProperty.call(patch,'tgtSpd')) patch.tgtSpd=Math.max(0,Math.min(4000,patch.tgtSpd));
+      if(Object.prototype.hasOwnProperty.call(patch,'turn')) patch.turn=Math.max(.1,Math.min(20,patch.turn));
+      if(!Object.keys(patch).length) return false;
+      const team=window.__SETCA_getCurrentTeam();
+      const id=String(plane.id);
+      let committedAt=Date.now();
+      await runTransaction(stateRef,current=>{
+        if(!current) return;
+        let found=false;
+        const next={...current};
+        next.planes=__setcaPlaneRosterArray(current.planes).map(entity=>{
+          if(!entity || String(entity.id)!==id || window.__SETCA_entityTeam(entity)!==team) return entity;
+          found=true;
+          committedAt=Math.max(Date.now(),Number(entity.__cmdAt||0)+1);
+          return {...entity,...patch,__cmdAt:committedAt,__cmdPatch:patch};
+        });
+        if(!found) return;
+        next.lastWriteBy=currentUID || 'pending';
+        next.lastWriteClient=__setcaStateClientId;
+        next.lastWriteRole='pseudopilot';
+        next.instructorAuthority=true;
+        next.lastUpdate=serverTimestamp();
+        return next;
+      });
+      if(patch.name){
+        try{
+          await runTransaction(__setcaPseudoLockRef(id),current=>current&&current.clientId===__setcaStateClientId?{...current,planeName:patch.name,heartbeatAt:Date.now()}:undefined);
+        }catch(_){}
+      }
+      Object.assign(plane,patch,{__cmdAt:committedAt,__cmdPatch:patch});
+      const baseline=__setcaExcsPlaneBaseline.get(id);
+      if(baseline) __setcaExcsPlaneBaseline.set(id,{...baseline,...JSON.parse(JSON.stringify(patch)),__cmdAt:committedAt,__cmdPatch:patch});
+      if(typeof window.logEvent==='function'){
+        const labels={tgtHdg:'rumbo',tgtAlt:'altitud',tgtSpd:'velocidad',name:'callsign'};
+        window.logEvent(`PSEUDO PILOTO: ${plane.name||plane.id} · ${Object.entries(patch).map(([key,value])=>(labels[key]||key)+' '+value).join(' · ')}`,plane);
+      }
+      return true;
+    }catch(error){
+      console.warn('SETCA PSEUDO PILOTO: no se pudo publicar la orden',error);
+      return false;
+    }
+  };
+
+  // Si el tick de WHITE coincide con una orden BLUE/RED, la transacción conserva
+  // esa orden. Aplicarla también al motor local evita esperar un segundo evento
+  // Firebase que puede ser reconocido como eco de la propia pestaña WHITE.
+  function __SETCA_applyCommittedExcsCommands(saved){
+    if(!saved || !__SETCA_isExcsSharedRoom() || !window.__SETCA_isExcsWhiteController() || !window.st) return false;
+    const localById=new Map((Array.isArray(st.planes)?st.planes:[]).filter(Boolean).map(p=>[String(p.id),p]));
+    let changed=false;
+    __setcaPlaneRosterArray(saved.planes).forEach(remote=>{
+      const local=localById.get(String(remote && remote.id || ''));
+      if(!local || __setcaPlaneCmdAt(remote)<=__setcaPlaneCmdAt(local)) return;
+      const rawPatch=(remote.__cmdPatch && typeof remote.__cmdPatch==='object') ? remote.__cmdPatch : {};
+      const patch={};
+      __SETCA_EXCS_COMMAND_FIELDS.forEach(key=>{ if(Object.prototype.hasOwnProperty.call(rawPatch,key)) patch[key]=rawPatch[key]; });
+      if(!Object.keys(patch).length) return;
+      Object.assign(local,patch,{__cmdAt:remote.__cmdAt,__cmdPatch:patch});
+      __setcaExcsPlaneBaseline.set(String(local.id),JSON.parse(JSON.stringify(local)));
+      changed=true;
+    });
+    st.missiles=Array.isArray(st.missiles)?st.missiles:[];
+    const existingMissiles=new Set(st.missiles.map(m=>String(m && m.id || '')).filter(Boolean));
+    const completed=__setcaCompletedMissileIds([].concat(Array.isArray(st.impactMarks)?st.impactMarks:[],Array.isArray(saved.impactMarks)?saved.impactMarks:[]));
+    (Array.isArray(saved.missiles)?saved.missiles:[]).forEach(remote=>{
+      const id=String(remote && remote.id || '');
+      if(!id || existingMissiles.has(id) || completed.has(id) || !__SETCA_isSharedMissile(remote) || (remote.status && String(remote.status).toLowerCase()!=='fly')) return;
+      st.missiles.push(JSON.parse(JSON.stringify(remote)));
+      existingMissiles.add(id);
+      __setcaExcsSentMissiles.add(id);
+      changed=true;
+    });
+    return changed;
+  }
+
   async function pushStateToCloud(local) {
     if (__localOnlyMode) return false;
+    if(__SETCA_isExcsSharedRoom()){
+      if(!__setcaStateHydrated) return false;
+      if(!window.__SETCA_isExcsWhiteController()) return __SETCA_publishExcsPilotChanges(local);
+    }
     if (!__SETCA_canWriteSharedState()) {
       // El ODT no toma autoridad total del estado; solo publica GTC/Ground Asset List y dibujos globales.
       if(__SETCA_isGtcGlobalWriterRole(__SETCA_getSharedWriteRole())) return __SETCA_publishGtcGlobalState(local);
@@ -1445,6 +1737,7 @@
           delete q.dataBlock; // drag Z+click solo local por equipo/usuario
           // V+click flight-planner waypoints/rutas = PRIVADO del instructor/local.
           // No viajan a GLOBAL para que otros roles solo vean aviones moviéndose.
+          if(!__SETCA_isExcsSharedRoom()){
           delete q.routePlan;
           delete q.routeIdx;
           delete q.routeEnabled;
@@ -1455,6 +1748,7 @@
           delete q.routeFinishedAt;
           delete q.routeManualUntil;
           delete q.__routeFollowState;
+          }
           delete q.__syncAfter;
           return q;
         }) : snap.planes;
@@ -1485,15 +1779,22 @@
           missileStats: window.__SETCA_ownedMissileStats ? window.__SETCA_ownedMissileStats(snap) : __normalizeMissileStats(snap.missileStats),
           samValidation: (snap.samValidation && typeof snap.samValidation === 'object') ? {phase:String(snap.samValidation.phase || 'green'), byRole:String(snap.samValidation.byRole || ''), at:Number(snap.samValidation.at || Date.now())} : null,
           globalStarted: !!snap.globalStarted,
+          exerciseId: String(snap.exerciseId || ''),
           windKmh: Number.isFinite(+snap.windKmh) ? +snap.windKmh : 0,
           windDir: Number.isFinite(+snap.windDir) ? +snap.windDir : 0,
           lastWriteBy: currentUID,
+          lastWriteClient: __setcaStateClientId,
           lastWriteRole: __SETCA_getSharedWriteRole() || 'default',
           instructorAuthority: true,
           lastUpdate: serverTimestamp()
         };
 
-        await runTransaction(stateRef, current=>__setcaMergeAuthoritativePayload(current, payload));
+        const committed = await runTransaction(stateRef, current=>__setcaMergeAuthoritativePayload(current, payload));
+        const saved=committed && committed.snapshot && committed.snapshot.val();
+        if(saved) __SETCA_applyCommittedExcsCommands(saved);
+        if(window.__SETCA_SCENE_LOADING){
+          if(saved && saved.lastUpdate) __setcaLastAppliedRemoteTs=Math.max(__setcaLastAppliedRemoteTs,Number(saved.lastUpdate));
+        }
         __setcaScheduleStageFlush();
       }while(__pushQueued);
     }finally{
@@ -1590,6 +1891,9 @@ let __setcaLastAppliedRemoteTs = 0;
     try {
       const remoteStamp = Number(v.lastUpdate || 0);
       const force = !!(opts && opts.force);
+      if(window.__SETCA_SCENE_LOADING && !force) return false;
+      const excs = __SETCA_isExcsSharedRoom();
+      const white = excs && window.__SETCA_isExcsWhiteController();
       if(!force && remoteStamp && __setcaLastAppliedRemoteTs && remoteStamp < __setcaLastAppliedRemoteTs) return false;
       const remoteRole = String(v.lastWriteRole || '').toLowerCase();
       if(!force && __SETCA_canWriteSharedState() && remoteRole && remoteRole !== 'default' && v.instructorAuthority !== true) return false;
@@ -1603,6 +1907,7 @@ let __setcaLastAppliedRemoteTs = 0;
         delete q.tagDy;
         delete q.dataBlock;
         // No aceptar rutas V+click desde GLOBAL: son privadas/locales del instructor.
+        if(!excs){
         delete q.routePlan;
         delete q.routeIdx;
         delete q.routeEnabled;
@@ -1613,7 +1918,30 @@ let __setcaLastAppliedRemoteTs = 0;
         delete q.routeFinishedAt;
         delete q.routeManualUntil;
         delete q.__routeFollowState;
+        }
         delete q.__syncAfter;
+        // Firebase no conserva arrays/objetos vacíos. Restablecer el modelo de vuelo.
+        q.ghosts = Array.isArray(q.ghosts) ? q.ghosts : [];
+        q.fail = q.fail && typeof q.fail === 'object' ? q.fail : {};
+        if(excs){
+          const id=String(q.id), local=(st.planes||[]).find(p=>String(p.id)===id);
+          const baseline=__setcaExcsPlaneBaseline.get(id);
+          if(white && local && baseline && !force){
+            // Una orden de un piloto no rebobina las posiciones calculadas por WHITE.
+            const changed=__setcaPlaneCmdAt(q)>__setcaPlaneCmdAt(local);
+            const command=changed ? (q.__cmdPatch || {}) : {};
+            Object.assign(q,local,command,changed ? {__cmdAt:q.__cmdAt,__cmdPatch:command} : {});
+          }else if(!white && window.__SETCA_isOwnTeam(q)){
+            const pending=__setcaExcsDiff(local,baseline,__SETCA_EXCS_COMMAND_FIELDS);
+            __setcaExcsPlaneBaseline.set(id,JSON.parse(JSON.stringify(q)));
+            Object.assign(q,pending);
+          }
+          if(white) __setcaExcsPlaneBaseline.set(id,JSON.parse(JSON.stringify(q)));
+          if(!white && local){
+            const from=window.__SETCA_interpolatedPlane(local);
+            __setcaExcsRenderMotion.set(id,{at:performance.now(),from:{x:from.x,y:from.y,hdg:from.hdg},to:{x:q.x,y:q.y,hdg:q.hdg}});
+          }
+        }
         return q;
       };
 
@@ -1632,12 +1960,12 @@ let __setcaLastAppliedRemoteTs = 0;
       let samValidationChanged = false;
       let globalStartedChanged = false;
 
-      if (Array.isArray(v.planes) || (v.planes && typeof v.planes === "object")) {
+      if (excs || Array.isArray(v.planes) || (v.planes && typeof v.planes === "object")) {
         const __canKeepLocalRoutePlan = (()=>{
           try{
             // Las rutas V+click solo existen/son visibles en el puesto Instructor.
             const a = window.__setcaAccess || {};
-            if(window.__SETCA_isExcsWhitePreparation && window.__SETCA_isExcsWhitePreparation(a)) return true;
+            if(excs) return false;
             const role = String(a.role || '').toLowerCase();
             return role === 'default';
           }catch(_){ return false; }
@@ -1660,7 +1988,15 @@ let __setcaLastAppliedRemoteTs = 0;
             });
           });
         }
-        const remotePlanes = Array.isArray(v.planes) ? v.planes : Object.values(v.planes);
+        // WHITE es el árbitro autoritativo del combate. Si ya registró un impacto,
+        // una instantánea anterior de BLUE/RED no puede resucitar ese blanco.
+        const locallyDestroyedPlaneIds = new Set((white && !force && remoteRole !== 'white' && Array.isArray(st.impactMarks) ? st.impactMarks : [])
+          .filter(mark=>mark && String(mark.type || '').toLowerCase()==='hit' && String(mark.targetId || ''))
+          .map(mark=>String(mark.targetId)));
+        const remotePlanesRaw = Array.isArray(v.planes) ? v.planes : Object.values(v.planes || {});
+        const remotePlanes = locallyDestroyedPlaneIds.size
+          ? remotePlanesRaw.filter(p=>!locallyDestroyedPlaneIds.has(String(p && p.id || '')))
+          : remotePlanesRaw;
         const remotePlaneIds = new Set(remotePlanes.map(p=>String(p && p.id || '')).filter(Boolean));
         const nowTs = Date.now();
         const nextPlanes = __setcaMergeRemoteArray(st.planes, remotePlanes, {
@@ -1714,6 +2050,7 @@ let __setcaLastAppliedRemoteTs = 0;
       }catch(_){ }
 
       {
+        const wasServerPaused = !!(st.serverPause && st.serverPause.active);
         const nextServerPause = (v.serverPause && v.serverPause.active) ? {
           active:true,
           callsign:String(v.serverPause.callsign || 'INSTRUCTOR'),
@@ -1722,6 +2059,12 @@ let __setcaLastAppliedRemoteTs = 0;
         serverPauseChanged = (__setcaSafeJson(st.serverPause || null) !== __setcaSafeJson(nextServerPause));
         if(serverPauseChanged){
           st.serverPause = nextServerPause;
+          // Al recibir PLAY GLOBAL de WHITE, reanudar el reloj vivo sin recargar ni saltar
+          // el escenario. La pausa local del usuario sigue siendo independiente.
+          if(wasServerPaused && !nextServerPause){
+            st.paused = false;
+            try{ st.t0 = performance.now() - (Number(st.elapsed || 0) || 0); }catch(_){ }
+          }
           try{ if(typeof __setLocalPauseUI === 'function') __setLocalPauseUI(); else if(typeof __setServerPauseUI === 'function') __setServerPauseUI(); }catch(_){}
           try{ if(typeof __refreshLocalDelaySnapshot === 'function') __refreshLocalDelaySnapshot(true); }catch(_){}
         }
@@ -1735,13 +2078,13 @@ let __setcaLastAppliedRemoteTs = 0;
         if(contingenciesChanged) st.contingencies = nextCont;
       }
 
-      if (v.drawings) {
+      if (v.drawings || excs) {
         const __localOnlyDrawings = (Array.isArray(st.drawings) ? st.drawings : [])
           .filter(d=>d && d.visibility === 'local')
           .map(d=>__normalizeDrawingScope(__clonePlain(d)));
         const remoteGlobals = __setcaMergeRemoteArray(
           (Array.isArray(st.drawings) ? st.drawings : []).filter(d=>!(d && d.visibility === 'local')),
-          v.drawings,
+          v.drawings || [],
           { prefix:'drawing', normalize:(d)=>__normalizeDrawingScope(__clonePlain(d)) }
         );
         const nextDrawings = __mergeGlobalAndLocalDrawings(remoteGlobals, __localOnlyDrawings);
@@ -1749,8 +2092,9 @@ let __setcaLastAppliedRemoteTs = 0;
         if(drawingsChanged) st.drawings = nextDrawings;
       }
 
-      if (Array.isArray(v.gtc)) {
+      if (Array.isArray(v.gtc) || excs) {
         const previousGtc = Array.isArray(st.gtc) ? st.gtc : [];
+        if(!Array.isArray(v.gtc)) v={...v,gtc:[]};
         const localGtcTransient = new Map();
         previousGtc.forEach(unit=>{
           if(!unit || !unit.id) return;
@@ -1775,6 +2119,12 @@ let __setcaLastAppliedRemoteTs = 0;
           prefix:'gtc',
           normalize:(u)=>{
             const q = (u && typeof u === 'object') ? {...u} : u;
+            if(excs && q && !white && window.__SETCA_isOwnTeam(q)){
+              const id=String(q.id),local=previousGtc.find(x=>String(x.id)===id);
+              const pending=__setcaExcsDiff(local,__setcaExcsGtcBaseline.get(id),__SETCA_EXCS_GTC_FIELDS);
+              __setcaExcsGtcBaseline.set(id,JSON.parse(JSON.stringify(q)));
+              Object.assign(q,pending);
+            }
             const transient = q && q.id ? localGtcTransient.get(String(q.id)) : null;
             if(transient && transient.samDual !== undefined) q.samDual = transient.samDual;
             if(transient && Number(transient.runtime.runtimeUpdatedAt || 0) > Number(q && q.runtimeUpdatedAt || 0)){
@@ -1804,7 +2154,8 @@ let __setcaLastAppliedRemoteTs = 0;
       // Emparejamientos = NETAMENTE LOCAL. Ignorar cualquier pareo remoto.
       pairsChanged = false;
 
-      if (Array.isArray(v.missiles)) {
+      if (Array.isArray(v.missiles) || excs) {
+        if(!Array.isArray(v.missiles)) v={...v,missiles:[]};
         const completedMissileIds = __setcaCompletedMissileIds([].concat(Array.isArray(st.impactMarks) ? st.impactMarks : [], Array.isArray(v.impactMarks) ? v.impactMarks : []));
         const remoteActiveMissiles = v.missiles.filter(m=>{
           const id = String(m && m.id || '');
@@ -1816,14 +2167,25 @@ let __setcaLastAppliedRemoteTs = 0;
         });
         const nextMissiles = __setcaMergeRemoteArray(st.missiles, remoteActiveMissiles, {
           prefix:'missile',
-          keepLocal:__SETCA_isLocalGtcMissile
+          keepLocal:m=>{
+            if(__SETCA_isLocalGtcMissile(m)) return true;
+            const id=String(m && m.id || '');
+            // Un eco autoritativo puede llegar durante los 900 ms de staging.
+            // No retirar el lanzamiento propio hasta que Firebase lo confirme.
+            return !!(excs && id && window.__SETCA_isOwnTeam(m) && !completedMissileIds.has(id) && !__setcaExcsSentMissiles.has(id));
+          }
         });
         missilesChanged = !__setcaSameArrayRefs(st.missiles, nextMissiles);
         if(missilesChanged) st.missiles = nextMissiles;
       }
 
       {
-        const nextImpacts = __setcaMergeRemoteArray(st.impactMarks, (Array.isArray(v.impactMarks) ? v.impactMarks : []), { prefix:'impact' });
+        const nextImpacts = __setcaMergeRemoteArray(st.impactMarks, (Array.isArray(v.impactMarks) ? v.impactMarks : []), {
+          prefix:'impact',
+          // Los equipos publican órdenes y lanzamientos; solo WHITE consolida el
+          // resultado. Conservarlo hasta que su estado autoritativo llegue a Firebase.
+          keepLocal:(white && !force && remoteRole !== 'white') ? (()=>true) : null
+        });
         impactsChanged = !__setcaSameArrayRefs(st.impactMarks, nextImpacts);
         if(impactsChanged) st.impactMarks = nextImpacts;
       }
@@ -1852,6 +2214,12 @@ let __setcaLastAppliedRemoteTs = 0;
       }
 
       if(remoteStamp) __setcaLastAppliedRemoteTs = Math.max(__setcaLastAppliedRemoteTs, remoteStamp);
+      if(excs){
+        if(white) (st.gtc||[]).forEach(u=>__setcaExcsGtcBaseline.set(String(u.id),JSON.parse(JSON.stringify(u))));
+        (v.missiles||[]).forEach(m=>__setcaExcsSentMissiles.add(String(m.id)));
+        if(v.excsClock) st.excsClock={...v.excsClock};
+        if(v.exerciseId) st.exerciseId=String(v.exerciseId);
+      }
 
       // Reaplicar offsets locales de Data Block (no se sincronizan)
       if (window.__applyLocalTagOffsets) window.__applyLocalTagOffsets();
@@ -1901,8 +2269,9 @@ let __setcaLastAppliedRemoteTs = 0;
   if(!__localOnlyMode){
     onValue(stateRef, (snap) => {
       const v = snap.val();
+      __setcaStateHydrated = true;
       if (!v) return;
-      if(v.lastWriteBy === currentUID){
+      if(v.lastWriteClient === __setcaStateClientId){
         const remotePaused = !!(v.serverPause && v.serverPause.active);
         const localPaused = !!(window.st && st.serverPause && st.serverPause.active);
         // Una pausa escrita por WHITE justo antes de recargar debe recuperarse
@@ -1923,7 +2292,7 @@ let __setcaLastAppliedRemoteTs = 0;
     let changed = false;
     Object.keys(map).forEach(assetId=>{
       const row = map[assetId];
-      if(!row || typeof row !== 'object' || String(row.by || '') === String(currentUID || '')) return;
+      if(!row || typeof row !== 'object' || row.byClient === __setcaGtcClientId) return;
       const unit = (window.st && Array.isArray(st.gtc)) ? st.gtc.find(item=>item && String(item.id || '') === String(assetId)) : null;
       if(!unit) return;
       let next = __SETCA_mergeSamDualState(unit.samDual, row.state || row);
@@ -1952,7 +2321,7 @@ let __setcaLastAppliedRemoteTs = 0;
     let changed = false;
     Object.keys(map).forEach(assetId=>{
       const row = map[assetId];
-      if(!row || typeof row !== 'object' || String(row.by || '') === String(currentUID || '')) return;
+      if(!row || typeof row !== 'object' || row.byClient === __setcaGtcClientId) return;
       const unit = (window.st && Array.isArray(st.gtc)) ? st.gtc.find(item=>item && String(item.id || '') === String(assetId)) : null;
       if(!unit) return;
       const updatedAt = Number(row.updatedAt || 0);
@@ -6843,6 +7212,7 @@ body.setca-access-locked #setcaGlobalPauseBootNote{display:none!important;}
 .setca-entry-section h3{margin:0 0 8px;font-size:12px;letter-spacing:.12em;color:#c6ddcf;}
 .setca-entry-section>.setca-step-hint{margin-top:6px;}
 .setca-entry-teams{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px;}
+.setca-entry-teams.setca-excs-three-teams{grid-template-columns:repeat(3,minmax(0,1fr));}
 .setca-entry-roles{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px;}
 #setcaAccessGate .setca-entry-card{position:relative;display:flex;flex-direction:column;align-items:flex-start;justify-content:center;gap:6px;width:100%;height:auto;min-height:70px;padding:13px 16px;text-align:left;white-space:normal;border:1px solid #315143;border-color:#315143!important;border-radius:12px;background:#0e1b16!important;color:#e5f0e9!important;cursor:pointer;line-height:1.3;transition:border-color .15s,background .15s;}
 #setcaAccessGate .setca-entry-card strong{font-size:13px;letter-spacing:.04em;}
@@ -6853,9 +7223,21 @@ body.setca-access-locked #setcaGlobalPauseBootNote{display:none!important;}
 #setcaAccessGate .setca-entry-card[data-gate-team] strong{font-size:20px;letter-spacing:.08em;}
 #setcaAccessGate .setca-entry-card[data-gate-team="blue"]{border-color:#325b80!important;background:linear-gradient(130deg,#102539,#0c1925)!important;color:#9ecfff!important;}
 #setcaAccessGate .setca-entry-card[data-gate-team="red"]{border-color:#81434c!important;background:linear-gradient(130deg,#311820,#1d1016)!important;color:#ffb3bc!important;}
+#setcaAccessGate .setca-entry-card[data-gate-team="white"]{border-color:#89939d!important;background:linear-gradient(130deg,#30363d,#171b20)!important;color:#f8fafc!important;}
 #setcaAccessGate .setca-entry-card[data-gate-team="blue"][aria-pressed="true"]{border-color:#72b6ff!important;box-shadow:inset 0 0 0 1px #72b6ff;}
 #setcaAccessGate .setca-entry-card[data-gate-team="red"][aria-pressed="true"]{border-color:#ff8b98!important;box-shadow:inset 0 0 0 1px #ff8b98;}
+#setcaAccessGate .setca-entry-card[data-gate-team="white"][aria-pressed="true"]{border-color:#fff!important;box-shadow:inset 0 0 0 1px #fff;}
 #setcaAccessGate .setca-entry-card:focus-visible{outline:2px solid #fff;outline-offset:3px;}
+.setca-white-access{
+  display:grid;grid-template-columns:minmax(0,1fr) auto auto;align-items:end;gap:8px;
+  margin-top:9px;padding:10px;border:1px solid #89939d;border-radius:10px;
+  background:linear-gradient(180deg,rgba(48,54,61,.74),rgba(13,17,21,.92));
+}
+.setca-white-access label{display:flex;flex-direction:column;gap:5px;color:#e5e7eb;font-size:10px;font-weight:800;letter-spacing:.09em;}
+#setcaAccessGate #gateExcsWhitePassword{width:100%;min-width:0;height:34px;box-sizing:border-box;border-color:#77828d;background:#090d11;color:#fff;}
+#gateExcsWhiteValidate,#gateExcsWhiteCancel{height:34px;min-height:34px!important;white-space:nowrap;}
+#gateExcsWhiteValidate{border-color:#e5e7eb!important;background:linear-gradient(180deg,#46515b,#28313a)!important;color:#fff!important;}
+#gateExcsWhiteError{grid-column:1/-1;min-height:14px;color:#fca5a5;font-size:10px;line-height:1.35;}
 .setca-entry-note{margin:0;padding:10px 12px;border-radius:9px;background:#101f18;color:#b5cabc;font-size:12px;line-height:1.5;}
 .setca-entry-actions{display:flex;align-items:center;gap:12px;margin-top:10px;padding-top:12px;border-top:1px solid #244231;}
 #gateGoBtn{flex:1;min-height:46px;font-size:18px;letter-spacing:.18em;background:#18482e;border-color:#8ce5ae;color:#e5ffed;}
@@ -6897,6 +7279,168 @@ body.setca-access-locked #setcaGlobalPauseBootNote{display:none!important;}
 .setca-excs-mission-foot{display:flex;align-items:center;justify-content:space-between;gap:10px;}
 #gateExcsBriefingStatus{color:#aab5be;font-size:10px;line-height:1.35;}
 #gateExcsBriefingSave{flex:0 0 auto;min-width:150px!important;}
+/* EXCS · Briefing Room: superficie grafito profesional y neutra. */
+#setcaAccessGate:has(#gateEntryBrief:not([hidden])) .setca-gate-backdrop{
+  background:rgba(16,19,22,.84);
+  backdrop-filter:blur(5px);
+}
+#setcaAccessGate:has(#gateEntryBrief:not([hidden])) .setca-gate-dialog{
+  border-color:#69737d;
+  background:linear-gradient(180deg,#353b41 0%,#2b3035 48%,#24292d 100%);
+  box-shadow:0 22px 62px rgba(0,0,0,.46),inset 0 1px 0 rgba(255,255,255,.07);
+}
+#setcaAccessGate:has(#gateEntryBrief:not([hidden])) .setca-gate-head{
+  border-bottom-color:#616b74;
+}
+#setcaAccessGate:has(#gateEntryBrief:not([hidden])) .setca-gate-kicker{color:#c8d0d7;}
+#setcaAccessGate:has(#gateEntryBrief:not([hidden])) .setca-gate-head h2{color:#f4f6f8;}
+#setcaAccessGate:has(#gateEntryBrief:not([hidden])) .setca-gate-badge{
+  border-color:#727d86;
+  background:#2b3136;
+  color:#f1f4f6;
+}
+#setcaAccessGate:has(#gateEntryBrief:not([hidden])) .setca-entry-context span{
+  border-color:#606a73;
+  background:#30363b;
+  color:#eef1f3;
+}
+#setcaAccessGate:has(#gateEntryBrief:not([hidden])) .setca-excs-brief{
+  border-color:#737d86;
+  background:linear-gradient(180deg,#30363b,#292e33);
+  box-shadow:inset 0 1px 0 rgba(255,255,255,.04);
+}
+#setcaAccessGate:has(#gateEntryBrief:not([hidden])) .setca-excs-title-editor,
+#setcaAccessGate:has(#gateEntryBrief:not([hidden])) .setca-excs-mission-brief{
+  border-color:#59636c;
+  background:#22272b;
+}
+#setcaAccessGate:has(#gateEntryBrief:not([hidden])) .setca-excs-team{
+  border-color:#626c75;
+  background:#24292e;
+}
+#setcaAccessGate:has(#gateEntryBrief:not([hidden])) .setca-excs-team[data-excs-team="red"]{
+  border-color:#8a5860;
+  background:linear-gradient(180deg,rgba(84,39,46,.58),#252a2f 44%,#22272b);
+}
+#setcaAccessGate:has(#gateEntryBrief:not([hidden])) .setca-excs-team[data-excs-team="blue"]{
+  border-color:#527596;
+  background:linear-gradient(180deg,rgba(38,67,92,.62),#252a2f 44%,#22272b);
+}
+#setcaAccessGate:has(#gateEntryBrief:not([hidden])) .setca-excs-limit,
+#setcaAccessGate:has(#gateEntryBrief:not([hidden])) .setca-excs-person{
+  border-color:#4f5962;
+  background:#30363b;
+}
+#setcaAccessGate:has(#gateEntryBrief:not([hidden])) .setca-excs-limit span{color:#e0e4e7;}
+#setcaAccessGate:has(#gateEntryBrief:not([hidden])) #gateExcsTitleInput,
+#setcaAccessGate:has(#gateEntryBrief:not([hidden])) .setca-excs-limit input,
+#setcaAccessGate:has(#gateEntryBrief:not([hidden])) #gateExcsBriefingText{
+  border-color:#59636c;
+  background:#1d2226;
+  color:#f2f4f5;
+}
+#setcaAccessGate:has(#gateEntryBrief:not([hidden])) .setca-entry-actions{
+  border-top-color:#616b74;
+}
+/* Consola EXCS: lenguaje visual de planificación aeronáutica, sobrio y funcional. */
+#setcaAccessGate:has(#gateEntryBrief:not([hidden])) .setca-gate-dialog{
+  background-color:#262c31;
+  background-image:
+    linear-gradient(rgba(184,197,207,.035) 1px,transparent 1px),
+    linear-gradient(90deg,rgba(184,197,207,.035) 1px,transparent 1px),
+    linear-gradient(180deg,#343a40 0%,#292f34 48%,#22272b 100%);
+  background-size:22px 22px,22px 22px,100% 100%;
+}
+#setcaAccessGate:has(#gateEntryBrief:not([hidden])) .setca-gate-head{
+  padding-bottom:12px;
+  border-bottom:1px solid #77818a;
+  box-shadow:0 1px 0 rgba(0,0,0,.55);
+}
+#setcaAccessGate:has(#gateEntryBrief:not([hidden])) .setca-gate-kicker{
+  font:700 10px/1.2 ui-monospace,SFMono-Regular,Consolas,monospace;
+  letter-spacing:.16em;
+}
+#setcaAccessGate:has(#gateEntryBrief:not([hidden])) .setca-gate-head h2{
+  font:800 20px/1.15 system-ui,-apple-system,"Segoe UI",sans-serif;
+  letter-spacing:.035em;
+}
+#setcaAccessGate:has(#gateEntryBrief:not([hidden])) .setca-excs-brief{
+  position:relative;
+  gap:10px;
+  padding:13px;
+  border-radius:8px;
+  box-shadow:0 12px 24px rgba(0,0,0,.22),inset 0 1px 0 rgba(255,255,255,.06);
+}
+#setcaAccessGate:has(#gateEntryBrief:not([hidden])) .setca-excs-brief::before{
+  content:"MISSION CONTROL  /  LIVE ROSTER";
+  align-self:flex-start;
+  margin:-4px 0 0;
+  padding:3px 7px;
+  border-left:3px solid #b8c4cc;
+  color:#d8dee3;
+  background:#20262a;
+  font:700 9px/1.2 ui-monospace,SFMono-Regular,Consolas,monospace;
+  letter-spacing:.13em;
+}
+#setcaAccessGate:has(#gateEntryBrief:not([hidden])) .setca-excs-head{
+  min-height:27px;
+  padding:0 2px 8px;
+  border-bottom:1px solid #4e5860;
+}
+#setcaAccessGate:has(#gateEntryBrief:not([hidden])) .setca-excs-head strong,
+#setcaAccessGate:has(#gateEntryBrief:not([hidden])) .setca-excs-mission-head strong{
+  font-family:ui-monospace,SFMono-Regular,Consolas,monospace;
+  letter-spacing:.12em;
+}
+#setcaAccessGate:has(#gateEntryBrief:not([hidden])) .setca-excs-title-editor,
+#setcaAccessGate:has(#gateEntryBrief:not([hidden])) .setca-excs-mission-brief{
+  border-radius:6px;
+  box-shadow:inset 0 1px 2px rgba(0,0,0,.35);
+}
+#setcaAccessGate:has(#gateEntryBrief:not([hidden])) .setca-excs-title-editor label,
+#setcaAccessGate:has(#gateEntryBrief:not([hidden])) .setca-excs-limit span,
+#setcaAccessGate:has(#gateEntryBrief:not([hidden])) .setca-excs-mission-head span{
+  font-family:ui-monospace,SFMono-Regular,Consolas,monospace;
+  letter-spacing:.07em;
+}
+#setcaAccessGate:has(#gateEntryBrief:not([hidden])) .setca-excs-team{
+  position:relative;
+  padding:11px;
+  border-radius:6px;
+  box-shadow:inset 0 1px 0 rgba(255,255,255,.045),0 4px 12px rgba(0,0,0,.18);
+}
+#setcaAccessGate:has(#gateEntryBrief:not([hidden])) .setca-excs-team::after{
+  content:"TEAM STATUS  ●  CONNECTED";
+  position:absolute;
+  top:12px;
+  right:11px;
+  color:#aab4bc;
+  font:700 8px/1 ui-monospace,SFMono-Regular,Consolas,monospace;
+  letter-spacing:.08em;
+}
+#setcaAccessGate:has(#gateEntryBrief:not([hidden])) .setca-excs-team[data-excs-team="red"]::after{color:#d49aa0;}
+#setcaAccessGate:has(#gateEntryBrief:not([hidden])) .setca-excs-team[data-excs-team="blue"]::after{color:#91b7d6;}
+#setcaAccessGate:has(#gateEntryBrief:not([hidden])) .setca-excs-team h4{
+  padding-bottom:8px;
+  border-bottom:1px solid rgba(220,230,238,.14);
+  font-family:ui-monospace,SFMono-Regular,Consolas,monospace;
+}
+#setcaAccessGate:has(#gateEntryBrief:not([hidden])) .setca-excs-limit{
+  min-height:32px;
+  padding:4px 6px 4px 9px;
+  border-radius:4px;
+}
+#setcaAccessGate:has(#gateEntryBrief:not([hidden])) .setca-excs-person{border-radius:4px;}
+#setcaAccessGate:has(#gateEntryBrief:not([hidden])) #gateExcsTitleSave,
+#setcaAccessGate:has(#gateEntryBrief:not([hidden])) #gateExcsBriefingSave{
+  border:1px solid #87929a!important;
+  border-radius:5px!important;
+  background:linear-gradient(180deg,#56616a,#3d464e)!important;
+  color:#fff!important;
+  box-shadow:inset 0 1px 0 rgba(255,255,255,.16),0 2px 4px rgba(0,0,0,.3)!important;
+  font:800 10px/1 ui-monospace,SFMono-Regular,Consolas,monospace!important;
+  letter-spacing:.08em;
+}
 body.setca-excs-pseudo-pilot #pUnitMgr{display:none!important;}
 /* En EXCS el Centro de Mando y las contingencias pertenecen únicamente a WHITE. */
 body.setca-excs-session:not(.setca-excs-white-preparation) #pCmd,
@@ -6909,12 +7453,15 @@ body.setca-excs-white-preparation #pause{display:inline-flex!important;}
 body[data-setca-role="white"] #setcaAccessChip{box-shadow:0 0 0 1px rgba(255,255,255,.12) inset;}
 @media(max-width:560px){
   #gateLobbyFields .setca-room-list{grid-template-columns:repeat(2,minmax(0,1fr));}
+  .setca-entry-teams.setca-excs-three-teams{grid-template-columns:1fr;}
   .setca-entry-roles{grid-template-columns:repeat(2,minmax(0,1fr));}
   #setcaAccessGate .setca-entry-card[data-gate-team]{padding:14px 12px;min-height:82px;}
   #setcaAccessGate .setca-entry-card[data-gate-team] strong{font-size:17px;}
   .setca-excs-board{grid-template-columns:1fr;}
   .setca-excs-limits{grid-template-columns:repeat(3,minmax(0,1fr));}
   .setca-excs-title-editor{grid-template-columns:1fr;}
+  .setca-white-access{grid-template-columns:1fr 1fr;}
+  .setca-white-access label{grid-column:1/-1;}
   .setca-excs-mission-head,.setca-excs-mission-foot{align-items:stretch;flex-direction:column;}
   #gateExcsTitleSave,#gateExcsBriefingSave{width:100%;}
 }
@@ -8867,7 +9414,6 @@ body.setca-modern-ui :is(
   #toggleAirports,
   #modeDigital,
   #toggleAwacsCov,
-  #contingenciesBtn,
   #spiderWebToggle,
   #observerAptoToggleBtn,
   #setcaAirwaysToggle,
@@ -8912,7 +9458,7 @@ body.setca-modern-ui :is(
   button.biasOn,
   button.setca-spawn-btn-armed,
   button[aria-pressed="true"]
-):not(.samValBtn):not(.setca-validation-confirm):not(.setca-entry-card):not(:where(#configPanel button)):not(:where(#drawingCtxMenu button)):not(:where(#systemsBtn,#systemsMenu button)),
+):not(.samValBtn):not(.setca-validation-confirm):not(.setca-entry-card):not(:where(#configPanel button)):not(:where(#drawingCtxMenu button)):not(:where(#systemsBtn,#systemsMenu button,#contingenciesBtn)),
 body.setca-modern-ui button[data-contingency].is-open{
   --setca-local-button-state:on;
   --setca-local-button-bg:linear-gradient(180deg,#d3ad16 0%,#927000 100%);
@@ -8988,7 +9534,6 @@ body.setca-modern-ui :is(
   #toggleAirports,
   #modeDigital,
   #toggleAwacsCov,
-  #contingenciesBtn,
   #spiderWebToggle,
   #observerAptoToggleBtn,
   #setcaAirwaysToggle,
@@ -9012,6 +9557,135 @@ body.setca-modern-ui :is(
   button[data-contingency]
 ):not(:where(#configPanel button)):not(:where(#drawingCtxMenu button)):not(:where(#systemsBtn,#systemsMenu button)):hover{
   filter:brightness(1.10) !important;
+}
+</style>
+
+<style id="setca-contingencies-professional-button">
+/* Mismo acabado sobrio que Configuración; conserva el acceso y sus permisos. */
+body.setca-modern-ui #contingenciesBtn.btn{
+  width:100%;min-height:32px;padding:7px 12px;
+  align-items:center;justify-content:center;
+  border:1px solid #586671 !important;border-radius:7px;
+  background:#24313a !important;color:#e7edf2 !important;
+  box-shadow:none !important;text-shadow:none !important;
+  filter:none !important;transform:none !important;animation:none !important;
+  font:600 12px/1.2 system-ui,Segoe UI,sans-serif;
+  text-align:center;letter-spacing:.025em;text-transform:uppercase;
+  transition:background-color .14s ease,border-color .14s ease;
+}
+body.setca-modern-ui #contingenciesBtn.btn:hover,
+body.setca-modern-ui #contingenciesBtn.btn[aria-expanded="true"]{
+  background:#3b4b59 !important;border-color:#9aaaba !important;
+  filter:none !important;
+}
+body.setca-modern-ui #contingenciesBtn.btn:focus-visible{outline:2px solid #9aaaba;outline-offset:2px;}
+
+/* Panel de contingencias: mismo lenguaje visual profesional de Configuración. */
+body.setca-modern-ui #setcaContingenciesPanel{
+  left:14px;top:calc(var(--setca-header-h,72px) + 8px);
+  width:min(330px,calc(100vw - 24px));max-width:none;
+  max-height:calc(100dvh - var(--setca-header-h,72px) - 24px);
+  padding:0;overflow:hidden;
+  border:1px solid #cbd2d9;border-radius:8px;
+  background:#fff;color:#182433;
+  box-shadow:0 12px 32px rgba(15,23,42,.18);
+  backdrop-filter:none;-webkit-backdrop-filter:none;
+}
+body.setca-modern-ui #setcaContingenciesPanel .cont-head{
+  align-items:flex-start;gap:10px;margin:0;padding:10px 12px 9px;
+  border-bottom:1px solid #e2e6ea;background:#f8f9fb;color:#172033;
+}
+body.setca-modern-ui #setcaContingenciesPanel .cont-title{
+  margin:0;color:#172033;
+  font:600 14px/1.25 system-ui,Segoe UI,sans-serif;
+  letter-spacing:0;text-transform:none;
+}
+body.setca-modern-ui #setcaContingenciesPanel .cont-description{
+  margin:2px 0 0;color:#647181;
+  font:400 10px/1.3 system-ui,Segoe UI,sans-serif;
+}
+body.setca-modern-ui #setcaContingenciesPanel #closeContingenciesPanel.cont-close{
+  width:28px;min-width:28px;height:28px;padding:0;
+  border:1px solid transparent !important;border-radius:4px;
+  background:transparent !important;color:#647181 !important;
+  box-shadow:none !important;text-shadow:none !important;filter:none !important;
+  font:400 20px/1 system-ui,Segoe UI,sans-serif;
+}
+body.setca-modern-ui #setcaContingenciesPanel #closeContingenciesPanel.cont-close:hover{
+  border-color:transparent !important;background:#e9edf1 !important;color:#172b3e !important;filter:none !important;
+}
+body.setca-modern-ui #setcaContingenciesPanel .cont-grid{
+  display:grid;grid-template-columns:1fr;gap:4px;
+  align-items:stretch;padding:6px 7px 7px;
+  max-height:calc(100dvh - var(--setca-header-h,72px) - 106px);
+  overflow-y:auto;scrollbar-width:thin;scrollbar-color:#c1c9d1 transparent;
+}
+body.setca-modern-ui #setcaContingenciesPanel .cont-grid .cont-btn,
+body.setca-modern-ui #setcaContingenciesPanel .cont-grid .cont-apply{
+  --setca-local-button-bg:#eef2f5;--setca-local-button-border:#7d8c9c;
+  --setca-local-button-color:#172b3e;--setca-local-button-shadow:0 1px 1px rgba(15,23,42,.10);
+  width:100%;min-width:0;height:32px;min-height:32px;
+  margin:0;padding:0 9px;
+  border:2px solid #7d8c9c !important;border-radius:5px;
+  background:#eef2f5 !important;color:#172b3e !important;
+  box-shadow:0 1px 1px rgba(15,23,42,.10) !important;text-shadow:none !important;
+  filter:none !important;transform:none !important;animation:none !important;
+  font:600 12px/1.2 system-ui,Segoe UI,sans-serif;
+  letter-spacing:0;text-align:center;text-transform:none;
+  transition:background-color .12s ease,border-color .12s ease;
+}
+body.setca-modern-ui #setcaContingenciesPanel .cont-grid > .cont-btn{margin-top:0;}
+body.setca-modern-ui #setcaContingenciesPanel .cont-grid > .cont-btn:last-of-type{margin-bottom:0;}
+body.setca-modern-ui #setcaContingenciesPanel .cont-grid .cont-btn:hover,
+body.setca-modern-ui #setcaContingenciesPanel .cont-grid .cont-apply:hover{
+  background:#e3e9ee !important;border-color:#5f7182 !important;filter:none !important;
+}
+body.setca-modern-ui #setcaContingenciesPanel .cont-grid .cont-btn.is-open{
+  background:#dce5ec !important;border-color:#536a7f !important;color:#10283d !important;
+  box-shadow:inset 0 1px 2px rgba(15,23,42,.12) !important;
+}
+body.setca-modern-ui #setcaContingenciesPanel .cont-btn[data-contingency="display_failure_blank_display"]{grid-column:auto;}
+body.setca-modern-ui #setcaContingenciesPanel .cont-config{
+  grid-column:auto;grid-template-columns:minmax(0,1fr) 84px;
+  gap:7px;margin:0;padding:8px;
+  border:1px solid #d5dde4;border-radius:4px;
+  background:#f8f9fb;box-shadow:none;
+}
+body.setca-modern-ui #setcaContingenciesPanel .cont-config label{
+  gap:5px;color:#4e5c6b;
+  font:500 11px/1.3 system-ui,Segoe UI,sans-serif;
+  letter-spacing:0;text-transform:none;
+}
+body.setca-modern-ui #setcaContingenciesPanel .cont-config :is(select,input){
+  color-scheme:light;width:100%;height:32px;min-height:32px;
+  padding:4px 8px;border:1px solid #c6ced7 !important;border-radius:4px;
+  background:#fff !important;color:#253445 !important;box-shadow:none !important;
+  font:400 12px/1.2 system-ui,Segoe UI,sans-serif;
+}
+body.setca-modern-ui #setcaContingenciesPanel .cont-apply{grid-column:1/-1;margin-top:0;}
+body.setca-modern-ui #setcaContingenciesPanel .cont-note{
+  margin:0;color:#647181;
+  font:400 11px/1.45 system-ui,Segoe UI,sans-serif;
+  letter-spacing:0;text-transform:none;
+}
+body.setca-modern-ui #setcaContingenciesPanel .fake-plots-targets{
+  gap:6px;max-height:150px;padding:8px;
+  border:1px solid #d7dde3;border-radius:4px;background:#fff;
+}
+body.setca-modern-ui #setcaContingenciesPanel .fake-plots-target{
+  gap:7px;padding:6px 8px;
+  border:1px solid #e1e6eb;border-radius:4px;
+  background:#fff;color:#334155 !important;
+  font:400 11px/1.25 system-ui,Segoe UI,sans-serif;
+}
+body.setca-modern-ui #setcaContingenciesPanel .fake-plots-target:hover{background:#f1f4f7;border-color:#b9c3cd;}
+body.setca-modern-ui #setcaContingenciesPanel .fake-plots-target input{accent-color:#526a80;}
+body.setca-modern-ui #setcaContingenciesPanel .fake-plots-empty{color:#647181;font-weight:400;}
+body.setca-modern-ui #setcaContingenciesPanel :is(button,select,input):focus-visible{outline:2px solid #61788f;outline-offset:2px;}
+@media(max-width:440px){
+  body.setca-modern-ui #setcaContingenciesPanel{left:8px;right:8px;width:auto;top:calc(var(--setca-header-h,64px) + 8px);}
+  body.setca-modern-ui #setcaContingenciesPanel .cont-head{padding:12px 14px;}
+  body.setca-modern-ui #setcaContingenciesPanel .cont-grid{padding:0 14px;}
 }
 </style>
 
@@ -9310,9 +9984,12 @@ body.setca-modern-ui.setca-excs-session[data-setca-team="red"] header :is(#setca
 </head>
 <body class="setca-access-locked setca-modern-ui">
 
-<div id="setcaContingenciesPanel" aria-hidden="true">
+<div id="setcaContingenciesPanel" role="dialog" aria-modal="false" aria-labelledby="setcaContingenciesHeading" aria-describedby="setcaContingenciesDescription" aria-hidden="true">
   <div class="cont-head">
-    <div class="cont-title">Contingencies</div>
+    <div>
+      <h2 class="cont-title" id="setcaContingenciesHeading">Contingencies</h2>
+      <p class="cont-description" id="setcaContingenciesDescription">Control de incidencias del ejercicio</p>
+    </div>
     <button id="closeContingenciesPanel" class="cont-close focusable" type="button" aria-label="Cerrar contingencias">×</button>
   </div>
   <div class="cont-grid" role="group" aria-label="Contingencies">
@@ -9438,7 +10115,7 @@ body.setca-modern-ui.setca-excs-session[data-setca-team="red"] header :is(#setca
         <div class="group">
           <div class="group-title">Contingencias</div>
           <div class="btn-grid small">
-            <button id="contingenciesBtn" class="btn mini focusable" type="button" title="Contingencies">Contingencies</button>
+            <button id="contingenciesBtn" class="btn mini focusable" type="button" title="Contingencies" aria-controls="setcaContingenciesPanel" aria-expanded="false">Contingencies</button>
           </div>
         </div>
 
@@ -10072,6 +10749,10 @@ let st={
   localDelaySnapshotAt:0,
   _callsignSeq:4
 };
+// Una sola referencia de estado para el motor, Firebase y los módulos añadidos.
+// Sin este enlace, `st` (global léxico) y `window.st` podían divergir durante
+// impactos o reconexiones y dejar en la nube una aeronave ya destruida.
+window.st = st;
 
 /* ===== LOCAL ONLY: Unidades + Predicción + Data Block offsets (NO se sincroniza) ===== */
 const __ROOM_LOCAL = (location.hash || "").replace(/^#/, "").trim() || "sala-default";
@@ -11524,8 +12205,8 @@ function __setServerPauseUI(){
         const white = !!(window.__SETCA_isExcsWhiteController && window.__SETCA_isExcsWhiteController());
         btn.classList.toggle('setca-general-paused', white);
         btn.classList.remove('setca-general-running');
-        btn.textContent = white ? '▶️ GO' : '▶️ Reanudar servidor';
-        btn.title = white ? 'Liberar la pausa general e iniciar EXCS sin recargar el mapa' : 'Reanudar la misión para toda la sala';
+        btn.textContent = white ? '▶ PLAY GLOBAL' : '▶️ Reanudar servidor';
+        btn.title = white ? 'Reanudar EXCS para BLUE y RED sin recargar el mapa' : 'Reanudar la misión para toda la sala';
       }else{
         btn.classList.remove('setca-general-paused','setca-general-running');
         btn.textContent = st && st.localPause ? '▶️ Reanudar local' : '⏸️ Pausa local';
@@ -11535,7 +12216,17 @@ function __setServerPauseUI(){
   }
 }
 function __toggleInstructorServerPause(){
+  if(window.__SETCA_SCENE_LOADING) return true;
   if(!(window.__SETCA_isPlanningMode && window.__SETCA_isPlanningMode()) && __SETCA_isInstructorSession()){
+    const white = !!(window.__SETCA_isExcsWhiteController && window.__SETCA_isExcsWhiteController());
+    if(white && typeof window.__SETCA_setExcsGlobalPause === 'function'){
+      const nextPaused = !__SETCA_isServerPaused();
+      window.__SETCA_setExcsGlobalPause(nextPaused).catch(err=>{
+        console.warn('No se pudo cambiar la pausa general EXCS', err);
+        try{ __setLocalPauseUI(); }catch(_){ }
+      });
+      return true;
+    }
     if(__SETCA_isServerPaused()){
       st.serverPause = null;
     }else{
@@ -13792,6 +14483,9 @@ try{
   window.__SETCA_updatePlaneFlightProcedure = updatePlaneFlightProcedure;
 }catch(_){ }
 function updatePlane(p,dt){
+  if(!p || typeof p !== 'object') return;
+  if(!Array.isArray(p.ghosts)) p.ghosts=[];
+  if(!p.fail || typeof p.fail!=='object') p.fail={};
   if(isPlaneKillConfirmed(p)){
     if(!Number.isFinite(+p.hdg)) p.hdg = Number.isFinite(+p.tgtHdg) ? +p.tgtHdg : 0;
     if(!Number.isFinite(+p.alt)) p.alt = Number.isFinite(+p.tgtAlt) ? +p.tgtAlt : 0;
@@ -13833,7 +14527,9 @@ if (Math.min(diffCW, diffCCW) > 0.1) {
 }
 function drawPlane(p){
   if(!p || typeof window.__SETCA_canRenderPlane !== 'function' || !window.__SETCA_canRenderPlane(p)) return;
+  if(!Array.isArray(p.ghosts)) p.ghosts=[];
   const __livePlaneRef = p;
+  if(window.__SETCA_interpolatedPlane) p=window.__SETCA_interpolatedPlane(p);
   if(window.__SETCA_contactView) p = window.__SETCA_contactView(p);
   const __fadeLost = (typeof window.__SETCA_getActiveFadeLost === 'function') ? window.__SETCA_getActiveFadeLost(p) : null;
   if(__fadeLost) return;
@@ -14500,6 +15196,7 @@ function __SETCA_finalizeLocalGtcOutcome(missile, result, reason, target){
       if(window.__SETCA_publishAuthoritativeGtcOutcome){
         const impact = {
           id:'GTC_RESULT_' + String(payload.missileId || '').replace(/[^a-z0-9_-]/gi, '_').slice(0, 90),
+          team:window.__SETCA_entityTeam(missile),
           type:payload.result,
           reason:payload.reason,
           x:payload.x,
@@ -17599,6 +18296,12 @@ function paintAlerts(force=false){
 // === FUNCIÓN MEJORADA: GENERADOR DE REPORTE TÁCTICO ===
 // ======================================================
 const tel = { rows: [], evts: [] };
+const __SETCA_TACTICAL_EVENT_IDS = new Set();
+window.__SETCA_receiveTacticalEvent = function(event){
+  if(!event || !event.id || __SETCA_TACTICAL_EVENT_IDS.has(event.id) || !window.__SETCA_isOwnTeam(event)) return;
+  __SETCA_TACTICAL_EVENT_IDS.add(event.id);
+  tel.evts.push(event);
+};
 
 function fmt(ms) {
   if (ms < 0) ms = 0;
@@ -17629,7 +18332,13 @@ function logEvent(txt, source) {
   }
   const privateItems = [].concat(st.gtc || [], st.drawings || [], st.missiles || []);
   if(privateItems.some(x=>!window.__SETCA_isOwnTeam(x) && x.name && text.includes(x.name))) return;
-  tel.evts.push({ t: st.elapsed, txt:text, team:window.__SETCA_getCurrentTeam() });
+  const actor=source || [].concat(st.planes||[],st.gtc||[]).filter(x=>x && x.name && text.includes(x.name)).sort((a,b)=>text.indexOf(a.name)-text.indexOf(b.name))[0];
+  const event={id:'evt_'+Date.now().toString(36)+'_'+Math.random().toString(36).slice(2,10),
+    t:st.elapsed,txt:text,team:actor?window.__SETCA_entityTeam(actor):window.__SETCA_getCurrentTeam(),
+    callsign:String((window.__setcaAccess||{}).callsign||''),exerciseId:String(st.exerciseId||'')};
+  __SETCA_TACTICAL_EVENT_IDS.add(event.id);
+  tel.evts.push(event);
+  if(typeof window.__SETCA_publishTacticalEvent==='function') window.__SETCA_publishTacticalEvent(event).catch(err=>console.warn('No se pudo compartir el evento táctico',err));
 }
 
 let telTick = 0;
@@ -17711,17 +18420,18 @@ function __reportValidationHtml(s){
   }).join('')+'</div>';
 }
 function __reportEventRows(){
-  return (tel.evts||[]).filter(window.__SETCA_isOwnTeam).map((e,index)=>{
+  return (tel.evts||[]).filter(window.__SETCA_isOwnTeam).filter(e=>!st.exerciseId || e.exerciseId===st.exerciseId).map((e,index)=>{
     const txt=String(e&&e.txt||'Sin registro');
     let category='AERONAVE',result='REGISTRO',actor='SISTEMA',action=txt;
-    if(/VALIDACION|VALIDACIÓN/i.test(txt)){category='VALIDACION';result=/completa|BUEN/i.test(txt)?'COMPLETA':'REGISTRADA';}
+    if(/^GTC:/i.test(txt)){category='GTC';}
+    else if(/VALIDACION|VALIDACIÓN/i.test(txt)){category='VALIDACION';result=/completa|BUEN/i.test(txt)?'COMPLETA':'REGISTRADA';}
     else if(/LANZAMIENTO/i.test(txt)){category='MISIL';result='LANZADO';}
     else if(/SPLASH/i.test(txt)){category='MISIL';result='IMPACTO';}
     else if(/FALLA|BLOQUEADO|NO ALCANZ/i.test(txt)){category='MISIL';result='NO IMPACTO';}
     else if(/DERRIB|DESTRUID/i.test(txt)){category='AERONAVE';result='FINALIZADA';}
     const colon=txt.indexOf(':');
     if(colon>=0){ action=txt.slice(colon+1).trim()||txt; const first=action.split(/\s+/)[0]; if(first)actor=first; }
-    return {index,t:__reportNum(e&&e.t),txt,category,result,actor,action};
+    return {index,t:__reportNum(e&&e.t),txt,category,result,actor,action,team:e.team,callsign:e.callsign||''};
   });
 }
 function __reportStatusClass(value){ const v=String(value||''); return /IMPACTO|ACTIVA|COMPLETA|EN VUELO|OPERATIVO/i.test(v)&&!/NO IMPACTO/i.test(v)?'good':(/NO IMPACTO|DERRIB|FALLA|ERROR/i.test(v)?'bad':'warn'); }
@@ -17804,7 +18514,7 @@ function __reportUpdateEvents(events,planeRecords,missileRecords){
   const selectedPlane=planeRecords.find(r=>r.id===__SETCA_REPORT_UI.aircraftId),selectedMissile=missileRecords.find(r=>r.id===__SETCA_REPORT_UI.missileId);
   const from=Math.max(0,__reportNum(__SETCA_REPORT_UI.fromSec))*1000,to=(__SETCA_REPORT_UI.toSec==null?Infinity:Math.max(0,__reportNum(__SETCA_REPORT_UI.toSec))*1000);
   const rows=events.filter(e=>e.t>=from&&e.t<=to).filter(e=>!selectedPlane||String(e.txt).toLowerCase().includes(selectedPlane.name.toLowerCase())||String(e.txt).toLowerCase().includes(selectedPlane.id.toLowerCase())).filter(e=>!selectedMissile||String(e.txt).toLowerCase().includes(selectedMissile.id.toLowerCase())||String(e.txt).toLowerCase().includes(selectedMissile.type.toLowerCase()));
-  body.innerHTML=rows.length?rows.slice().reverse().map(e=>`<tr><td>${__reportFmtMs(e.t)}</td><td>${__reportEsc(e.category)}</td><td>${__reportEsc(e.actor)}</td><td>${__reportEsc(e.action)}</td><td><span class="tac-report-status ${__reportStatusClass(e.result)}">${__reportEsc(e.result)}</span></td><td>${__reportEsc(e.txt)}</td></tr>`).join(''):'<tr><td colspan="6">Sin eventos para los filtros seleccionados.</td></tr>';
+  body.innerHTML=rows.length?rows.slice().sort((a,b)=>b.t-a.t).map(e=>`<tr><td>${__reportFmtMs(e.t)}</td><td>${__reportEsc(window.__SETCA_teamLabel(e.team))}<br>${__reportEsc(e.callsign)}</td><td>${__reportEsc(e.category)}</td><td>${__reportEsc(e.actor)}</td><td>${__reportEsc(e.action)}</td><td><span class="tac-report-status ${__reportStatusClass(e.result)}">${__reportEsc(e.result)}</span></td><td>${__reportEsc(e.txt)}</td></tr>`).join(''):'<tr><td colspan="7">Sin eventos para los filtros seleccionados.</td></tr>';
 }
 function __reportPreparePrint(){
   const content=document.getElementById('reportContent');if(!content)return;
@@ -17851,7 +18561,7 @@ function renderReport(){
     <section class="tac-report-section"><div class="tac-report-section-head"><h2>Dashboard de aeronaves</h2><div class="tac-report-section-note">Telemetria local · filtros sin sincronizacion</div></div><div class="tac-report-split"><div id="tacAircraftDetail" class="tac-report-detail"></div><div class="tac-report-charts"><div class="tac-report-chart"><canvas id="tacAltChart"></canvas></div><div class="tac-report-chart"><canvas id="tacSpdChart"></canvas></div></div></div></section>
     <section class="tac-report-section"><div class="tac-report-section-head"><h2>Dashboard de misiles tierra-aire</h2><div class="tac-report-section-note">Un grafico dinamico por misil seleccionado</div></div><div class="tac-report-split"><div id="tacMissileDetail" class="tac-report-detail"></div><div class="tac-report-chart single"><canvas id="tacMissileChart"></canvas></div></div><div class="tac-report-table-wrap"><table class="tac-report-table"><thead><tr><th>ID</th><th>Tipo</th><th>Origen</th><th>Destino</th><th>Condicion</th><th>Estado</th><th>Motivo</th><th>Validacion</th></tr></thead><tbody id="tacMissileTableBody"></tbody></table></div></section>
     <section class="tac-report-section"><div class="tac-report-section-head"><h2>Estado final de aeronaves</h2><div class="tac-report-section-note">Callsign, rol, condicion y valores finales</div></div><div class="tac-report-table-wrap"><table class="tac-report-table"><thead><tr><th>Nombre / callsign</th><th>Rol</th><th>Estado final</th><th>Derribos</th><th>Velocidad final</th><th>Altitud final</th></tr></thead><tbody id="tacPlaneTableBody"></tbody></table></div></section>
-    <section class="tac-report-section"><div class="tac-report-section-head"><h2>Eventos finales</h2><div class="tac-report-section-note">Secuencia temporal, actor, accion, resultado y estado</div></div><div class="tac-report-table-wrap tac-report-events"><table class="tac-report-table"><thead><tr><th>Tiempo</th><th>Categoria</th><th>Actor</th><th>Accion</th><th>Resultado</th><th>Registro</th></tr></thead><tbody id="tacEventsBody"></tbody></table></div></section>
+    <section class="tac-report-section"><div class="tac-report-section-head"><h2>Eventos finales</h2><div class="tac-report-section-note">Secuencia temporal por bando y callsign</div></div><div class="tac-report-table-wrap tac-report-events"><table class="tac-report-table"><thead><tr><th>Tiempo</th><th>Bando / operador</th><th>Categoria</th><th>Actor</th><th>Accion</th><th>Resultado</th><th>Registro</th></tr></thead><tbody id="tacEventsBody"></tbody></table></div></section>
   </article>`;
   __reportBindLocalFilters(planes,missiles,events);__reportUpdateAircraftDashboard(planes);__reportUpdateMissileDashboard(missiles);__reportUpdatePlaneTable(planes);__reportUpdateMissileTable(missiles);__reportUpdateEvents(events,planes,missiles);
 }
@@ -18805,6 +19515,10 @@ const __SETCA_GTC_TICK_SEC = 0.2;
 function __SETCA_isAuthoritativeSimulationHost(){
   try{ if(window.__SETCA_isPlanningMode && window.__SETCA_isPlanningMode()) return true; }catch(_){ }
   try{ if(window.__SETCA_isFreePlayMode && window.__SETCA_isFreePlayMode()) return true; }catch(_){ }
+  try{
+    const access=window.__setcaAccess || {};
+    if(String(access.room || '').toLowerCase()==='excs') return !!(window.__SETCA_isExcsWhiteController && window.__SETCA_isExcsWhiteController());
+  }catch(_){ }
   try{ if(window.__SETCA_isInstructorAuthority) return !!window.__SETCA_isInstructorAuthority(); }catch(_){ }
   try{
     const access = window.__setcaAccess || {};
@@ -18821,32 +19535,47 @@ function __SETCA_publishAuthoritativeTick(){
   }catch(_){ }
   return false;
 }
+let __SETCA_EXCS_PUBLISH_ACC=0;
 function loop(ts){
+  // Conservar el siguiente fotograma incluso si un elemento importado falla al pintar.
+  requestAnimationFrame(loop);
   const dt=Math.max(0,(ts-lastTS)/1000); lastTS=ts;
   const planningMode = __SETCA_enforcePlanningPause();
   if(!planningMode){ try{ __SETCA_pruneDelayLag && __SETCA_pruneDelayLag(); }catch(_){ } }
   const authHost = __SETCA_isAuthoritativeSimulationHost();
   const serverPaused = __SETCA_isServerPaused();
-  if(!planningMode && !serverPaused && authHost){
+  const excsSession=String((window.__setcaAccess||{}).room||'').toLowerCase()==='excs';
+  const simStep=excsSession ? 0.05 : __SETCA_AUTH_TICK_SEC;
+  if(excsSession && st.excsClock){
+    st.elapsed=Number(st.excsClock.elapsed||0)+(serverPaused?0:Math.max(0,Date.now()-Number(st.excsClock.startedAt||Date.now())));
+    st.t0=performance.now()-st.elapsed;
+  }
+  if(!planningMode && !serverPaused){
+    telTick += Math.min(dt,1);
+    if(telTick>5){logTel();telTick=0;}
+  }
+  if(!planningMode && !serverPaused && authHost && !window.__SETCA_SCENE_LOADING){
     st.elapsed = performance.now() - st.t0;
-    telTick += dt;
-    if(telTick>5){logTel(); telTick=0;}
     __SETCA_AUTH_TICK_ACC = Math.min(3, __SETCA_AUTH_TICK_ACC + Math.max(0, dt));
     let __setcaDidAuthTick = false;
     let __setcaTickGuard = 0;
-    while(__SETCA_AUTH_TICK_ACC >= __SETCA_AUTH_TICK_SEC && __setcaTickGuard < 3){
-      __SETCA_AUTH_TICK_ACC -= __SETCA_AUTH_TICK_SEC;
+    while(__SETCA_AUTH_TICK_ACC >= simStep && __setcaTickGuard < (excsSession?6:3)){
+      __SETCA_AUTH_TICK_ACC -= simStep;
       __setcaTickGuard++;
       __SETCA_AUTH_TICK_SEQ++;
-      st.planes.forEach(p=>updatePlane(p,__SETCA_AUTH_TICK_SEC));
-      updateMissiles(__SETCA_AUTH_TICK_SEC, {excludeGtc:true});
+      st.planes.forEach(p=>updatePlane(p,simStep));
+      updateMissiles(simStep, {excludeGtc:true});
       updatePairs();
-      sweepDetect(__SETCA_AUTH_TICK_SEC);
+      sweepDetect(simStep);
       st.__authoritativeTick = __SETCA_AUTH_TICK_SEQ;
       st.__authoritativeTickAt = Date.now();
       __setcaDidAuthTick = true;
     }
-    if(__setcaDidAuthTick) __SETCA_publishAuthoritativeTick();
+    __SETCA_EXCS_PUBLISH_ACC += dt;
+    if(__setcaDidAuthTick && (!excsSession || __SETCA_EXCS_PUBLISH_ACC>=0.5)){
+      __SETCA_EXCS_PUBLISH_ACC=0;
+      __SETCA_publishAuthoritativeTick();
+    }
   }else if(!planningMode){
     __SETCA_AUTH_TICK_ACC = 0;
     updatePairs();
@@ -18914,7 +19643,7 @@ try{
         if(!window.__SETCA_isOwnTeam(p)) return; // No revelar la ruta previa a la detección.
         const acquisition = (typeof window.__SETCA_getPlaneAcquisitionVisual === 'function') ? window.__SETCA_getPlaneAcquisitionVisual(p) : null;
         if(acquisition && !acquisition.showDataBlock) return;
-        if(p.ghosts.length>1){
+        if(Array.isArray(p.ghosts) && p.ghosts.length>1){
           ctx.beginPath();
           p.ghosts.forEach((g,i)=>{
             const sg=toScreen(g.x,g.y);
@@ -18948,7 +19677,6 @@ try{
   if(__SETCA_isServerPaused()) __drawServerPauseOverlay();
   try{ __SETCA_drawRadarFailureOverlay && __SETCA_drawRadarFailureOverlay(); }catch(_){ }
   accFPS+=dt;frames++;if(accFPS>=0.5){fpsEl.textContent=String(Math.round(frames/accFPS));accFPS=0;frames=0;}
-  requestAnimationFrame(loop);
 }
 requestAnimationFrame(loop);
 
@@ -20580,11 +21308,13 @@ requestAnimationFrame(()=>{ repaintPlanesList(); repaintNav(); repaintStudent();
           panel.classList.remove('open');
           panel.setAttribute('aria-hidden', 'true');
           contingenciesBtn.classList.remove('active');
+          contingenciesBtn.setAttribute('aria-expanded', 'false');
           return;
         }
         panel.classList.toggle('open', !!open);
         panel.setAttribute('aria-hidden', open ? 'false' : 'true');
         contingenciesBtn.classList.toggle('active', !!open);
+        contingenciesBtn.setAttribute('aria-expanded', open ? 'true' : 'false');
         if(open){ try{ (window.__SETCA_refreshDelayLagPlaneOptions||function(){})(); (window.__SETCA_refreshFadeLostPlaneOptions||function(){})(); }catch(_){ } }
       };
       contingenciesBtn.addEventListener('click', (ev)=>{
@@ -22607,7 +23337,7 @@ document.addEventListener('keydown', (ev)=>{
     try{ if(window.__applyLocalTagOffsets) window.__applyLocalTagOffsets(); }catch(_){ }
     try{ if(window.__saveLocalPrefs) window.__saveLocalPrefs(); }catch(_){ }
     try{ if(window.__updateLocalUI) window.__updateLocalUI(); }catch(_){ }
-    try{ if(window._SETCA_SYNC && typeof window._SETCA_SYNC.push === 'function') window._SETCA_SYNC.push(); }catch(_){ }
+    try{ if(!window.__SETCA_SCENE_LOADING && window._SETCA_SYNC && typeof window._SETCA_SYNC.push === 'function') window._SETCA_SYNC.push(); }catch(_){ }
   }
 
   loadBtn.title = 'Carga un JSON y reemplaza el escenario actual.';
@@ -22929,8 +23659,25 @@ document.addEventListener('keydown', (ev)=>{
   }
   function loadSceneFromFile(file, mode){
     if(!file) return;
+    if(window.__SETCA_SCENE_LOADING) return;
+    if(window.__SETCA_isExcsPseudoPilot && window.__SETCA_isExcsPseudoPilot()) return;
+    let status=document.getElementById('setcaMissionLoadStatus');
+    if(!status){
+      status=document.createElement('div');status.id='setcaMissionLoadStatus';status.setAttribute('role','status');status.setAttribute('aria-live','polite');
+      status.style.cssText='font:12px system-ui;padding:6px 0;color:#cde7d7;';
+      loadBtn.parentElement.appendChild(status);
+    }
+    window.__SETCA_SCENE_LOADING=true;
+    loadFileInput.disabled=true; importFileInput.disabled=true;
+    status.textContent='Cargando '+file.name+'…';
     const reader = new FileReader();
-    reader.onload = (ev)=>{
+    const finish=()=>{
+      window.__SETCA_SCENE_LOADING=false;
+      loadFileInput.disabled=false;importFileInput.disabled=false;
+      loadFileInput.value='';importFileInput.value='';
+    };
+    reader.onerror=()=>{status.textContent='No se pudo leer el archivo.';finish();};
+    reader.onload = async (ev)=>{
       try{
         const data = JSON.parse(ev.target.result);
         let scene = data && typeof data === 'object' && data.scene ? data.scene : data;
@@ -22943,7 +23690,7 @@ document.addEventListener('keydown', (ev)=>{
           (Array.isArray(scene[key]) ? scene[key] : []).some(entity=>entity && !window.__SETCA_normalizeTeam(entity.team)));
         const warnings = [];
         if(missingTeam) warnings.push('Los elementos sin equipo se asignarán a ' + window.__SETCA_teamLabel(declaredTeam || currentTeam) + '.');
-        if(originalTeams.some(team=>team !== currentTeam)) warnings.push('El archivo contiene ' + originalTeams.map(window.__SETCA_teamLabel).join(', ') + '. Se conservarán esos equipos; tu sesión seguirá en ' + window.__SETCA_teamLabel(currentTeam) + '.');
+        if(currentTeam!=='white' && originalTeams.some(team=>team !== currentTeam)) warnings.push('El archivo contiene ' + originalTeams.map(window.__SETCA_teamLabel).join(', ') + '. Se conservarán esos equipos; tu sesión seguirá en ' + window.__SETCA_teamLabel(currentTeam) + '.');
         if(warnings.length && !window.confirm(warnings.join('\n') + '\n¿Continuar?')) return;
         scene = window.__SETCA_prepareSceneTeams(cloneDeep(scene), declaredTeam || currentTeam);
 
@@ -22951,21 +23698,21 @@ document.addEventListener('keydown', (ev)=>{
           const merged = mergeSceneIntoCurrent(scene);
           if(typeof scene.showAwacsCoverage === 'boolean' && !st.showAwacsCoverage) st.showAwacsCoverage = !!scene.showAwacsCoverage;
           refreshImportedScene();
-          alert(`Mapa importado correctamente. Añadidos: ${merged.planes.length} aeronaves, ${merged.drawings.length} gráficos, ${merged.gtc.length} GTC, ${merged.pairs.length} emparejamientos y ${merged.missiles.length} misiles.`);
+          if(window._SETCA_SYNC) await window._SETCA_SYNC.pushNow();
+          status.textContent=`Misión añadida: ${merged.planes.length} aeronaves · ${merged.gtc.length} GTC.`;
           return;
         }
 
         replaceScene(scene);
+        st.exerciseId='exercise_'+Date.now().toString(36)+'_'+Math.random().toString(36).slice(2,6);
         if(typeof scene.showAwacsCoverage === 'boolean') st.showAwacsCoverage = !!scene.showAwacsCoverage;
         refreshImportedScene();
-        alert('Mapa cargado correctamente. Equipos: ' + (window.__SETCA_sceneTeams(scene).map(window.__SETCA_teamLabel).join(', ') || window.__SETCA_teamLabel(scene.team)) + '.');
+        if(window._SETCA_SYNC) await window._SETCA_SYNC.pushNow();
+        status.textContent='Misión cargada: ' + (window.__SETCA_sceneTeams(scene).map(window.__SETCA_teamLabel).join(', ') || window.__SETCA_teamLabel(scene.team)) + '.';
       }catch(err){
-        alert('Error al cargar el archivo: '+err.message);
+        status.textContent='Error al cargar la misión: '+err.message;
       }finally{
-        try{
-          if(mode === 'merge') importFileInput.value = '';
-          else loadFileInput.value = '';
-        }catch(_){ }
+        finish();
       }
     };
     reader.readAsText(file);
@@ -23071,13 +23818,23 @@ document.addEventListener('keydown', (ev)=>{
         <div class="setca-entry-teams" role="group" aria-label="Elegir equipo">
           <button type="button" class="setca-entry-card" data-gate-team="blue" aria-label="TEAM BLUE" aria-pressed="false"><strong>TEAM BLUE</strong><small>Bando azul</small></button>
           <button type="button" class="setca-entry-card" data-gate-team="red" aria-label="TEAM RED" aria-pressed="false"><strong>TEAM RED</strong><small>Bando rojo</small></button>
+          <button type="button" class="setca-entry-card" data-gate-team="white" aria-label="WHITE TEAM" aria-pressed="false" hidden><strong>WHITE TEAM</strong><small>Instructor General BLUE + RED</small></button>
         </div>
-        <div id="gateTeamHint" class="setca-step-hint">Selecciona BLUE o RED.</div>
+        <div id="gateTeamHint" class="setca-step-hint">Selecciona BLUE, RED o WHITE.</div>
+        <div id="gateExcsWhiteAccess" class="setca-white-access" hidden>
+          <label for="gateExcsWhitePassword">CLAVE DE INSTRUCTOR GENERAL WHITE
+            <input id="gateExcsWhitePassword" class="ghost focusable" type="password" autocomplete="current-password" placeholder="SETCA-WHITE-2026">
+          </label>
+          <button type="button" id="gateExcsWhiteValidate" class="btn mini focusable">INGRESAR WHITE</button>
+          <button type="button" id="gateExcsWhiteCancel" class="btn mini focusable ghost">CANCELAR</button>
+          <span id="gateExcsWhiteError" role="alert" aria-live="polite"></span>
+        </div>
       </section>
       <section id="gateStep2" class="setca-entry-section" aria-labelledby="gateRoleTitle">
         <h3 id="gateRoleTitle">02 · ELIGE TU ROL</h3>
         <div class="setca-entry-roles" role="group" aria-label="Elegir rol">
           <button type="button" class="setca-entry-card" data-gate-role="default" aria-label="INSTRUCTOR" aria-pressed="false"><strong>INSTRUCTOR</strong><small>Dirigir el entrenamiento</small></button>
+          <button type="button" class="setca-entry-card" data-gate-role="pseudopilot" aria-label="PSEUDO PILOTO" aria-pressed="false"><strong>PSEUDO PILOTO</strong><small>Vista HUD de una aeronave del bando</small></button>
           <button type="button" class="setca-entry-card" data-gate-role="odi" aria-label="ODI-CO" aria-pressed="false"><strong>ODI-CO</strong><small>Control de interceptación</small></button>
           <button type="button" class="setca-entry-card" data-gate-role="atc" aria-label="ATC" aria-pressed="false"><strong>ATC</strong><small>Control de tránsito aéreo</small></button>
           <button type="button" class="setca-entry-card" data-gate-role="odt" aria-label="ODT" aria-pressed="false"><strong>ODT</strong><small>Trabajo de trazas</small></button>
@@ -23102,6 +23859,7 @@ document.addEventListener('keydown', (ev)=>{
             <h4>RED TEAM</h4>
             <div class="setca-excs-limits">
               <label class="setca-excs-limit"><span>INSTRUCTOR</span><input type="number" min="1" max="20" value="1" data-excs-limit-team="red" data-excs-limit-role="default"></label>
+              <label class="setca-excs-limit"><span>PSEUDO PILOTO</span><input type="number" min="0" max="50" value="10" data-excs-limit-team="red" data-excs-limit-role="pseudopilot"></label>
               <label class="setca-excs-limit"><span>ODI-CO</span><input type="number" min="0" max="50" value="10" data-excs-limit-team="red" data-excs-limit-role="odi"></label>
               <label class="setca-excs-limit"><span>ATC</span><input type="number" min="0" max="50" value="10" data-excs-limit-team="red" data-excs-limit-role="atc"></label>
               <label class="setca-excs-limit"><span>ODT</span><input type="number" min="0" max="50" value="10" data-excs-limit-team="red" data-excs-limit-role="odt"></label>
@@ -23114,6 +23872,7 @@ document.addEventListener('keydown', (ev)=>{
             <h4>BLUE TEAM</h4>
             <div class="setca-excs-limits">
               <label class="setca-excs-limit"><span>INSTRUCTOR</span><input type="number" min="1" max="20" value="1" data-excs-limit-team="blue" data-excs-limit-role="default"></label>
+              <label class="setca-excs-limit"><span>PSEUDO PILOTO</span><input type="number" min="0" max="50" value="10" data-excs-limit-team="blue" data-excs-limit-role="pseudopilot"></label>
               <label class="setca-excs-limit"><span>ODI-CO</span><input type="number" min="0" max="50" value="10" data-excs-limit-team="blue" data-excs-limit-role="odi"></label>
               <label class="setca-excs-limit"><span>ATC</span><input type="number" min="0" max="50" value="10" data-excs-limit-team="blue" data-excs-limit-role="atc"></label>
               <label class="setca-excs-limit"><span>ODT</span><input type="number" min="0" max="50" value="10" data-excs-limit-team="blue" data-excs-limit-role="odt"></label>
@@ -23344,7 +24103,8 @@ let presenceDisconnectRoom = '';
 signInAnonymously(auth).catch(console.error);
 onAuthStateChanged(auth, u=>{
   if(!u) return;
-  uid = u.uid;
+  uid = currentRoom.toLowerCase()==='excs' ? u.uid+'_'+(window.__SETCA_stateClientId||Date.now()) : u.uid;
+  window.__SETCA_presenceUid=uid;
   startPresence();
 });
 
@@ -23566,8 +24326,9 @@ import { getDatabase, ref, onValue, set } from "https://www.gstatic.com/firebase
 
   const ACTIVE_MS = 20000;
   const ROLE_LABELS = Object.freeze({
-    white:'ÁRBITRO WHITE TEAM',
+    white:'INSTRUCTOR GENERAL WHITE',
     default:'INSTRUCTOR',
+    pseudopilot:'PSEUDO PILOTO',
     samallocator:'SAM ALOCATOR',
     observer:'OBSERVADOR',
     odi:'ODI-CO',
@@ -23577,10 +24338,10 @@ import { getDatabase, ref, onValue, set } from "https://www.gstatic.com/firebase
   const TIERS = Object.freeze([
     { label:'1. WHITE TEAM', roles:['white'] },
     { label:'2. INSTRUCTORES', roles:['default'] },
-    { label:'3. SAM ALLOCATOR / OBSERVADOR', roles:['samallocator','observer'] },
+    { label:'3. PSEUDO PILOTO / SAM / OBSERVADOR', roles:['pseudopilot','samallocator','observer'] },
     { label:'4. ODI-CO / ATC / ODT', roles:['odi','atc','odt'] }
   ]);
-  const EXCS_TEAM_ROLES = Object.freeze(['default','odi','atc','odt','samallocator','observer']);
+  const EXCS_TEAM_ROLES = Object.freeze(['default','pseudopilot','odi','atc','odt','samallocator','observer']);
 
   let roomId = '';
   let usersValue = {};
@@ -25937,9 +26698,9 @@ document.querySelectorAll('#pCmdBody .btn').forEach(btn=>{
     }catch(_){ return false; }
   }
   function aircraftDeferredLabel(){
-    if(isPlanningAircraftContext()) return 'Planning Tool: Enter aplica y cierra (local, pausado)';
-    if(isFreePlayAircraftContext()) return 'Free Play: Enter aplica y cierra (solo local)';
-    return 'Instructor: Enter aplica y cierra';
+    if(isPlanningAircraftContext()) return 'Planning Tool: CERRAR aplica todos los cambios (local, pausado)';
+    if(isFreePlayAircraftContext()) return 'Free Play: CERRAR aplica todos los cambios (solo local)';
+    return 'CERRAR aplica todos los cambios en una sola operación';
   }
 
   function ensureOdiBeMenu(){
@@ -26248,20 +27009,18 @@ document.querySelectorAll('#pCmdBody .btn').forEach(btn=>{
         if(act === 'delete'){ deleteTargetPlane(); return; }
         if(act === 'apply'){
           applyMenuValues();
-          if(isAircraftDeferredContext()) hideMenu();
+          hideMenu();
           return;
         }
-        if(act === 'fire'){ applyMenuValues(); fireMenuMissile(); return; }
+        if(act === 'fire'){ fireMenuMissile(); return; }
         if(act === 'close'){
-          if(!isAircraftDeferredContext()) applyMenuValues();
+          applyMenuValues();
           hideMenu();
         }
       }, true);
       menu.addEventListener('keydown', (e)=>{
         if(e.key === 'Enter'){
           consume(e);
-          applyMenuValues();
-          if(isAircraftDeferredContext()) hideMenu();
         }else if(e.key === 'Escape'){
           consume(e);
           hideMenu();
@@ -26274,8 +27033,7 @@ document.querySelectorAll('#pCmdBody .btn').forEach(btn=>{
           const v = sanitizeXpdr(t.value);
           if(t.value !== v) t.value = v;
         }
-        if(isAircraftDeferredContext()) return;
-        applyMenuValues();
+        menu.dataset.setcaDraftDirty = '1';
       }, true);
       menu.addEventListener('input', (e)=>{
         const t = e.target;
@@ -26288,6 +27046,7 @@ document.querySelectorAll('#pCmdBody .btn').forEach(btn=>{
           const v = String(t.value || '').replace(/\D/g, '').slice(0, 3);
           if(t.value !== v) t.value = v;
         }
+        menu.dataset.setcaDraftDirty = '1';
       }, true);
     }
     return menu;
@@ -26428,12 +27187,7 @@ document.querySelectorAll('#pCmdBody .btn').forEach(btn=>{
       arrivalBtn.setAttribute('aria-pressed',procedureLabel === 'ARR' ? 'true' : 'false');
     }
     if(hint){
-      let text = isAircraftDeferredContext() ? aircraftDeferredLabel() : 'Cambios sincronizados';
-      try{
-        if(window.__SETCA_isPlanningMode && window.__SETCA_isPlanningMode()) text = 'Planning Tool: aplicación inmediata';
-        else if(window.__SETCA_isFreePlayMode && window.__SETCA_isFreePlayMode()) text = 'Free Play: cambios locales';
-      }catch(_){ }
-      hint.textContent = text;
+      hint.textContent = aircraftDeferredLabel();
     }
     if(enemyContact){
       if(hint) hint.textContent = 'Clasificación compartida solo con ' + window.__SETCA_teamLabel(window.__SETCA_getCurrentTeam());
@@ -26546,6 +27300,7 @@ document.querySelectorAll('#pCmdBody .btn').forEach(btn=>{
     const m = ensureMenu();
     targetPlaneId = p.id;
     populateMenu(p);
+    m.dataset.setcaDraftDirty = '0';
     const pad = 8;
     m.style.display = 'block';
     m.style.left = '0px';
@@ -26614,12 +27369,9 @@ document.querySelectorAll('#pCmdBody .btn').forEach(btn=>{
     const m = ensureMenu();
     if(m.style.display === 'none') return;
     if(m.contains(e.target)) return;
-    if(isAircraftDeferredContext()) return;
-    try{ applyMenuValues(); }catch(_){ }
     hideMenu();
   }, true);
-  addEventListener('blur', ()=>{ if(isAircraftDeferredContext()) return; try{ applyMenuValues(); }catch(_){ } hideMenu(); }, true);
-  addEventListener('scroll', ()=>{ if(isAircraftDeferredContext()) return; try{ applyMenuValues(); }catch(_){ } hideMenu(); }, true);
+  addEventListener('blur', (e)=>{ if(e.target === window) hideMenu(); }, false);
 
   cvs.addEventListener('contextmenu', (e)=>{
     if(window.st && st.modoObservador) return;
@@ -26905,7 +27657,7 @@ function gtcLaunchMissile(u, opts={}){
     if(!u || !u.id) return false;
     const launchOpts = (opts && typeof opts === 'object') ? opts : {};
     const accessRole = String(((window.__setcaAccess||{}).role)||'').toLowerCase();
-    const userCanLaunch = accessRole === 'default' || accessRole === 'odt' || accessRole === 'samallocator';
+    const userCanLaunch = accessRole === 'default' || accessRole === 'odt' || accessRole === 'samallocator' || !!(window.__SETCA_isExcsWhiteController && window.__SETCA_isExcsWhiteController());
     if(!userCanLaunch){
       try{ logEvent(`LANZAMIENTO GTC bloqueado: solo ODT, SAM ALOCATOR e INSTRUCTOR pueden disparar.`); }catch(_){ }
       return false;
@@ -28180,7 +28932,7 @@ import { getAuth } from "https://www.gstatic.com/firebasejs/10.12.3/firebase-aut
   const PRESET_ROOMS = [EXCS_ROOM_ID,'sala-default','alfa','bravo','charlie','delta','eco','foxtrot','golf','hotel','india','juliet'];
   const GATE_KEY = 'setca_access_gate_v3';
   const MASTER_ACCESS_KEY = 'SETCA-2026';
-  const VALID_ACCESS_ROLES = new Set(['default','odi','atc','odt','samallocator','observer']);
+  const VALID_ACCESS_ROLES = new Set(['default','pseudopilot','odi','atc','odt','samallocator','observer']);
   const body = document.body;
   const gate = document.getElementById('setcaAccessGate');
   const roomBadge = document.getElementById('setcaGateRoomBadge');
@@ -28204,7 +28956,13 @@ import { getAuth } from "https://www.gstatic.com/firebasejs/10.12.3/firebase-aut
   const briefNote = document.getElementById('gateBriefNote');
   const briefSummary = document.getElementById('gateBriefSummary');
   const teamCards = Array.from(gate.querySelectorAll('[data-gate-team]'));
+  const teamCardsGrid = gate.querySelector('.setca-entry-teams');
   const roleCards = Array.from(gate.querySelectorAll('[data-gate-role]'));
+  const excsWhiteAccess = document.getElementById('gateExcsWhiteAccess');
+  const excsWhitePassword = document.getElementById('gateExcsWhitePassword');
+  const excsWhiteValidate = document.getElementById('gateExcsWhiteValidate');
+  const excsWhiteCancel = document.getElementById('gateExcsWhiteCancel');
+  const excsWhiteError = document.getElementById('gateExcsWhiteError');
   const excsBrief = document.getElementById('gateExcsBrief');
   const excsModeLabel = document.getElementById('gateExcsModeLabel');
   const excsStatus = document.getElementById('gateExcsStatus');
@@ -28253,8 +29011,8 @@ import { getAuth } from "https://www.gstatic.com/firebasejs/10.12.3/firebase-aut
   let gateDestination = 'training';
   let gateEntryBusy = false;
   let editMode = false;
-  const EXCS_ROLES = ['default','odi','atc','odt','samallocator','observer'];
-  const EXCS_DEFAULT_LIMITS = Object.freeze({default:1, odi:10, atc:10, odt:10, samallocator:10, observer:10});
+  const EXCS_ROLES = ['default','pseudopilot','odi','atc','odt','samallocator','observer'];
+  const EXCS_DEFAULT_LIMITS = Object.freeze({default:1, pseudopilot:10, odi:10, atc:10, odt:10, samallocator:10, observer:10});
   let excsMode = '';
   let excsConfig = null;
   let excsWaiting = {};
@@ -28290,7 +29048,7 @@ import { getAuth } from "https://www.gstatic.com/firebasejs/10.12.3/firebase-aut
     return 'neutral';
   }
   function roleToLabel(v){
-    return ({odi:'ODI-CO', atc:'ATC', odt:'ODT', samallocator:'SAM ALLOCATOR', observer:'OBSERVADOR', default:'INSTRUCTOR', white:'ÁRBITRO WHITE TEAM'})[v] || 'INSTRUCTOR';
+    return ({pseudopilot:'PSEUDO PILOTO', odi:'ODI-CO', atc:'ATC', odt:'ODT', samallocator:'SAM ALLOCATOR', observer:'OBSERVADOR', default:'INSTRUCTOR', white:'INSTRUCTOR GENERAL WHITE'})[v] || 'INSTRUCTOR';
   }
   function sideToLabel(v){
     return ({ally:'ALIADO', enemy:'ENEMIGO', neutral:'NEUTRAL'})[normalizeSide(v)] || 'NEUTRAL';
@@ -28327,10 +29085,13 @@ import { getAuth } from "https://www.gstatic.com/firebasejs/10.12.3/firebase-aut
     return 'Friend';
   };
   function baseCanSeePlane(p){
-    // WHITE TEAM arbitra EXCS con cuadro completo; los demás solo ven medios propios de inmediato.
+    // WHITE es Instructor General y recibe el cuadro completo de BLUE + RED.
+    // En EXCS todos los puestos ven de inmediato las aeronaves de su propio bando;
+    // las del rival continúan sujetas a cobertura y adquisición radar/AWACS/GTC.
     const access = window.__setcaAccess || {};
     if(window.__SETCA_getCurrentTeam && window.__SETCA_getCurrentTeam() === 'white' && access.whiteAccess === true) return true;
     const own = !p || !window.__SETCA_isOwnTeam || window.__SETCA_isOwnTeam(p);
+    if(String(access.room || '').toLowerCase() === 'excs' && own) return true;
     return own && (!!access.planning || String(access.role || '').toLowerCase() === 'default');
   }
   window.__SETCA_hasFullAircraftVisibility = baseCanSeePlane;
@@ -28500,6 +29261,10 @@ import { getAuth } from "https://www.gstatic.com/firebasejs/10.12.3/firebase-aut
     return !!(access && String(access.role || '').toLowerCase() === 'white' &&
       window.__SETCA_normalizeTeam(access.team) === 'white' && String(access.room || '').toLowerCase() === EXCS_ROOM_ID && access.whiteAccess === true);
   }
+  function __clearExcsWhiteAccess(){
+    if(excsWhitePassword) excsWhitePassword.value = '';
+    if(excsWhiteError) excsWhiteError.textContent = '';
+  }
   function saveSession(access){
     try{ sessionStorage.setItem(GATE_KEY, JSON.stringify({...access, team:window.__SETCA_participantTeam(access.team)})); }catch(_){ }
   }
@@ -28652,7 +29417,8 @@ import { getAuth } from "https://www.gstatic.com/firebasejs/10.12.3/firebase-aut
     excsConfig = __normalizeExcsConfig(excsConfig);
     const rows = __freshExcsRows();
     const state = __excsReadiness();
-    if(excsModeLabel) excsModeLabel.textContent = excsMode === 'white' ? '' : 'Selecciona bando y rol; entrarás al mapa bajo control de WHITE TEAM';
+    const whiteChoice = window.__SETCA_normalizeTeam(gateState.team) === 'white' && excsMode !== 'white';
+    if(excsModeLabel) excsModeLabel.textContent = excsMode === 'white' ? '' : (whiteChoice ? 'WHITE TEAM · valida la clave de Instructor General' : 'Selecciona bando y rol; entrarás al mapa bajo control de WHITE TEAM');
     if(excsTitleEditor) excsTitleEditor.hidden = excsMode !== 'white';
     if(excsTitleInput){
       if(!excsTitleDirty) excsTitleInput.value = __normalizeExcsTitle(excsTitleValue);
@@ -28679,6 +29445,7 @@ import { getAuth } from "https://www.gstatic.com/firebasejs/10.12.3/firebase-aut
       excsStatus.hidden = excsMode === 'white';
       if(excsMode === 'white') excsStatus.textContent = '';
       else if(excsAwaitingStart) excsStatus.textContent = 'Puesto confirmado. Abriendo el mapa de tu bando…';
+      else if(whiteChoice) excsStatus.textContent = 'WHITE TEAM requiere la clave del Instructor General para controlar BLUE y RED.';
       else excsStatus.textContent = 'Elige TEAM BLUE o TEAM RED y un rol. Confirma tu puesto para aparecer en este Briefing Room.';
     }
     if(excsBriefingText){
@@ -28789,25 +29556,90 @@ import { getAuth } from "https://www.gstatic.com/firebasejs/10.12.3/firebase-aut
     const paused = !!active;
     const callsign = gateState.callsign.trim() || String((window.__setcaAccess && window.__setcaAccess.callsign) || 'WHITE TEAM');
     const now = Date.now();
-    await runTransaction(ref(db, `rooms/${EXCS_ROOM_ID}/state`), current=>{
+    const localClock = window.st && st.excsClock;
+    const previousPause = window.st && st.serverPause;
+    const elapsed = localClock ? Number(localClock.elapsed||0)+((previousPause && previousPause.active)?0:Math.max(0,now-Number(localClock.startedAt||now))) : Number(window.st && st.elapsed || 0);
+    // Respuesta local inmediata: el mapa no espera la red para pausar o continuar.
+    try{
+      if(window.st){
+        st.serverPause = paused ? {active:true,callsign,startedAt:now,whiteControlled:true} : null;
+        st.globalStarted = !paused;
+        st.excsClock = {elapsed,startedAt:now};
+        st.paused = false;
+        if(st.localPause){
+          st.localPause = false;
+          try{ if(typeof __clearLocalPauseSnapshot === 'function') __clearLocalPauseSnapshot(); }catch(_){ }
+        }
+        if(!paused){
+          try{ st.t0 = performance.now() - (Number(st.elapsed || 0) || 0); }catch(_){ }
+        }
+        if(typeof __setLocalPauseUI === 'function') __setLocalPauseUI();
+      }
+    }catch(_){ }
+    const result = await runTransaction(ref(db, `rooms/${EXCS_ROOM_ID}/state`), current=>{
       const next = current && typeof current === 'object' ? {...current} : {};
+      const clock = next.excsClock;
+      const total = clock ? Number(clock.elapsed||0)+((next.serverPause && next.serverPause.active)?0:Math.max(0,now-Number(clock.startedAt||now))) : elapsed;
+      next.excsClock = {elapsed:total,startedAt:now};
       next.serverPause = paused ? {active:true,callsign,startedAt:now,whiteControlled:true} : null;
       next.globalStarted = !paused;
       next.lastWriteBy = (auth.currentUser && auth.currentUser.uid) || 'white-team';
+      next.lastWriteClient = window.__SETCA_stateClientId || 'white-access';
       next.lastWriteRole = 'white';
       next.instructorAuthority = true;
       next.lastUpdate = now;
       return next;
     });
+    if(result && result.committed === false) throw new Error('La pausa general no se pudo sincronizar.');
+    if(result && result.snapshot && window.st){
+      const committed=result.snapshot.val();
+      if(committed && committed.excsClock) st.excsClock={...committed.excsClock};
+    }
+    // Compatibilidad con el iniciador antiguo: EXCS ya quedó explícitamente
+    // gobernado por WHITE y no debe auto-pausarse otra vez después de PLAY GLOBAL.
     try{
-      if(window.st){
-        st.serverPause = paused ? {active:true,callsign,startedAt:now,whiteControlled:true} : null;
-        st.globalStarted = !paused;
-        st.paused = false;
-        if(typeof __setLocalPauseUI === 'function') __setLocalPauseUI();
-      }
+      const key = 'setca_global_started_v43_3_' + EXCS_ROOM_ID;
+      if(paused) localStorage.removeItem(key); else localStorage.setItem(key, '1');
     }catch(_){ }
     return true;
+  }
+  window.__SETCA_setExcsGlobalPause = function(active){
+    if(!window.__SETCA_isExcsWhiteController()) return Promise.resolve(false);
+    return __setExcsGlobalPause(active);
+  };
+  async function __enterExcsWhiteFromBrief(){
+    if(gateEntryBusy || gateStage !== 'brief' || !isExcsSelection()) return false;
+    const entered = String(excsWhitePassword && excsWhitePassword.value || '').trim();
+    if(entered !== EXCS_WHITE_PASSWORD){
+      if(excsWhiteError) excsWhiteError.textContent = 'Clave WHITE incorrecta.';
+      if(excsWhitePassword){ excsWhitePassword.select(); excsWhitePassword.focus(); }
+      return false;
+    }
+    gateEntryBusy = true;
+    if(excsWhiteError) excsWhiteError.textContent = '';
+    excsMode = 'white';
+    safeSetGateState({team:'white',role:'white'});
+    updateGateUI();
+    try{
+      // WHITE entra directamente al mapa como Instructor General. La pausa
+      // inicial se libera después únicamente desde PLAY GLOBAL en la cabecera.
+      await runTransaction(ref(db, `rooms/${EXCS_ROOM_ID}/briefRoom/exercise`), current=>({
+        ...((current && typeof current === 'object') ? current : {}),
+        phase:'preparing', preparedAt:Date.now(), preparedBy:gateState.callsign.trim() || 'WHITE TEAM'
+      }));
+      await __setExcsGlobalPause(true);
+      await __completeExcsEntry(true, true);
+      return true;
+    }catch(err){
+      console.error(err);
+      excsMode = 'participant';
+      safeSetGateState({team:'',role:''});
+      setError('No se pudo iniciar el acceso WHITE. Revisa la conexión.');
+      return false;
+    }finally{
+      gateEntryBusy = false;
+      updateGateUI();
+    }
   }
   async function __completeExcsEntry(isWhite, preparation=false){
     if(excsEntryCompleting) return;
@@ -28841,32 +29673,15 @@ import { getAuth } from "https://www.gstatic.com/firebasejs/10.12.3/firebase-aut
       await __completeExcsEntry(false);
       return;
     }
-    if(excsMode !== 'white'){ setError('Acceso EXCS no autorizado.'); return; }
-    // GO nunca depende de completar los cupos: quienes falten pueden ingresar
-    // progresivamente al ejercicio ya iniciado y recibir el estado vivo.
-    await __saveExcsWhiteDrafts();
-    await set(ref(db, `rooms/${EXCS_ROOM_ID}/briefRoom/exercise`), {phase:'running', roundId:'excs-'+Date.now().toString(36), startedAt:Date.now(), startedBy:gateState.callsign.trim(), limits:excsConfig, title:__currentExcsTitle()});
-    await __setExcsGlobalPause(false);
-    // No se cambia de rol ni se recarga: WHITE continúa como Instructor superior.
-    try{
-      const access = window.__setcaAccess || {};
-      access.excsPreparation = true;
-      access.exerciseName = __currentExcsTitle();
-      saveSession({...access,ts:Date.now()});
-      buildHeaderChip(access);
-    }catch(_){ }
-    __stopExcsBriefListeners(false);
-    gate.classList.remove('open');
-    gate.setAttribute('aria-hidden','true');
-    body.classList.remove('setca-access-locked');
-    editMode = false;
+    // WHITE no dispone de GO dentro del Briefing. Solo PLAY/PAUSA GLOBAL,
+    // ubicado en la cabecera del mapa, controla el reloj de toda la sala.
+    return;
   }
   async function __handleExcsPreparation(){
     if(excsMode !== 'white'){ setError('Acceso EXCS no autorizado.'); return; }
     await __saveExcsWhiteDrafts();
     await set(ref(db, `rooms/${EXCS_ROOM_ID}/briefRoom/exercise`), {phase:'preparing', preparedAt:Date.now(), preparedBy:gateState.callsign.trim(), limits:excsConfig, title:__currentExcsTitle()});
-    await __setExcsGlobalPause(true);
-    // El escenario se prepara sobre el mismo mapa vivo, sin reinicios.
+    // Compilar solo guarda/cierra el briefing. No altera la pausa general.
     __stopExcsBriefListeners(false);
     gate.classList.remove('open');
     gate.setAttribute('aria-hidden','true');
@@ -28880,6 +29695,8 @@ import { getAuth } from "https://www.gstatic.com/firebasejs/10.12.3/firebase-aut
     const training = gateDestination === 'training';
     const excs = inBrief && isExcsSelection();
     const whiteExcs = excs && excsMode === 'white';
+    const whiteChoice = excs && team === 'white' && !whiteExcs;
+    const excsRoomSelected = training && gateMode === 'join' && String(gateState.room || '').toLowerCase() === EXCS_ROOM_ID;
     const teamReady = whiteExcs || ['blue','red'].includes(team);
     const chosenRole = planning ? 'default' : (whiteExcs ? 'white' : validAccessRole(gateState.role));
     const roleReady = !!chosenRole;
@@ -28903,17 +29720,24 @@ import { getAuth } from "https://www.gstatic.com/firebasejs/10.12.3/firebase-aut
     gateDescription.textContent = !inBrief
       ? ''
       : planning ? 'Elige el equipo para tu planificación. Entrarás como instructor, con todo pausado.'
-      : excs ? (whiteExcs ? '' : 'Elige bando y rol. Entrarás a tu mapa; el ejercicio seguirá en pausa hasta que WHITE TEAM pulse GO.')
+      : excs ? (whiteExcs ? '' : 'Elige TEAM BLUE, TEAM RED o WHITE TEAM. WHITE es el Instructor General de ambos bandos.')
       : 'Elige tu bando y el rol que vas a desempeñar. Pulsa GO cuando estés listo.';
     gateDescription.hidden = !gateDescription.textContent;
     teamSelect.value = team;
     roleSelect.value = chosenRole;
     stepEls.team.hidden = whiteExcs;
-    stepEls.role.hidden = planning || whiteExcs;
+    stepEls.role.hidden = planning || whiteExcs || whiteChoice;
+    if(teamCardsGrid) teamCardsGrid.classList.toggle('setca-excs-three-teams', excs);
     teamCards.forEach(card=>{
+      const isWhiteCard = card.dataset.gateTeam === 'white';
+      card.hidden = isWhiteCard && !excs;
       card.setAttribute('aria-pressed', String(card.dataset.gateTeam === team));
       card.disabled = gateEntryBusy || whiteExcs || excsAwaitingStart;
     });
+    if(excsWhiteAccess) excsWhiteAccess.hidden = !whiteChoice;
+    if(excsWhitePassword) excsWhitePassword.disabled = !whiteChoice || gateEntryBusy;
+    if(excsWhiteValidate) excsWhiteValidate.disabled = !whiteChoice || gateEntryBusy;
+    if(excsWhiteCancel) excsWhiteCancel.disabled = !whiteChoice || gateEntryBusy;
     roleCards.forEach(card=>{
       const cap = excs && teamReady && ['blue','red'].includes(team) ? Number((excsConfig || __excsDefaultConfig())[team][card.dataset.gateRole] || 0) : Infinity;
       const used = excs && teamReady && ['blue','red'].includes(team) ? Number(__excsCounts()[team][card.dataset.gateRole] || 0) : 0;
@@ -28923,7 +29747,8 @@ import { getAuth } from "https://www.gstatic.com/firebasejs/10.12.3/firebase-aut
       card.disabled = !teamReady || gateEntryBusy || occupied || full || whiteExcs || excsAwaitingStart;
       card.title = occupied ? 'Instructor del bando: ' + selectedInstructor : (full ? 'Cupo completo para este rol.' : '');
     });
-    hints.team.textContent = teamReady ? window.__SETCA_teamLabel(team) + ' seleccionado.' : 'Selecciona BLUE o RED para continuar.';
+    hints.team.textContent = whiteChoice ? 'WHITE TEAM seleccionado · ingresa la clave para continuar como Instructor General.'
+      : teamReady ? window.__SETCA_teamLabel(team) + ' seleccionado.' : (excs ? 'Selecciona BLUE, RED o WHITE para continuar.' : 'Selecciona BLUE o RED para continuar.');
     hints.role.textContent = instructorOccupied ? 'La sala ya tiene instructor: ' + selectedInstructor + '. Elige otro rol o vuelve para cambiar de sala.'
       : roleReady ? 'Rol elegido: ' + roleToLabel(chosenRole) : teamReady ? 'Selecciona el puesto que vas a desempeñar.' : 'Primero selecciona tu bando.';
     briefCallsign.textContent = 'CALLSIGN · ' + (gateState.callsign.trim() || (planning ? 'PLANIFICADOR' : '—'));
@@ -28940,6 +29765,7 @@ import { getAuth } from "https://www.gstatic.com/firebasejs/10.12.3/firebase-aut
       excsPrepareBtn.disabled = !inBrief || !whiteExcs || gateEntryBusy;
       excsPrepareBtn.textContent = gateEntryBusy ? 'PROCESANDO…' : 'COMPILAR MISIONES';
     }
+    goBtn.hidden = !!whiteExcs;
     goBtn.disabled = !inBrief || !ready || gateEntryBusy;
     goBtn.textContent = gateEntryBusy ? 'PROCESANDO…' : (excs && !whiteExcs ? (excsAwaitingStart ? 'ABRIENDO MAPA…' : 'CONFIRMAR PUESTO') : 'GO');
     briefBackBtn.disabled = gateEntryBusy;
@@ -28951,10 +29777,9 @@ import { getAuth } from "https://www.gstatic.com/firebasejs/10.12.3/firebase-aut
     createTab.disabled = !callsignReady;
     // La clave de una sala privada puede escribirse apenas se selecciona la sala;
     // el callsign solo se exige al pulsar Ingresar.
-    joinPasswordInput.disabled = gateEntryBusy || !gateState.room || gateMode !== 'join';
-    joinPasswordInput.placeholder = selectedRoomMeta && selectedRoomMeta.special
-      ? 'Clave EXCS o clave WHITE TEAM'
-      : 'Clave de sala (si aplica)';
+    joinPasswordInput.hidden = !!excsRoomSelected;
+    joinPasswordInput.disabled = gateEntryBusy || !gateState.room || gateMode !== 'join' || excsRoomSelected;
+    joinPasswordInput.placeholder = 'Clave de sala (si aplica)';
     createRoomInput.disabled = !callsignReady || gateMode !== 'create';
     createPasswordInput.disabled = !callsignReady || gateMode !== 'create';
     refreshRoomsBtn.disabled = gateEntryBusy;
@@ -28972,7 +29797,7 @@ import { getAuth } from "https://www.gstatic.com/firebasejs/10.12.3/firebase-aut
 
     hints.callsign.textContent = callsignReady ? 'Callsign listo: ' + gateState.callsign.trim() : 'Ingresa un callsign de al menos 2 caracteres.';
     hints.join.textContent = gateState.room
-      ? ('Sala elegida: ' + roomLabel(gateState.room) + (selectedRoomMeta && selectedRoomMeta.private ? ' · escribe la clave y pulsa Ingresar.' : ''))
+      ? (excsRoomSelected ? 'Sala EXCS elegida · selecciona WHITE dentro del Briefing para ingresar su clave.' : ('Sala elegida: ' + roomLabel(gateState.room) + (selectedRoomMeta && selectedRoomMeta.private ? ' · escribe la clave y pulsa Ingresar.' : '')))
       : (callsignReady ? 'Selecciona una sala existente.' : 'Puedes elegir la sala ahora; el callsign será obligatorio para ingresar.');
     hints.create.textContent = callsignReady ? 'Escribe nombre de sala y una clave obligatoria.' : 'Primero define callsign.';
 
@@ -29006,31 +29831,21 @@ import { getAuth } from "https://www.gstatic.com/firebasejs/10.12.3/firebase-aut
       try{
         const check = await verifyJoinRoom(EXCS_ROOM_ID, gateState.joinPassword);
         if(!check.ok){ setError(check.message || 'Clave EXCS incorrecta.'); return; }
-        excsMode = check.accessMode === 'white' ? 'white' : 'participant';
+        // Toda persona entra primero al selector BLUE / RED / WHITE.
+        // La clave especial se solicita únicamente al pulsar WHITE TEAM.
+        excsMode = 'participant';
         excsAwaitingStart = false;
         excsConfig = __excsDefaultConfig();
         excsTitleValue = 'EXCS · BRIEFING ROOM';
         excsTitleDirty = false;
         excsBriefingValue = null;
         excsBriefingDirty = false;
-        if(excsMode === 'white'){
-          safeSetGateState({team:'white', role:'white'});
-          // WHITE abre primero el mapa en pausa; el Briefing Room queda disponible
-          // encima del mapa desde su botón de acceso, sin pantalla intermedia.
-          await runTransaction(ref(db, `rooms/${EXCS_ROOM_ID}/briefRoom/exercise`), current=>({
-            ...((current && typeof current === 'object') ? current : {}),
-            phase:'preparing', preparedAt:Date.now(), preparedBy:gateState.callsign.trim() || 'WHITE TEAM'
-          }));
-          await __setExcsGlobalPause(true);
-          await __completeExcsEntry(true, true);
-          return;
-        }else{
-          const selectedTeam = window.__SETCA_normalizeTeam(gateState.team);
-          // No heredar INSTRUCTOR ni ningún rol de una sesión anterior.
-          // Primero se elige el color y luego cualquiera de los roles disponibles.
-          safeSetGateState({team:['blue','red'].includes(selectedTeam) ? selectedTeam : '', role:''});
-          __startExcsBriefListeners();
-        }
+        const selectedTeam = window.__SETCA_normalizeTeam(gateState.team);
+        // No heredar INSTRUCTOR, WHITE ni ningún rol de una sesión anterior.
+        // Primero se elige uno de los tres equipos; BLUE/RED eligen después su rol.
+        safeSetGateState({team:['blue','red'].includes(selectedTeam) ? selectedTeam : '', role:''});
+        __clearExcsWhiteAccess();
+        __startExcsBriefListeners();
       }finally{
         gateEntryBusy = false;
       }
@@ -29049,6 +29864,7 @@ import { getAuth } from "https://www.gstatic.com/firebasejs/10.12.3/firebase-aut
     if(gateEntryBusy) return;
     __stopExcsBriefListeners(true);
     excsMode = '';
+    __clearExcsWhiteAccess();
     gateStage = 'lobby';
     setError('');
     updateGateUI();
@@ -29168,7 +29984,7 @@ import { getAuth } from "https://www.gstatic.com/firebasejs/10.12.3/firebase-aut
     chip.dataset.team = team;
     const teamLabel = window.__SETCA_teamLabel(team);
     const callsign = __escapeGateHtml(access.callsign);
-    const accessRoleLabel = window.__SETCA_isExcsPseudoPilot && window.__SETCA_isExcsPseudoPilot(access) ? 'PSEUDO-PILOTO' : roleToLabel(access.role);
+    const accessRoleLabel = roleToLabel(access.role);
     if(access && access.planning){
       chip.innerHTML = `<strong>PLANNING TOOL · ${teamLabel}</strong> · ${roleToLabel(access.role)} · ${callsign} · LOCAL · PAUSADO`;
       return;
@@ -29178,7 +29994,7 @@ import { getAuth } from "https://www.gstatic.com/firebasejs/10.12.3/firebase-aut
       return;
     }
     if(window.__SETCA_isExcsWhitePreparation && window.__SETCA_isExcsWhitePreparation(access)){
-      chip.innerHTML = `<strong>WHITE TEAM · INSTRUCTOR SUPERIOR</strong> · ${callsign} · ${__escapeGateHtml(access.exerciseName || 'EXCS')}`;
+      chip.innerHTML = `<strong>WHITE TEAM · INSTRUCTOR GENERAL BLUE + RED</strong> · ${callsign} · ${__escapeGateHtml(access.exerciseName || 'EXCS')}`;
       return;
     }
     chip.innerHTML = `<strong>${teamLabel} · ${accessRoleLabel}</strong> · ${callsign} · ${__escapeGateHtml(access.exerciseName || roomLabel(access.room))}`;
@@ -29189,7 +30005,7 @@ import { getAuth } from "https://www.gstatic.com/firebasejs/10.12.3/firebase-aut
     if(access.planning || access.freeplay) return true;
     if(window.__SETCA_isExcsWhitePreparation && window.__SETCA_isExcsWhitePreparation(access)) return true;
     const role = String(access.role || '').toLowerCase();
-    return role === 'default';
+    return role === 'default' || role === 'pseudopilot';
   }
   try{ window.__SETCA_canInstructorMovePlanes = __SETCA_canInstructorMovePlanes; }catch(_){ }
 
@@ -29355,7 +30171,7 @@ import { getAuth } from "https://www.gstatic.com/firebasejs/10.12.3/firebase-aut
       if(addMission){ addMission.textContent = '2 · SUMAR MISIÓN'; addMission.title = 'Importa la misión del otro bando y la suma al escenario.'; }
       if(exportMission){ exportMission.textContent = '💾 ESCENARIO COMPILADO'; exportMission.title = 'Exporta el escenario BLUE + RED ya compilado.'; }
     }
-    const removePlanesPanel = freeplay || accessRole === 'white' || (!planning && ['default','odi','odico','atc','odt','samallocator'].includes(accessRole));
+    const removePlanesPanel = freeplay || accessRole === 'white' || (!planning && ['default','pseudopilot','odi','odico','atc','odt','samallocator'].includes(accessRole));
     const planesPanel = document.getElementById('pPlanes');
     if(removePlanesPanel){
       if(planesPanel) planesPanel.remove();
@@ -29877,10 +30693,9 @@ import { getAuth } from "https://www.gstatic.com/firebasejs/10.12.3/firebase-aut
 
   async function verifyJoinRoom(roomId, password){
     if(String(roomId || '').toLowerCase() === EXCS_ROOM_ID){
-      const entered = String(password || '');
-      if(entered === EXCS_WHITE_PASSWORD) return {ok:true, private:true, special:true, accessMode:'white'};
-      if(entered === EXCS_ROOM_PASSWORD) return {ok:true, private:true, special:true, accessMode:'participant'};
-      return {ok:false, message:'Clave incorrecta. Usa la clave EXCS de participante o la clave WHITE TEAM autorizada.'};
+      // EXCS abre primero el Briefing bilateral. BLUE y RED eligen allí su rol;
+      // la única clave especial se valida después, al pulsar WHITE TEAM.
+      return {ok:true, private:false, special:true, accessMode:'participant', whitePasswordDeferred:true};
     }
     const metaSnap = await get(ref(db, `rooms_meta/${roomId}`));
     if(!metaSnap.exists()) return { ok:true, private:false };
@@ -30056,8 +30871,6 @@ import { getAuth } from "https://www.gstatic.com/firebasejs/10.12.3/firebase-aut
     __startExcsBriefListeners();
     updateGateUI();
     entryBrief.scrollTop = 0;
-    try{ await __setExcsGlobalPause(true); }
-    catch(err){ console.warn('No se pudo activar la pausa general al abrir el briefing EXCS',err); setError('No se pudo activar la pausa general. Revisa la conexión.'); }
   }
   function openGate(isEdit, focusRoom){
     if(gateEntryBusy) return;
@@ -30106,9 +30919,34 @@ import { getAuth } from "https://www.gstatic.com/firebasejs/10.12.3/firebase-aut
   teamCards.forEach(card=>card.addEventListener('click', ()=>{
     if(gateEntryBusy) return;
     const nextTeam = card.dataset.gateTeam;
+    if(nextTeam === 'white'){
+      if(!isExcsSelection()) return;
+      safeSetGateState({team:'white',role:''});
+      if(excsWhiteError) excsWhiteError.textContent = '';
+      setError('');
+      updateGateUI();
+      setTimeout(()=>{ try{ if(excsWhitePassword) excsWhitePassword.focus(); }catch(_){ } },40);
+      return;
+    }
+    __clearExcsWhiteAccess();
     const teamChanged = window.__SETCA_normalizeTeam(gateState.team) !== window.__SETCA_normalizeTeam(nextTeam);
     safeSetGateState({team:nextTeam, role:(excsMode === 'participant' && teamChanged) ? '' : gateState.role}); setError(''); updateGateUI();
   }));
+  if(excsWhiteValidate) excsWhiteValidate.addEventListener('click', ()=>{ __enterExcsWhiteFromBrief(); });
+  if(excsWhiteCancel) excsWhiteCancel.addEventListener('click', ()=>{
+    if(gateEntryBusy) return;
+    __clearExcsWhiteAccess();
+    safeSetGateState({team:'',role:''});
+    setError('');
+    updateGateUI();
+    const blueCard = teamCards.find(card=>card.dataset.gateTeam === 'blue');
+    if(blueCard) blueCard.focus();
+  });
+  if(excsWhitePassword) excsWhitePassword.addEventListener('keydown', e=>{
+    if(e.key !== 'Enter' || gateEntryBusy) return;
+    e.preventDefault();
+    __enterExcsWhiteFromBrief();
+  });
   roleCards.forEach(card=>card.addEventListener('click', ()=>{
     if(card.disabled || gateEntryBusy || gateDestination === 'planning') return;
     safeSetGateState({role:card.dataset.gateRole}); setError(''); updateGateUI();
@@ -30185,6 +31023,12 @@ import { getAuth } from "https://www.gstatic.com/firebasejs/10.12.3/firebase-aut
     if(e.key !== 'Escape' || gateEntryBusy) return;
     if(gate.classList.contains('open') && gateStage === 'brief'){
       e.preventDefault();
+      if(isExcsSelection() && window.__SETCA_normalizeTeam(gateState.team) === 'white' && excsMode !== 'white'){
+        __clearExcsWhiteAccess();
+        safeSetGateState({team:'',role:''});
+        updateGateUI();
+        return;
+      }
       returnToEntryLobby();
       return;
     }
@@ -30196,6 +31040,7 @@ import { getAuth } from "https://www.gstatic.com/firebasejs/10.12.3/firebase-aut
 
   function __openAccessGateFresh(msg){
     clearSession();
+    __clearExcsWhiteAccess();
     gateStage = 'lobby';
     gateDestination = 'training';
     safeSetGateState({ side:'neutral', team:'', role:'', room: '' });
@@ -30354,7 +31199,7 @@ import { getDatabase, ref, get, set, runTransaction } from "https://www.gstatic.
       .replace(/'/g, '&#39;');
   }
   function roleLabel(v){
-    return ({ default:'INSTRUCTOR', odi:'ODI-CO', atc:'ATC', odt:'ODT', samallocator:'SAM ALOCATOR', observer:'OBSERVADOR' })[String(v || 'default')] || String(v || 'INSTRUCTOR').toUpperCase();
+    return ({ default:'INSTRUCTOR', pseudopilot:'PSEUDO PILOTO', odi:'ODI-CO', atc:'ATC', odt:'ODT', samallocator:'SAM ALOCATOR', observer:'OBSERVADOR' })[String(v || 'default')] || String(v || 'INSTRUCTOR').toUpperCase();
   }
   function formatConnected(ms){
     const total = Math.max(0, Math.floor((Number(ms) || 0) / 1000));
@@ -30436,7 +31281,7 @@ import { getDatabase, ref, get, set, runTransaction } from "https://www.gstatic.
       summaryBox.innerHTML = '<div class="setca-god-summary-card"><div class="setca-god-card-title">Relación global</div><div class="setca-god-empty">Sin usuarios conectados.</div></div>';
       return;
     }
-    const counts = { default:0, odi:0, atc:0, odt:0, samallocator:0, observer:0, other:0 };
+    const counts = { default:0, pseudopilot:0, odi:0, atc:0, odt:0, samallocator:0, observer:0, other:0 };
     users.forEach(user=>{
       const key = String(user.role || 'default');
       if(Object.prototype.hasOwnProperty.call(counts, key)) counts[key] += 1;
@@ -30445,6 +31290,7 @@ import { getDatabase, ref, get, set, runTransaction } from "https://www.gstatic.
     const chips = [
       `<span class="chip"><strong>${users.length}</strong> total</span>`,
       `<span class="chip"><strong>${counts.default}</strong> instructores</span>`,
+      `<span class="chip"><strong>${counts.pseudopilot}</strong> pseudo pilotos</span>`,
       `<span class="chip"><strong>${counts.odi}</strong> ODI-CO</span>`,
       `<span class="chip"><strong>${counts.atc}</strong> ATC</span>`,
       `<span class="chip"><strong>${counts.odt}</strong> ODT</span>`,
@@ -30843,7 +31689,7 @@ import { getDatabase, ref, get, set } from "https://www.gstatic.com/firebasejs/1
   const KICK_KEY = 'setca_dios_kick_seen_v1';
   async function pollKick(){
     try{
-      const uid = window.currentUID || null;
+      const uid = window.__SETCA_presenceUid || window.currentUID || null;
       const room = String(window.__setcaCurrentRoom || (location.hash || '').replace(/^#/, '').trim() || 'sala-default');
       if(!uid || !room) return;
       const kickPath = `rooms/${room}/kicks/${uid}`;
@@ -31885,7 +32731,7 @@ import { getDatabase, ref, get, set } from "https://www.gstatic.com/firebasejs/1
       const a = window.__setcaAccess || {};
       if(a.planning || a.freeplay) return false;
       const role = String(a.role || document.body.getAttribute('data-setca-role') || '').toLowerCase();
-      return role === 'odt' || role === 'samallocator' || role === 'default';
+      return role === 'odt' || role === 'samallocator' || role === 'default' || !!(window.__SETCA_isExcsWhiteController && window.__SETCA_isExcsWhiteController());
     }catch(_){ return false; }
   }
   document.addEventListener('click', function(ev){
@@ -31978,7 +32824,7 @@ import { getDatabase, ref, get, set } from "https://www.gstatic.com/firebasejs/1
     return isPlanningLike() || r === 'default';
   }
   function roleLabel(r){
-    return ({default:'INSTRUCTOR',odi:'ODI-CO',odico:'ODI-CO',atc:'ATC',odt:'ODT',samallocator:'SAM ALOCATOR',observer:'OBSERVADOR'})[String(r||'default')] || String(r||'INSTRUCTOR').toUpperCase();
+    return ({default:'INSTRUCTOR',pseudopilot:'PSEUDO PILOTO',odi:'ODI-CO',odico:'ODI-CO',atc:'ATC',odt:'ODT',samallocator:'SAM ALOCATOR',observer:'OBSERVADOR'})[String(r||'default')] || String(r||'INSTRUCTOR').toUpperCase();
   }
   function refreshAll(){
     ['repaintPlanesList','repaintNav','repaintVuelos','repaintPairs','repaintAlt','repaintGTC','paintAlerts','renderObserverStats'].forEach(fn=>{ try{ if(typeof window[fn] === 'function') window[fn](); }catch(_){ } });
@@ -32007,7 +32853,7 @@ import { getDatabase, ref, get, set } from "https://www.gstatic.com/firebasejs/1
     const chip = $('#setcaRoleConsole');
     if(chip){
       const whitePreparation = !!(window.__SETCA_isExcsWhitePreparation && window.__SETCA_isExcsWhitePreparation());
-      const perm = whitePreparation ? 'CONTROL SUPERIOR' : (canManageAircraft() ? 'CTRL AERONAVES' : (r === 'observer' ? 'SOLO OBS' : 'PUESTO LIMITADO'));
+      const perm = whitePreparation ? 'CONTROL SUPERIOR' : (canManageAircraft() ? 'CTRL AERONAVES' : (r === 'pseudopilot' ? 'CTRL AERONAVES x4' : (r === 'observer' ? 'SOLO OBS' : 'PUESTO LIMITADO')));
       chip.textContent = `${roleLabel(r)} · ${perm}`;
     }
     if(!$('#setcaSpawnBanner')){
@@ -32714,6 +33560,9 @@ import { getDatabase, ref, get, set } from "https://www.gstatic.com/firebasejs/1
 
   function ensureDefaultInstructorGlobalPause(){
     if(!isInstructor() || !canUseSharedRoom() || !window.st) return;
+    // EXCS tiene un único reloj general administrado explícitamente por WHITE.
+    // El inicializador heredado de salas normales no debe volver a pausar tras PLAY GLOBAL.
+    if(roomId().toLowerCase() === 'excs') return;
     const key = globalPauseKey();
     if(localStorage.getItem(key) === '1') return;
     if(st.serverPause && st.serverPause.active) return;
@@ -35036,6 +35885,624 @@ import { getDatabase, ref, get, set } from "https://www.gstatic.com/firebasejs/1
   bind();
   setTimeout(bind, 400);
   setInterval(bind, 2000);
+})();
+</script>
+
+<style id="setca-pseudo-pilot-hud-css">
+body[data-setca-role="pseudopilot"] .app{
+  grid-template-columns:minmax(0,1fr)!important;
+  grid-template-rows:auto minmax(0,1fr)!important;
+  grid-template-areas:"top" "center"!important;
+}
+body[data-setca-role="pseudopilot"] #left,
+body[data-setca-role="pseudopilot"] #right{display:none!important;}
+body[data-setca-role="pseudopilot"] #center{
+  min-height:calc(100vh - 70px)!important;
+  height:auto!important;
+}
+#setcaPseudoPilotSelector{
+  --pp-accent:#75baff;
+  position:fixed;
+  z-index:8790;
+  top:var(--pp-top,58px);
+  left:50%;
+  display:none;
+  width:min(560px,calc(100vw - 28px));
+  transform:translateX(-50%);
+  border:1px solid #66727d;
+  border-top:3px solid var(--pp-accent);
+  border-radius:7px;
+  background:linear-gradient(180deg,rgba(38,45,51,.98),rgba(24,29,33,.98));
+  color:#f3f6f8;
+  box-shadow:0 18px 46px rgba(0,0,0,.48),inset 0 1px 0 rgba(255,255,255,.07);
+  font-family:ui-monospace,SFMono-Regular,Consolas,monospace;
+}
+body[data-setca-role="pseudopilot"] #setcaPseudoPilotSelector{display:block;}
+body[data-setca-team="red"] #setcaPseudoPilotSelector{--pp-accent:#ef7d86;}
+#setcaPseudoPilotSelector[hidden]{display:none!important;}
+.setca-pp-selector-head{
+  display:flex;align-items:center;justify-content:space-between;gap:12px;
+  padding:10px 12px;border-bottom:1px solid #525d66;background:#20262b;
+}
+.setca-pp-selector-title{display:flex;align-items:center;gap:9px;min-width:0;}
+.setca-pp-selector-title::before{content:"";width:8px;height:8px;border-radius:50%;background:var(--pp-accent);box-shadow:0 0 0 3px color-mix(in srgb,var(--pp-accent) 20%,transparent);}
+.setca-pp-selector-title strong{font-size:12px;letter-spacing:.12em;white-space:nowrap;}
+.setca-pp-selector-head span{color:#b8c2c9;font-size:9px;letter-spacing:.09em;}
+.setca-pp-selector-body{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:8px;padding:12px;}
+#setcaPseudoPlaneSelect{
+  min-width:0;height:38px;padding:0 11px;border:1px solid #697681;border-radius:4px;
+  background:#11171b;color:#f5f7f8;font:700 11px/1 ui-monospace,SFMono-Regular,Consolas,monospace;
+  outline:none;
+}
+#setcaPseudoPlaneSelect:focus{border-color:var(--pp-accent);box-shadow:0 0 0 2px color-mix(in srgb,var(--pp-accent) 18%,transparent);}
+#setcaPseudoHudOpen{
+  min-width:150px;border:1px solid color-mix(in srgb,var(--pp-accent) 82%,#fff 18%);border-radius:4px;
+  background:linear-gradient(180deg,color-mix(in srgb,var(--pp-accent) 48%,#27323a),color-mix(in srgb,var(--pp-accent) 25%,#11171b));
+  color:#fff;font:800 10px/1 ui-monospace,SFMono-Regular,Consolas,monospace;letter-spacing:.09em;cursor:pointer;
+  box-shadow:inset 0 1px 0 rgba(255,255,255,.13),0 2px 5px rgba(0,0,0,.32);
+}
+#setcaPseudoHudOpen:disabled{opacity:.4;cursor:not-allowed;filter:grayscale(1);}
+#setcaPseudoPlaneStatus{grid-column:1/-1;min-height:14px;color:#abb6be;font-size:9px;letter-spacing:.04em;}
+
+#setcaPseudoPilotHud{
+  --pp-hud:#9dffba;
+  --pp-line:rgba(157,255,186,.82);
+  --pp-bank:0deg;
+  --pp-pitch:0px;
+  position:fixed;
+  z-index:8800;
+  inset:var(--pp-top,58px) 0 0;
+  display:none;
+  overflow:hidden;
+  background:#081018;
+  color:var(--pp-hud);
+  font-family:ui-monospace,SFMono-Regular,Consolas,monospace;
+  user-select:none;
+}
+body[data-setca-team="red"] #setcaPseudoPilotHud{--pp-hud:#ffb0b5;--pp-line:rgba(255,176,181,.82);}
+#setcaPseudoPilotHud.setca-pp-active{display:block;}
+.setca-pp-world{position:absolute;inset:0;overflow:hidden;background:linear-gradient(180deg,#263d50 0%,#425d6e 46%,#74736a 50%,#393b35 100%);}
+.setca-pp-world::before{
+  content:"";position:absolute;inset:0;
+  background:
+    radial-gradient(circle at 68% 17%,rgba(255,255,255,.22),transparent 8%),
+    linear-gradient(180deg,rgba(255,255,255,.08),transparent 45%,rgba(0,0,0,.18));
+}
+.setca-pp-terrain{
+  position:absolute;left:-20%;right:-20%;top:50%;bottom:-20%;
+  transform-origin:50% 0;transform:translateY(var(--pp-pitch)) rotate(var(--pp-bank));
+  background:
+    linear-gradient(23deg,transparent 45%,rgba(18,25,20,.34) 46%,rgba(18,25,20,.34) 48%,transparent 49%) 0 0/260px 120px,
+    linear-gradient(-18deg,transparent 46%,rgba(22,29,23,.26) 47%,rgba(22,29,23,.26) 49%,transparent 50%) 0 0/310px 150px,
+    linear-gradient(180deg,#666a5f,#32372f 70%);
+  clip-path:polygon(0 6%,11% 2%,23% 7%,35% 0,49% 5%,61% 1%,74% 8%,88% 3%,100% 7%,100% 100%,0 100%);
+  transition:transform .09s linear;
+}
+.setca-pp-vignette{position:absolute;inset:0;pointer-events:none;box-shadow:inset 0 0 150px 38px rgba(0,0,0,.62);background:linear-gradient(90deg,rgba(0,0,0,.24),transparent 18%,transparent 82%,rgba(0,0,0,.24));}
+.setca-pp-glass{position:absolute;inset:0;pointer-events:none;background:repeating-linear-gradient(0deg,rgba(255,255,255,.012) 0 1px,transparent 1px 4px);}
+.setca-pp-topbar{
+  position:absolute;z-index:3;top:10px;left:12px;right:12px;display:grid;grid-template-columns:1fr auto 1fr;align-items:center;gap:14px;
+  padding:7px 10px;border:1px solid rgba(174,191,202,.4);border-radius:4px;background:rgba(10,16,20,.74);backdrop-filter:blur(4px);
+  color:#e8eef2;font-size:9px;letter-spacing:.1em;
+}
+.setca-pp-topbar strong{color:var(--pp-hud);font-size:11px;letter-spacing:.12em;}
+.setca-pp-topbar .setca-pp-center-status{text-align:center;color:#d8e0e5;}
+.setca-pp-topbar .setca-pp-local{text-align:right;color:#b9c3ca;}
+.setca-pp-heading{
+  position:absolute;z-index:3;top:66px;left:50%;width:min(560px,66vw);height:56px;transform:translateX(-50%);
+  border-top:1px solid var(--pp-line);border-bottom:1px solid rgba(157,255,186,.25);background:rgba(3,12,8,.18);overflow:hidden;
+}
+.setca-pp-heading::after{content:"";position:absolute;top:0;left:50%;height:14px;border-left:2px solid var(--pp-hud);}
+.setca-pp-heading-values{display:grid;grid-template-columns:repeat(7,1fr);align-items:end;height:100%;padding:0 12px 9px;text-align:center;font-size:11px;text-shadow:0 0 5px rgba(0,0,0,.8);}
+.setca-pp-heading-values b{font-size:19px;color:#eaffef;}
+.setca-pp-data-box{
+  position:absolute;z-index:3;top:29%;width:130px;padding:8px 9px 10px;
+  border:1px solid var(--pp-line);background:rgba(1,12,7,.28);box-shadow:inset 0 0 18px rgba(0,0,0,.25);
+}
+.setca-pp-data-box.speed{left:6%;}.setca-pp-data-box.altitude{right:6%;text-align:right;}
+.setca-pp-data-label{display:block;margin-bottom:2px;color:var(--pp-hud);font-size:9px;letter-spacing:.13em;}
+.setca-pp-data-value{display:block;color:#edfff2;font-size:34px;font-weight:800;line-height:1;letter-spacing:.04em;text-shadow:0 0 7px rgba(58,255,122,.25);}
+.setca-pp-data-unit{display:block;margin-top:3px;font-size:9px;letter-spacing:.11em;}
+.setca-pp-reticle{position:absolute;z-index:3;left:50%;top:50%;width:164px;height:84px;transform:translate(-50%,-50%);}
+.setca-pp-reticle::before,.setca-pp-reticle::after{content:"";position:absolute;top:42px;border-top:2px solid var(--pp-line);width:58px;}
+.setca-pp-reticle::before{left:0}.setca-pp-reticle::after{right:0}
+.setca-pp-reticle-ring{position:absolute;left:66px;top:26px;width:32px;height:32px;border:2px solid var(--pp-line);border-radius:50%;}
+.setca-pp-reticle-ring::before{content:"";position:absolute;left:14px;top:14px;width:3px;height:3px;border-radius:50%;background:var(--pp-hud);}
+.setca-pp-flight-path{position:absolute;z-index:3;left:50%;top:58%;width:98px;height:25px;transform:translate(-50%,-50%);border-top:1px solid var(--pp-line);}
+.setca-pp-flight-path::before,.setca-pp-flight-path::after{content:"";position:absolute;top:-4px;width:9px;height:9px;border:1px solid var(--pp-line);border-radius:50%;}
+.setca-pp-flight-path::before{left:31px}.setca-pp-flight-path::after{right:31px}
+.setca-pp-bottom{
+  position:absolute;z-index:3;left:50%;bottom:22px;display:grid;grid-template-columns:auto auto auto;gap:8px;align-items:center;transform:translateX(-50%);
+  padding:8px;border:1px solid rgba(176,192,202,.42);border-radius:5px;background:rgba(8,14,18,.76);backdrop-filter:blur(4px);
+}
+.setca-pp-readout{min-width:120px;padding:0 9px;border-right:1px solid #4c5961;text-align:center;}
+.setca-pp-readout span{display:block;color:#aab7bf;font-size:8px;letter-spacing:.12em;}.setca-pp-readout strong{display:block;margin-top:2px;color:var(--pp-hud);font-size:15px;}
+.setca-pp-action{
+  height:34px;padding:0 13px;border:1px solid #78858e;border-radius:4px;background:linear-gradient(180deg,#465159,#2f383f);color:#fff;
+  font:800 9px/1 ui-monospace,SFMono-Regular,Consolas,monospace;letter-spacing:.08em;cursor:pointer;
+}
+.setca-pp-action:hover{border-color:#c4d0d7;background:linear-gradient(180deg,#56636c,#39434a);}
+#setcaPseudoHudWarning{position:absolute;z-index:5;left:50%;top:42%;display:none;transform:translate(-50%,-50%);padding:12px 18px;border:1px solid #f59e0b;background:rgba(42,27,4,.92);color:#fde68a;font-size:12px;font-weight:800;letter-spacing:.1em;}
+#setcaPseudoHudWarning.setca-pp-show{display:block;}
+@media(max-width:760px){
+  .setca-pp-selector-body{grid-template-columns:1fr}.setca-pp-selector-body #setcaPseudoHudOpen{height:38px}.setca-pp-data-box{width:100px}.setca-pp-data-box.speed{left:2%}.setca-pp-data-box.altitude{right:2%}.setca-pp-data-value{font-size:25px}.setca-pp-bottom{bottom:10px;grid-template-columns:1fr 1fr}.setca-pp-readout{grid-column:1/-1;border:0}.setca-pp-heading{width:82vw}
+}
+</style>
+<script id="setca-pseudo-pilot-hud-script">
+(function(){
+  'use strict';
+  const ROLE = 'pseudopilot';
+  let selector = null;
+  let hud = null;
+  let selectedId = '';
+  let lastOptionSignature = '';
+  let lastPaint = 0;
+  let lastHeading = null;
+  let lastHeadingAt = 0;
+  let bankDeg = 0;
+
+  function access(){
+    try{ return window.__setcaAccess || (window.__SETCA_readSavedAccess && window.__SETCA_readSavedAccess()) || {}; }
+    catch(_){ return {}; }
+  }
+  function activeRole(){ return String(access().role || '').toLowerCase() === ROLE; }
+  function team(){
+    try{ return window.__SETCA_participantTeam(access().team); }catch(_){ return String(access().team || 'blue').toLowerCase() === 'red' ? 'red' : 'blue'; }
+  }
+  function entityTeam(p){
+    try{ return window.__SETCA_entityTeam(p); }catch(_){ return String(p && p.team || 'blue').toLowerCase(); }
+  }
+  function ownPlanes(){
+    const mine = team();
+    const planes = window.st && Array.isArray(window.st.planes) ? window.st.planes : [];
+    return planes.filter(p=>p && p.id && entityTeam(p) === mine && !p._hit && !p.destroyed);
+  }
+  function planeName(p){ return String(p && (p.name || p.callsign || p.id) || 'AERONAVE'); }
+  function normHeading(value){ const n = Number(value) || 0; return ((n % 360) + 360) % 360; }
+  function headingText(value){ return String(Math.round(normHeading(value)) % 360).padStart(3,'0'); }
+  function storageKey(){ return `setca_pseudo_pilot_aircraft_${String(access().room || 'local')}_${team()}`; }
+  function headerTop(){
+    const header = document.querySelector('.app > header');
+    const top = header ? Math.max(52,Math.ceil(header.getBoundingClientRect().bottom) + 5) : 58;
+    document.documentElement.style.setProperty('--pp-top',`${top}px`);
+  }
+  function build(){
+    if(selector && hud) return;
+    selector = document.createElement('section');
+    selector.id = 'setcaPseudoPilotSelector';
+    selector.setAttribute('aria-label','Selección de aeronave para Pseudo Piloto');
+    selector.innerHTML = `
+      <div class="setca-pp-selector-head">
+        <div class="setca-pp-selector-title"><strong>PSEUDO PILOTO · FLIGHT STATION</strong></div>
+        <span>VISTA LOCAL / SOLO LECTURA</span>
+      </div>
+      <div class="setca-pp-selector-body">
+        <select id="setcaPseudoPlaneSelect" aria-label="Aeronave propia para vista HUD"><option value="">SIN AERONAVES DISPONIBLES</option></select>
+        <button id="setcaPseudoHudOpen" type="button" disabled>ABRIR VISTA HUD</button>
+        <div id="setcaPseudoPlaneStatus" role="status">Esperando aeronaves de tu bando…</div>
+      </div>`;
+    hud = document.createElement('section');
+    hud.id = 'setcaPseudoPilotHud';
+    hud.setAttribute('aria-hidden','true');
+    hud.innerHTML = `
+      <div class="setca-pp-world"><div class="setca-pp-terrain"></div><div class="setca-pp-vignette"></div><div class="setca-pp-glass"></div></div>
+      <div class="setca-pp-topbar"><strong id="setcaPseudoHudCallsign">---</strong><span class="setca-pp-center-status">FLIGHT DISPLAY · LIVE</span><span class="setca-pp-local">LOCAL / READ ONLY</span></div>
+      <div class="setca-pp-heading"><div id="setcaPseudoHeadingValues" class="setca-pp-heading-values"></div></div>
+      <div class="setca-pp-data-box speed"><span class="setca-pp-data-label">AIRSPEED</span><strong id="setcaPseudoHudSpeed" class="setca-pp-data-value">000</strong><span class="setca-pp-data-unit">KNOTS</span></div>
+      <div class="setca-pp-data-box altitude"><span class="setca-pp-data-label">ALTITUDE</span><strong id="setcaPseudoHudAltitude" class="setca-pp-data-value">00000</strong><span class="setca-pp-data-unit">FEET MSL</span></div>
+      <div class="setca-pp-reticle"><span class="setca-pp-reticle-ring"></span></div><div class="setca-pp-flight-path"></div>
+      <div class="setca-pp-bottom">
+        <div class="setca-pp-readout"><span>MAGNETIC HEADING</span><strong id="setcaPseudoHudHeading">000°</strong></div>
+        <button id="setcaPseudoHudChange" class="setca-pp-action" type="button">CAMBIAR AERONAVE</button>
+        <button id="setcaPseudoHudMap" class="setca-pp-action" type="button">VOLVER AL MAPA</button>
+      </div>
+      <div id="setcaPseudoHudWarning" role="alert">AERONAVE NO DISPONIBLE</div>`;
+    document.body.append(selector,hud);
+    selector.querySelector('#setcaPseudoPlaneSelect').addEventListener('change',refreshSelectorState);
+    selector.querySelector('#setcaPseudoHudOpen').addEventListener('click',()=>openHud(selector.querySelector('#setcaPseudoPlaneSelect').value));
+    hud.querySelector('#setcaPseudoHudChange').addEventListener('click',closeHud);
+    hud.querySelector('#setcaPseudoHudMap').addEventListener('click',closeHud);
+    window.addEventListener('resize',headerTop,{passive:true});
+    headerTop();
+  }
+  function refreshSelectorState(){
+    if(!selector) return;
+    const select = selector.querySelector('#setcaPseudoPlaneSelect');
+    const button = selector.querySelector('#setcaPseudoHudOpen');
+    const status = selector.querySelector('#setcaPseudoPlaneStatus');
+    const p = ownPlanes().find(row=>String(row.id) === String(select.value));
+    button.disabled = !p;
+    status.textContent = p ? `${planeName(p)} · ${team().toUpperCase()} · LISTO PARA VISTA HUD` : 'Esperando una aeronave disponible de tu bando…';
+  }
+  function refreshOptions(){
+    if(!selector) return;
+    const planes = ownPlanes();
+    const signature = planes.map(p=>`${p.id}:${planeName(p)}`).join('|');
+    if(signature === lastOptionSignature) return;
+    lastOptionSignature = signature;
+    const select = selector.querySelector('#setcaPseudoPlaneSelect');
+    const previous = String(select.value || selectedId || sessionStorage.getItem(storageKey()) || '');
+    select.replaceChildren();
+    if(!planes.length){
+      const option = document.createElement('option'); option.value = ''; option.textContent = 'SIN AERONAVES PROPIAS DISPONIBLES'; select.append(option);
+    }else{
+      planes.forEach(p=>{
+        const option = document.createElement('option'); option.value = String(p.id); option.textContent = `${planeName(p)}  /  ${String(p.tipo || 'AERONAVE').toUpperCase()}`; select.append(option);
+      });
+      if(planes.some(p=>String(p.id) === previous)) select.value = previous;
+    }
+    refreshSelectorState();
+  }
+  function openHud(id){
+    const p = ownPlanes().find(row=>String(row.id) === String(id));
+    if(!p) return false;
+    selectedId = String(p.id);
+    try{ sessionStorage.setItem(storageKey(),selectedId); }catch(_){ }
+    selector.hidden = true;
+    hud.classList.add('setca-pp-active');
+    hud.setAttribute('aria-hidden','false');
+    document.body.classList.add('setca-pseudo-hud-active');
+    lastHeading = normHeading(p.hdg);
+    lastHeadingAt = performance.now();
+    paint(p,performance.now());
+    return true;
+  }
+  function closeHud(){
+    if(!selector || !hud) return;
+    hud.classList.remove('setca-pp-active');
+    hud.setAttribute('aria-hidden','true');
+    document.body.classList.remove('setca-pseudo-hud-active');
+    selector.hidden = !activeRole();
+    refreshOptions();
+  }
+  function paintHeading(hdg){
+    const wrap = hud.querySelector('#setcaPseudoHeadingValues');
+    const offsets = [-30,-20,-10,0,10,20,30];
+    wrap.replaceChildren(...offsets.map(offset=>{
+      const el = document.createElement(offset === 0 ? 'b' : 'span');
+      const value = normHeading(hdg + offset);
+      el.textContent = offset === 0 ? headingText(value) : String(Math.round(value / 10) % 36).padStart(2,'0');
+      return el;
+    }));
+  }
+  function paint(p,now){
+    const hdg = normHeading(Number.isFinite(Number(p.hdg)) ? p.hdg : p.tgtHdg);
+    const speedKts = Math.max(0,(Number(p.spd) || 0) / 1.852);
+    const altitudeFt = Math.max(0,Number(p.alt) || 0);
+    const vsFpm = Number(p.vsFpm) || 0;
+    if(lastHeading !== null && lastHeadingAt){
+      const dt = Math.max(.03,(now-lastHeadingAt)/1000);
+      let delta = hdg-lastHeading;
+      if(delta > 180) delta -= 360;
+      if(delta < -180) delta += 360;
+      const targetBank = Math.max(-24,Math.min(24,-delta/dt*1.9));
+      bankDeg += (targetBank-bankDeg)*.18;
+    }
+    lastHeading = hdg; lastHeadingAt = now;
+    hud.style.setProperty('--pp-bank',`${bankDeg.toFixed(2)}deg`);
+    hud.style.setProperty('--pp-pitch',`${Math.max(-28,Math.min(28,-vsFpm/120)).toFixed(1)}px`);
+    hud.querySelector('#setcaPseudoHudCallsign').textContent = `${planeName(p).toUpperCase()} · ${team().toUpperCase()}`;
+    hud.querySelector('#setcaPseudoHudSpeed').textContent = String(Math.round(speedKts)).padStart(3,'0');
+    hud.querySelector('#setcaPseudoHudAltitude').textContent = String(Math.round(altitudeFt)).padStart(5,'0');
+    hud.querySelector('#setcaPseudoHudHeading').textContent = `${headingText(hdg)}°`;
+    hud.querySelector('#setcaPseudoHudWarning').classList.remove('setca-pp-show');
+    paintHeading(hdg);
+  }
+  function deactivate(){
+    if(selector) selector.hidden = true;
+    if(hud){ hud.classList.remove('setca-pp-active'); hud.setAttribute('aria-hidden','true'); }
+    document.body.classList.remove('setca-pseudo-hud-active');
+  }
+  function frame(now){
+    try{
+      if(window.__SETCA_PSEUDO_QUAD_ACTIVE){ deactivate(); return; }
+      if(activeRole()){
+        build();
+        if(!hud.classList.contains('setca-pp-active')) selector.hidden = false;
+        if(now-lastPaint >= 50){
+          lastPaint = now;
+          refreshOptions();
+          if(hud.classList.contains('setca-pp-active')){
+            const p = ownPlanes().find(row=>String(row.id) === selectedId);
+            if(p) paint(p,now);
+            else{
+              hud.querySelector('#setcaPseudoHudWarning').classList.add('setca-pp-show');
+              setTimeout(()=>{ if(hud && hud.classList.contains('setca-pp-active') && !ownPlanes().some(row=>String(row.id)===selectedId)) closeHud(); },900);
+            }
+          }
+        }
+      }else deactivate();
+    }catch(err){ console.warn('PSEUDO PILOTO HUD:',err); }
+    requestAnimationFrame(frame);
+  }
+  window.__SETCA_PSEUDO_PILOT = Object.freeze({
+    isActive:activeRole,
+    ownPlanes:()=>ownPlanes().slice(),
+    open:openHud,
+    close:closeHud,
+    selected:()=>selectedId
+  });
+  if(document.readyState === 'loading') document.addEventListener('DOMContentLoaded',()=>{ build(); requestAnimationFrame(frame); },{once:true});
+  else{ build(); requestAnimationFrame(frame); }
+})();
+</script>
+
+<style id="setca-pseudo-pilot-quad-css">
+/* PSEUDO PILOTO v2: consola simple de cuatro aeronaves. */
+body[data-setca-role="pseudopilot"] #setcaPseudoPilotSelector,
+body[data-setca-role="pseudopilot"] #setcaPseudoPilotHud{display:none!important;}
+#setcaPseudoQuad{
+  --ppq-accent:#6eb9f1;
+  position:fixed;z-index:8810;inset:var(--pp-top,58px) 0 0;
+  display:none;grid-template-rows:auto minmax(0,1fr);
+  padding:7px;background:#151b20;color:#edf2f5;
+  font-family:ui-monospace,SFMono-Regular,Consolas,monospace;
+}
+body[data-setca-role="pseudopilot"] #setcaPseudoQuad{display:grid;}
+body[data-setca-team="red"] #setcaPseudoQuad{--ppq-accent:#eb7f86;}
+.setca-ppq-toolbar{
+  display:grid;grid-template-columns:auto minmax(180px,390px) auto minmax(0,1fr) auto;align-items:center;gap:7px;
+  min-height:42px;padding:6px 8px;border:1px solid #52606a;background:#20282e;
+}
+.setca-ppq-toolbar strong{font-size:11px;letter-spacing:.12em;color:#fff;}
+.setca-ppq-toolbar select{
+  min-width:0;height:30px;padding:0 9px;border:1px solid #687783;border-radius:3px;background:#0e1418;color:#fff;
+  font:700 10px/1 ui-monospace,SFMono-Regular,Consolas,monospace;
+}
+.setca-ppq-button{
+  height:30px;padding:0 11px;border:1px solid #788791;border-radius:3px;background:#303b43;color:#fff;
+  font:800 9px/1 ui-monospace,SFMono-Regular,Consolas,monospace;letter-spacing:.07em;cursor:pointer;
+}
+.setca-ppq-button:hover{border-color:#b7c2c9;background:#3b4851;}
+.setca-ppq-button:disabled{opacity:.35;cursor:not-allowed;}
+#setcaPseudoQuadStatus{overflow:hidden;color:#b8c3ca;font-size:9px;white-space:nowrap;text-overflow:ellipsis;}
+.setca-ppq-count{padding:5px 8px;border:1px solid #65727b;border-left:3px solid var(--ppq-accent);color:#e9eef1;font-size:9px;white-space:nowrap;}
+.setca-ppq-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));grid-template-rows:repeat(2,minmax(0,1fr));gap:7px;min-height:0;padding-top:7px;}
+.setca-ppq-slot{
+  position:relative;display:grid;grid-template-rows:auto minmax(90px,1fr) auto;min-width:0;min-height:0;overflow:hidden;
+  border:1px solid #53616b;background:#11181d;box-shadow:inset 0 1px 0 rgba(255,255,255,.03);
+}
+.setca-ppq-slot.is-active{border-top:3px solid var(--ppq-accent);}
+.setca-ppq-slot-head{display:grid;grid-template-columns:auto minmax(0,1fr) auto;align-items:center;gap:8px;min-height:40px;padding:5px 8px;border-bottom:1px solid #46535c;background:#20292f;}
+.setca-ppq-index{display:grid;place-items:center;width:23px;height:23px;border:1px solid #71808a;color:#cbd4da;font-size:10px;}
+.setca-ppq-callsign{overflow:hidden;color:#fff;font-size:19px;font-weight:900;letter-spacing:.08em;white-space:nowrap;text-overflow:ellipsis;}
+.setca-ppq-slot.is-active .setca-ppq-callsign{color:var(--ppq-accent);}
+.setca-ppq-remove{height:25px;padding:0 8px;border:1px solid #68757e;border-radius:3px;background:#2c353b;color:#dce3e7;font:800 8px/1 ui-monospace,SFMono-Regular,Consolas,monospace;cursor:pointer;}
+.setca-ppq-canvas-wrap{position:relative;min-height:0;background:#07100d;}
+.setca-ppq-canvas{display:block;width:100%;height:100%;min-height:90px;cursor:crosshair;touch-action:none;}
+.setca-ppq-vector-help{position:absolute;left:7px;bottom:6px;padding:3px 5px;background:rgba(5,10,12,.76);color:#aebbc3;font-size:8px;letter-spacing:.06em;pointer-events:none;}
+.setca-ppq-empty{
+  position:absolute;z-index:2;inset:40px 0 0;display:grid;place-items:center;padding:18px;background:#11181d;color:#86939b;
+  text-align:center;font-size:10px;line-height:1.6;letter-spacing:.08em;
+}
+.setca-ppq-slot.is-active .setca-ppq-empty{display:none;}
+.setca-ppq-controls{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:5px;padding:6px;border-top:1px solid #46535c;background:#1c2429;}
+.setca-ppq-control{display:grid;grid-template-columns:1fr;gap:2px;min-width:0;}
+.setca-ppq-control label{color:#91a0aa;font-size:7px;font-weight:800;letter-spacing:.1em;white-space:nowrap;}
+.setca-ppq-control input{
+  width:100%;min-width:0;height:27px;box-sizing:border-box;padding:0 6px;border:1px solid #596873;border-radius:2px;background:#0b1115;color:#fff;
+  font:800 11px/1 ui-monospace,SFMono-Regular,Consolas,monospace;text-align:center;
+}
+.setca-ppq-control input:focus{outline:none;border-color:var(--ppq-accent);}
+.setca-ppq-readouts{position:absolute;z-index:2;top:7px;left:7px;right:7px;display:grid;grid-template-columns:repeat(3,1fr);gap:5px;pointer-events:none;}
+.setca-ppq-readout{padding:4px 5px;border:1px solid rgba(121,147,135,.55);background:rgba(4,15,10,.72);text-align:center;}
+.setca-ppq-readout span{display:block;color:#91a79a;font-size:7px;letter-spacing:.1em;}.setca-ppq-readout strong{display:block;margin-top:1px;color:#dff8e8;font-size:13px;}
+.setca-ppq-command-state{position:absolute;z-index:2;right:7px;bottom:6px;padding:3px 5px;border:1px solid #52625a;background:rgba(3,12,8,.78);color:#9edeb2;font-size:8px;pointer-events:none;}
+@media(max-width:780px){
+  .setca-ppq-toolbar{grid-template-columns:1fr auto}.setca-ppq-toolbar strong,#setcaPseudoQuadStatus,.setca-ppq-count{display:none}.setca-ppq-toolbar select{grid-column:1}.setca-ppq-grid{gap:4px;padding-top:4px}.setca-ppq-callsign{font-size:14px}.setca-ppq-controls{grid-template-columns:repeat(2,minmax(0,1fr))}.setca-ppq-readout strong{font-size:10px}
+}
+</style>
+<script id="setca-pseudo-pilot-quad-script">
+(function(){
+  'use strict';
+  window.__SETCA_PSEUDO_QUAD_ACTIVE=true;
+  const MAX=4;
+  let root=null,select=null,assignBtn=null,statusEl=null,countEl=null;
+  const slots=[];
+  let lastRefresh=0;
+  let optionSignature='';
+
+  function access(){ try{return window.__setcaAccess||(window.__SETCA_readSavedAccess&&window.__SETCA_readSavedAccess())||{};}catch(_){return{};} }
+  function active(){return String(access().role||'').toLowerCase()==='pseudopilot';}
+  function team(){try{return window.__SETCA_participantTeam(access().team);}catch(_){return String(access().team||'blue').toLowerCase()==='red'?'red':'blue';}}
+  function entityTeam(p){try{return window.__SETCA_entityTeam(p);}catch(_){return String(p&&p.team||'blue').toLowerCase();}}
+  function ownPlanes(){const t=team(),arr=window.st&&Array.isArray(st.planes)?st.planes:[];return arr.filter(p=>p&&p.id&&entityTeam(p)===t&&!p._hit&&!p.destroyed);}
+  function norm(v){return ((Number(v)||0)%360+360)%360;}
+  function hdg(v){return String(Math.round(norm(v))%360).padStart(3,'0');}
+  function name(p){return String(p&&(p.name||p.callsign||p.id)||'AERONAVE');}
+  function storageKey(){return `setca_pseudo_quad_${String(access().room||'room')}_${team()}`;}
+  function selectedIds(){return slots.map(slot=>slot.planeId).filter(Boolean);}
+  function planeById(id){return ownPlanes().find(p=>String(p.id)===String(id))||null;}
+  function save(){try{sessionStorage.setItem(storageKey(),JSON.stringify(selectedIds()));}catch(_){}}
+  function headerTop(){const h=document.querySelector('.app > header');document.documentElement.style.setProperty('--pp-top',`${h?Math.max(52,Math.ceil(h.getBoundingClientRect().bottom)+4):58}px`);}
+
+  function makeSlot(index){
+    const el=document.createElement('article');
+    el.className='setca-ppq-slot';
+    el.dataset.slot=String(index);
+    el.innerHTML=`
+      <div class="setca-ppq-slot-head"><span class="setca-ppq-index">${index+1}</span><strong class="setca-ppq-callsign">SIN ASIGNAR</strong><button class="setca-ppq-remove" type="button">LIBERAR</button></div>
+      <div class="setca-ppq-canvas-wrap">
+        <canvas class="setca-ppq-canvas" aria-label="Vector de rumbo"></canvas>
+        <div class="setca-ppq-readouts"><div class="setca-ppq-readout"><span>RUMBO</span><strong data-read="hdg">---</strong></div><div class="setca-ppq-readout"><span>ALTITUD</span><strong data-read="alt">---</strong></div><div class="setca-ppq-readout"><span>VELOCIDAD</span><strong data-read="spd">---</strong></div></div>
+        <div class="setca-ppq-vector-help">ARRASTRE EL VECTOR PARA CAMBIAR RUMBO</div><div class="setca-ppq-command-state">EN ESPERA</div>
+      </div>
+      <div class="setca-ppq-controls">
+        <div class="setca-ppq-control"><label>CALLSIGN</label><input data-cmd="name" maxlength="24" autocomplete="off"></div>
+        <div class="setca-ppq-control"><label>RUMBO °</label><input data-cmd="tgtHdg" type="number" min="0" max="359" step="1"></div>
+        <div class="setca-ppq-control"><label>ALTITUD FT</label><input data-cmd="tgtAlt" type="number" min="0" max="80000" step="100"></div>
+        <div class="setca-ppq-control"><label>VELOCIDAD KT</label><input data-cmd="tgtSpd" type="number" min="0" max="2159" step="5"></div>
+      </div>
+      <div class="setca-ppq-empty">PANEL ${index+1}<br>ASIGNE UNA AERONAVE PROPIA</div>`;
+    const slot={el,index,planeId:'',canvas:el.querySelector('canvas'),ctx:null,preview:null,dragging:false,lastCommand:''};
+    slot.ctx=slot.canvas.getContext('2d');
+    el.querySelector('.setca-ppq-remove').addEventListener('click',()=>clearSlot(slot));
+    el.querySelectorAll('[data-cmd]').forEach(input=>{
+      input.addEventListener('keydown',event=>{if(event.key==='Enter'){event.preventDefault();input.blur();}});
+      input.addEventListener('change',()=>commitInput(slot,input));
+    });
+    slot.canvas.addEventListener('pointerdown',event=>{
+      if(!slot.planeId)return;
+      slot.dragging=true;slot.canvas.setPointerCapture(event.pointerId);slot.preview=headingFromPointer(slot,event);drawSlot(slot);event.preventDefault();
+    });
+    slot.canvas.addEventListener('pointermove',event=>{if(!slot.dragging)return;slot.preview=headingFromPointer(slot,event);drawSlot(slot);event.preventDefault();});
+    const finish=event=>{if(!slot.dragging)return;slot.dragging=false;slot.preview=headingFromPointer(slot,event);commit(slot,{tgtHdg:slot.preview},'vector');slot.preview=null;try{slot.canvas.releasePointerCapture(event.pointerId);}catch(_){}event.preventDefault();};
+    slot.canvas.addEventListener('pointerup',finish);slot.canvas.addEventListener('pointercancel',()=>{slot.dragging=false;slot.preview=null;});
+    return slot;
+  }
+
+  function build(){
+    if(root)return;
+    root=document.createElement('section');root.id='setcaPseudoQuad';root.setAttribute('aria-label','Consola Pseudo Piloto de cuatro aeronaves');
+    root.innerHTML=`<div class="setca-ppq-toolbar"><strong>PSEUDO PILOTO · CONTROL x4</strong><select id="setcaPseudoQuadSelect" aria-label="Aeronave propia"></select><button id="setcaPseudoQuadAssign" class="setca-ppq-button" type="button">ASIGNAR AL SIGUIENTE PANEL</button><span id="setcaPseudoQuadStatus">Seleccione aeronaves de su propio bando.</span><span id="setcaPseudoQuadCount" class="setca-ppq-count">0 / 4 ACTIVOS</span></div><div class="setca-ppq-grid"></div>`;
+    document.body.appendChild(root);select=root.querySelector('#setcaPseudoQuadSelect');assignBtn=root.querySelector('#setcaPseudoQuadAssign');statusEl=root.querySelector('#setcaPseudoQuadStatus');countEl=root.querySelector('#setcaPseudoQuadCount');
+    const grid=root.querySelector('.setca-ppq-grid');for(let i=0;i<MAX;i++){const slot=makeSlot(i);slots.push(slot);grid.appendChild(slot.el);}
+    assignBtn.addEventListener('click',()=>assignNext(select.value));
+    window.addEventListener('resize',()=>{headerTop();slots.forEach(drawSlot);},{passive:true});headerTop();
+    try{const saved=JSON.parse(sessionStorage.getItem(storageKey())||'[]');if(Array.isArray(saved))saved.slice(0,MAX).forEach((id,index)=>assignSlot(slots[index],id,false));}catch(_){}
+  }
+  function setCommandState(slot,text,error=false){slot.lastCommand=text;const el=slot.el.querySelector('.setca-ppq-command-state');el.textContent=text;el.style.color=error?'#ffb4b8':'#9edeb2';}
+  function clearSlot(slot){slot.planeId='';slot.preview=null;slot.dragging=false;slot.el.classList.remove('is-active');slot.el.querySelector('.setca-ppq-callsign').textContent='SIN ASIGNAR';slot.el.querySelectorAll('[data-cmd]').forEach(input=>input.value='');slot.el.querySelectorAll('[data-read]').forEach(el=>el.textContent='---');setCommandState(slot,'EN ESPERA');save();refreshOptions(true);drawSlot(slot);}
+  function assignSlot(slot,id,persist=true){const p=planeById(id);if(!p||selectedIds().includes(String(p.id)))return false;slot.planeId=String(p.id);slot.el.classList.add('is-active');setCommandState(slot,'CONTROL ACTIVO');if(persist)save();refreshSlot(slot,p);refreshOptions(true);return true;}
+  function assignNext(id){const free=slots.find(slot=>!slot.planeId);if(!free){statusEl.textContent='Los cuatro paneles ya están ocupados.';return false;}const ok=assignSlot(free,id);statusEl.textContent=ok?`${name(planeById(id))} asignado al panel ${free.index+1}.`:'Seleccione una aeronave propia disponible.';return ok;}
+  function refreshOptions(force=false){
+    const chosen=new Set(selectedIds()),planes=ownPlanes(),sig=planes.map(p=>`${p.id}:${name(p)}`).join('|')+'#'+Array.from(chosen).join('|');if(!force&&sig===optionSignature)return;optionSignature=sig;
+    const previous=select.value;select.replaceChildren();const available=planes.filter(p=>!chosen.has(String(p.id)));
+    if(!available.length){const o=document.createElement('option');o.value='';o.textContent=chosen.size>=MAX?'LÍMITE DE 4 AERONAVES':'SIN AERONAVES DISPONIBLES';select.append(o);}else available.forEach(p=>{const o=document.createElement('option');o.value=String(p.id);o.textContent=`${name(p)} / ${String(p.tipo||'AERONAVE').toUpperCase()}`;select.append(o);});
+    if(available.some(p=>String(p.id)===previous))select.value=previous;assignBtn.disabled=!select.value||chosen.size>=MAX;countEl.textContent=`${chosen.size} / 4 ACTIVOS`;
+  }
+  function commitInput(slot,input){
+    const p=planeById(slot.planeId);if(!p)return;const key=input.dataset.cmd;let patch={};
+    if(key==='name'){const value=String(input.value||'').trim().slice(0,24);if(!value){input.value=name(p);return;}patch.name=value;}
+    else if(key==='tgtHdg')patch.tgtHdg=norm(input.value);
+    else if(key==='tgtAlt')patch.tgtAlt=Math.max(0,Math.min(80000,Number(input.value)||0));
+    else if(key==='tgtSpd')patch.tgtSpd=Math.max(0,Math.min(4000,(Number(input.value)||0)*1.852));
+    commit(slot,patch,key);
+  }
+  async function commit(slot,patch,kind){
+    const p=planeById(slot.planeId);if(!p||!patch||!Object.keys(patch).length)return false;Object.assign(p,patch);if(Object.prototype.hasOwnProperty.call(patch,'tgtHdg'))p.routeManualUntil=Date.now()+14000;
+    try{if(window.__SETCA_markAircraftDirty)window.__SETCA_markAircraftDirty(p);}catch(_){}
+    setCommandState(slot,'ENVIANDO…');refreshSlot(slot,p);
+    const payload={...patch};if(Object.prototype.hasOwnProperty.call(patch,'tgtHdg'))payload.routeManualUntil=p.routeManualUntil;
+    let ok=false;try{ok=!!(window.__SETCA_publishPseudoPilotPatch&&await window.__SETCA_publishPseudoPilotPatch(p,payload,kind));}catch(_){}
+    setCommandState(slot,ok?'ORDEN SINCRONIZADA':'SIN CONEXIÓN',!ok);refreshOptions(true);return ok;
+  }
+  function headingFromPointer(slot,event){const r=slot.canvas.getBoundingClientRect(),x=event.clientX-r.left-r.width/2,y=event.clientY-r.top-r.height/2;return norm(Math.atan2(x,-y)*180/Math.PI);}
+  function lineArrow(c,cx,cy,angle,length,color,dashed=false){const rad=norm(angle)*Math.PI/180,x=cx+Math.sin(rad)*length,y=cy-Math.cos(rad)*length;c.save();c.strokeStyle=color;c.fillStyle=color;c.lineWidth=2;if(dashed)c.setLineDash([5,4]);c.beginPath();c.moveTo(cx,cy);c.lineTo(x,y);c.stroke();c.setLineDash([]);const a=7;c.beginPath();c.moveTo(x,y);c.lineTo(x-Math.sin(rad-.55)*a,y+Math.cos(rad-.55)*a);c.lineTo(x-Math.sin(rad+.55)*a,y+Math.cos(rad+.55)*a);c.closePath();c.fill();c.restore();}
+  function drawSlot(slot){
+    const canvas=slot.canvas,c=slot.ctx;if(!canvas||!c)return;const r=canvas.getBoundingClientRect(),dpr=Math.max(1,devicePixelRatio||1),w=Math.max(1,Math.round(r.width)),h=Math.max(1,Math.round(r.height));if(canvas.width!==Math.round(w*dpr)||canvas.height!==Math.round(h*dpr)){canvas.width=Math.round(w*dpr);canvas.height=Math.round(h*dpr);}c.setTransform(dpr,0,0,dpr,0,0);c.clearRect(0,0,w,h);c.fillStyle='#07100d';c.fillRect(0,0,w,h);
+    c.strokeStyle='rgba(91,132,109,.17)';c.lineWidth=1;for(let x=w/2%32;x<w;x+=32){c.beginPath();c.moveTo(x,0);c.lineTo(x,h);c.stroke();}for(let y=h/2%32;y<h;y+=32){c.beginPath();c.moveTo(0,y);c.lineTo(w,y);c.stroke();}
+    const p=planeById(slot.planeId);if(!p)return;const cx=w/2,cy=h/2+8,current=norm(p.hdg),target=slot.preview===null?norm(Number.isFinite(+p.tgtHdg)?p.tgtHdg:current):slot.preview;lineArrow(c,cx,cy,current,Math.min(w,h)*.24,'rgba(210,245,220,.72)',false);lineArrow(c,cx,cy,target,Math.min(w,h)*.38,getComputedStyle(root).getPropertyValue('--ppq-accent').trim()||'#6eb9f1',true);
+    c.save();c.translate(cx,cy);c.rotate(current*Math.PI/180);c.fillStyle='#fff';c.strokeStyle='#06110b';c.lineWidth=1;c.beginPath();c.moveTo(0,-10);c.lineTo(7,9);c.lineTo(0,6);c.lineTo(-7,9);c.closePath();c.fill();c.stroke();c.restore();c.fillStyle='#d9eee0';c.font='bold 10px ui-monospace,Consolas,monospace';c.textAlign='center';c.fillText(`${hdg(target)}°`,cx,Math.max(54,cy-Math.min(w,h)*.42));
+  }
+  function refreshSlot(slot,p){
+    if(!p){if(slot.planeId)clearSlot(slot);return;}slot.el.querySelector('.setca-ppq-callsign').textContent=name(p).toUpperCase();slot.el.querySelector('[data-read="hdg"]').textContent=`${hdg(p.hdg)}°`;slot.el.querySelector('[data-read="alt"]').textContent=`${Math.round(Number(p.alt)||0)} FT`;slot.el.querySelector('[data-read="spd"]').textContent=`${Math.round((Number(p.spd)||0)/1.852)} KT`;
+    const values={name:name(p),tgtHdg:Math.round(norm(Number.isFinite(+p.tgtHdg)?p.tgtHdg:p.hdg)),tgtAlt:Math.round(Number.isFinite(+p.tgtAlt)?p.tgtAlt:p.alt||0),tgtSpd:Math.round((Number.isFinite(+p.tgtSpd)?p.tgtSpd:p.spd||0)/1.852)};slot.el.querySelectorAll('[data-cmd]').forEach(input=>{if(document.activeElement!==input)input.value=values[input.dataset.cmd];});drawSlot(slot);
+  }
+  function frame(now){
+    try{if(window.__SETCA_PSEUDO_MINIMAL_ACTIVE){if(root)root.style.display='none';return;}if(!active()){if(root)root.style.display='none';requestAnimationFrame(frame);return;}build();root.style.display='';if(now-lastRefresh>100){lastRefresh=now;slots.forEach(slot=>{if(slot.planeId&&!planeById(slot.planeId))clearSlot(slot);else if(slot.planeId)refreshSlot(slot,planeById(slot.planeId));});refreshOptions();}}
+    catch(error){console.warn('PSEUDO PILOTO x4:',error);}requestAnimationFrame(frame);
+  }
+  window.__SETCA_PSEUDO_QUAD=Object.freeze({ownPlanes:()=>ownPlanes().slice(),selected:selectedIds,assign:id=>assignNext(id),clear:index=>{const slot=slots[index];if(slot)clearSlot(slot);},command:async(index,patch)=>{const slot=slots[index];return slot?commit(slot,patch,'qa-command'):false;}});
+  if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',()=>{build();requestAnimationFrame(frame);},{once:true});else{build();requestAnimationFrame(frame);}
+})();
+</script>
+
+<style id="setca-pseudo-minimal-css">
+body[data-setca-role="pseudopilot"] #setcaPseudoQuad{display:none!important;}
+#setcaPseudoMinimal{
+  --ppm-accent:#5faee8;position:fixed;z-index:8820;inset:var(--pp-top,58px) 0 0;display:none;
+  grid-template-rows:44px minmax(0,1fr);gap:6px;padding:6px;background:#161b1f;color:#eef2f4;
+  font-family:ui-monospace,SFMono-Regular,Consolas,monospace;
+}
+body[data-setca-role="pseudopilot"] #setcaPseudoMinimal{display:grid;}
+body[data-setca-team="red"] #setcaPseudoMinimal{--ppm-accent:#df747b;}
+.setca-ppm-bar{position:relative;display:flex;align-items:center;gap:7px;min-width:0;padding:6px 8px;border:1px solid #46515a;background:#20262b;}
+.setca-ppm-bar select{flex:1 1 260px;max-width:430px;min-width:120px;height:30px;padding:0 9px;border:1px solid #5b6871;border-radius:3px;background:#101519;color:#f4f6f7;font:700 10px/1 inherit;}
+.setca-ppm-btn{height:30px;padding:0 11px;border:1px solid #68757e;border-radius:3px;background:#2c353b;color:#f4f6f7;font:800 9px/1 inherit;letter-spacing:.06em;cursor:pointer;}
+.setca-ppm-btn:hover{border-color:#aeb8be;background:#364047}.setca-ppm-btn:disabled{opacity:.35;cursor:not-allowed;}
+#setcaPseudoMinimalStatus{min-width:0;flex:1;overflow:hidden;color:#9fabb2;font-size:9px;white-space:nowrap;text-overflow:ellipsis;}
+#setcaPseudoMinimalCount{padding-left:9px;border-left:2px solid var(--ppm-accent);font-size:9px;white-space:nowrap;}
+.setca-ppm-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));grid-template-rows:repeat(2,minmax(0,1fr));gap:6px;min-height:0;}
+.setca-ppm-slot{position:relative;display:grid;grid-template-rows:39px minmax(0,1fr) 32px;min-width:0;min-height:0;overflow:hidden;border:1px solid #46525a;background:#0d1316;}
+.setca-ppm-slot.active{border-top:2px solid var(--ppm-accent);}
+.setca-ppm-head{display:flex;align-items:center;gap:7px;min-width:0;padding:5px 7px;border-bottom:1px solid #3d474e;background:#1e252a;}
+.setca-ppm-number{color:#89969e;font-size:9px}.setca-ppm-name{min-width:0;flex:1;overflow:hidden;color:#e9eef1;font-size:18px;font-weight:900;letter-spacing:.07em;white-space:nowrap;text-overflow:ellipsis;}
+.setca-ppm-slot.active .setca-ppm-name{color:var(--ppm-accent);}
+.setca-ppm-head .setca-ppm-btn{height:24px;padding:0 8px;font-size:8px;}
+.setca-ppm-view{position:relative;min-height:0;background:#07100d;}
+.setca-ppm-canvas{display:block;width:100%;height:100%;min-height:80px;cursor:crosshair;touch-action:none;}
+.setca-ppm-telemetry{display:flex;align-items:center;justify-content:space-around;gap:10px;padding:0 8px;border-top:1px solid #36423c;background:#111a16;color:#91a49a;font-size:8px;letter-spacing:.05em;}
+.setca-ppm-telemetry strong{margin-left:4px;color:#e6f2ea;font-size:11px;}
+.setca-ppm-empty{position:absolute;z-index:3;inset:39px 0 0;display:grid;place-items:center;background:#10161a;color:#74818a;font-size:9px;letter-spacing:.08em;}
+.setca-ppm-slot.active .setca-ppm-empty{display:none;}
+.setca-ppm-editor{position:absolute;z-index:5;inset:39px 0 31px;display:none;align-content:center;grid-template-columns:repeat(2,minmax(0,1fr));gap:7px;padding:14px;background:rgba(22,28,32,.97);}
+.setca-ppm-slot.editing .setca-ppm-editor{display:grid;}
+.setca-ppm-field{display:grid;gap:3px;min-width:0}.setca-ppm-field label{color:#98a5ad;font-size:8px;letter-spacing:.07em}.setca-ppm-field input{width:100%;height:29px;box-sizing:border-box;padding:0 7px;border:1px solid #59666f;border-radius:2px;background:#0d1215;color:#fff;font:800 11px/1 inherit;text-align:center;}
+.setca-ppm-editor-foot{grid-column:1/-1;display:flex;justify-content:flex-end;gap:6px;margin-top:2px;}
+.setca-ppm-relation{position:absolute;z-index:20;top:40px;right:6px;width:min(390px,calc(100vw - 24px));max-height:55vh;overflow:auto;border:1px solid #69757d;background:#f5f6f7;color:#18202a;box-shadow:0 14px 34px rgba(0,0,0,.38);}
+.setca-ppm-relation[hidden]{display:none}.setca-ppm-relation-head{display:flex;justify-content:space-between;align-items:center;padding:9px 10px;border-bottom:1px solid #c7cdd2;font-size:10px;font-weight:900;letter-spacing:.07em}.setca-ppm-relation-list{display:grid;gap:1px;padding:5px}.setca-ppm-lock-row{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:8px;padding:8px;border:1px solid #d2d7db;background:#fff;font-size:9px}.setca-ppm-lock-row strong{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.setca-ppm-lock-row span{color:#52616d}.setca-ppm-none{padding:16px;text-align:center;color:#6b7780;font-size:9px;}
+@media(max-width:760px){.setca-ppm-grid{gap:3px}.setca-ppm-bar{gap:4px}.setca-ppm-bar #setcaPseudoMinimalStatus{display:none}.setca-ppm-name{font-size:13px}.setca-ppm-head .setca-ppm-adjust{display:none}.setca-ppm-telemetry{gap:3px;padding:0 3px}.setca-ppm-telemetry span{font-size:0}.setca-ppm-telemetry span::first-letter{font-size:8px}.setca-ppm-telemetry strong{font-size:9px}.setca-ppm-editor{grid-template-columns:1fr;padding:7px;overflow:auto}}
+</style>
+<script id="setca-pseudo-minimal-script">
+(function(){
+  'use strict';
+  window.__SETCA_PSEUDO_MINIMAL_ACTIVE=true;
+  const MAX=4,slots=[];
+  let root=null,select=null,assignBtn=null,statusEl=null,countEl=null,relation=null,relationList=null,lastPaint=0,restored=false,optionSig='';
+  function access(){try{return window.__setcaAccess||(window.__SETCA_readSavedAccess&&window.__SETCA_readSavedAccess())||{};}catch(_){return{};}}
+  function active(){return String(access().role||'').toLowerCase()==='pseudopilot';}
+  function team(){try{return window.__SETCA_participantTeam(access().team);}catch(_){return String(access().team||'blue').toLowerCase()==='red'?'red':'blue';}}
+  function entityTeam(p){try{return window.__SETCA_entityTeam(p);}catch(_){return String(p&&p.team||'blue').toLowerCase();}}
+  function ownPlanes(){const mine=team(),arr=window.st&&Array.isArray(st.planes)?st.planes:[];return arr.filter(p=>p&&p.id&&entityTeam(p)===mine&&!p._hit&&!p.destroyed);}
+  function plane(id){return ownPlanes().find(p=>String(p.id)===String(id))||null;}
+  function planeName(p){return String(p&&(p.name||p.callsign||p.id)||'AERONAVE');}
+  function norm(v){return((Number(v)||0)%360+360)%360;}
+  function hdg(v){return String(Math.round(norm(v))%360).padStart(3,'0');}
+  function lockApi(){return window.__SETCA_PSEUDO_LOCKS||null;}
+  function selected(){return slots.map(s=>s.planeId).filter(Boolean);}
+  function key(){return`setca_pseudo_minimal_${String(access().room||'room')}_${team()}`;}
+  function save(){try{sessionStorage.setItem(key(),JSON.stringify(selected()));}catch(_){}}
+  function top(){const h=document.querySelector('.app > header');document.documentElement.style.setProperty('--pp-top',`${h?Math.max(52,Math.ceil(h.getBoundingClientRect().bottom)+4):58}px`);}
+  function tell(text,error=false){if(!statusEl)return;statusEl.textContent=text;statusEl.style.color=error?'#e6a0a4':'#9fabb2';}
+  function makeSlot(index){
+    const el=document.createElement('article');el.className='setca-ppm-slot';el.dataset.slot=String(index);el.innerHTML=`
+      <div class="setca-ppm-head"><span class="setca-ppm-number">${index+1}</span><strong class="setca-ppm-name">SIN ASIGNAR</strong><button class="setca-ppm-btn setca-ppm-adjust" type="button">AJUSTAR</button><button class="setca-ppm-btn setca-ppm-release" type="button">LIBERAR</button></div>
+      <div class="setca-ppm-view"><canvas class="setca-ppm-canvas" aria-label="Vector de rumbo"></canvas></div>
+      <div class="setca-ppm-telemetry"><span>RUMBO<strong data-read="hdg">---</strong></span><span>ALT<strong data-read="alt">---</strong></span><span>VEL<strong data-read="spd">---</strong></span></div>
+      <div class="setca-ppm-editor"><div class="setca-ppm-field"><label>CALLSIGN</label><input data-cmd="name" maxlength="24"></div><div class="setca-ppm-field"><label>RUMBO °</label><input data-cmd="tgtHdg" type="number" min="0" max="359"></div><div class="setca-ppm-field"><label>ALTITUD FT</label><input data-cmd="tgtAlt" type="number" min="0" max="80000" step="100"></div><div class="setca-ppm-field"><label>VELOCIDAD KT</label><input data-cmd="tgtSpd" type="number" min="0" max="2159" step="5"></div><div class="setca-ppm-field"><label>VIRAJE °/S</label><input data-cmd="turn" type="number" min="0.1" max="20" step="0.1"></div><div class="setca-ppm-editor-foot"><button class="setca-ppm-btn setca-ppm-close-edit" type="button">CERRAR</button></div></div>
+      <div class="setca-ppm-empty">AERONAVE SIN ASIGNAR</div>`;
+    const slot={index,el,planeId:'',canvas:el.querySelector('canvas'),ctx:null,drag:false,preview:null};slot.ctx=slot.canvas.getContext('2d');
+    el.querySelector('.setca-ppm-adjust').addEventListener('click',()=>el.classList.toggle('editing'));el.querySelector('.setca-ppm-close-edit').addEventListener('click',()=>el.classList.remove('editing'));el.querySelector('.setca-ppm-release').addEventListener('click',()=>releaseSlot(slot));
+    el.querySelectorAll('[data-cmd]').forEach(input=>{input.addEventListener('keydown',e=>{if(e.key==='Enter'){e.preventDefault();input.blur();}});input.addEventListener('change',()=>commitInput(slot,input));});
+    slot.canvas.addEventListener('pointerdown',e=>{if(!slot.planeId)return;slot.drag=true;slot.preview=pointerHeading(slot,e);slot.canvas.setPointerCapture(e.pointerId);draw(slot);e.preventDefault();});
+    slot.canvas.addEventListener('pointermove',e=>{if(!slot.drag)return;slot.preview=pointerHeading(slot,e);draw(slot);e.preventDefault();});
+    slot.canvas.addEventListener('pointerup',e=>{if(!slot.drag)return;slot.drag=false;slot.preview=pointerHeading(slot,e);command(slot,{tgtHdg:slot.preview,routeManualUntil:Date.now()+14000},'vector');slot.preview=null;try{slot.canvas.releasePointerCapture(e.pointerId);}catch(_){}e.preventDefault();});
+    slot.canvas.addEventListener('pointercancel',()=>{slot.drag=false;slot.preview=null;draw(slot);});return slot;
+  }
+  function build(){
+    if(root)return;root=document.createElement('section');root.id='setcaPseudoMinimal';root.innerHTML=`<div class="setca-ppm-bar"><select id="setcaPseudoMinimalSelect" aria-label="Aeronave disponible"></select><button id="setcaPseudoMinimalAssign" class="setca-ppm-btn" type="button">ASIGNAR</button><button id="setcaPseudoRelationBtn" class="setca-ppm-btn" type="button">RELACIÓN</button><span id="setcaPseudoMinimalStatus">Seleccione una aeronave disponible.</span><span id="setcaPseudoMinimalCount">0 / 4</span><aside id="setcaPseudoRelation" class="setca-ppm-relation" hidden><div class="setca-ppm-relation-head"><span>AERONAVES BAJO CONTROL</span><button class="setca-ppm-btn" type="button">CERRAR</button></div><div class="setca-ppm-relation-list"></div></aside></div><div class="setca-ppm-grid"></div>`;document.body.appendChild(root);
+    select=root.querySelector('#setcaPseudoMinimalSelect');assignBtn=root.querySelector('#setcaPseudoMinimalAssign');statusEl=root.querySelector('#setcaPseudoMinimalStatus');countEl=root.querySelector('#setcaPseudoMinimalCount');relation=root.querySelector('#setcaPseudoRelation');relationList=relation.querySelector('.setca-ppm-relation-list');
+    const grid=root.querySelector('.setca-ppm-grid');for(let i=0;i<MAX;i++){const s=makeSlot(i);slots.push(s);grid.appendChild(s.el);}assignBtn.addEventListener('click',()=>assignNext(select.value));root.querySelector('#setcaPseudoRelationBtn').addEventListener('click',()=>{relation.hidden=!relation.hidden;renderRelation();});relation.querySelector('button').addEventListener('click',()=>relation.hidden=true);
+    window.addEventListener('resize',()=>{top();slots.forEach(draw);},{passive:true});window.addEventListener('setca:pseudo-locks',()=>{validateLocks();refreshOptions(true);renderRelation();});top();
+  }
+  async function restore(){if(restored||!lockApi())return;restored=true;let ids=[];try{ids=JSON.parse(sessionStorage.getItem(key())||'[]');}catch(_){}for(const id of Array.isArray(ids)?ids.slice(0,MAX):[])await assignNext(id,true);}
+  function assignLocal(slot,id){const p=plane(id);if(!p)return false;slot.planeId=String(id);slot.el.classList.add('active');slot.el.querySelector('.setca-ppm-name').textContent=planeName(p).toUpperCase();refreshSlot(slot,p);save();return true;}
+  async function assignNext(id,quiet=false){const p=plane(id),free=slots.find(s=>!s.planeId),api=lockApi();if(!p||!free||!api){if(!quiet)tell(!api?'Conectando control de aeronaves…':'No hay panel disponible.',true);return false;}const result=await api.acquire(p);if(!result.ok){if(!quiet)tell(`OCUPADO POR ${String(result.owner&&result.owner.callsign||'OTRO PSEUDO PILOTO').toUpperCase()}`,true);refreshOptions(true);return false;}assignLocal(free,id);if(!quiet)tell(`${planeName(p)} · CONTROL ASIGNADO`);refreshOptions(true);renderRelation();return true;}
+  function clearLocal(slot){slot.planeId='';slot.preview=null;slot.el.classList.remove('active','editing');slot.el.querySelector('.setca-ppm-name').textContent='SIN ASIGNAR';slot.el.querySelectorAll('[data-read]').forEach(el=>el.textContent='---');slot.el.querySelectorAll('[data-cmd]').forEach(el=>el.value='');draw(slot);save();}
+  async function releaseSlot(slot){const id=slot.planeId;if(!id)return;const ok=lockApi()&&await lockApi().release(id);if(ok){clearLocal(slot);tell('Aeronave liberada.');refreshOptions(true);renderRelation();}else tell('No se pudo liberar la aeronave.',true);}
+  function validateLocks(){const api=lockApi();if(!api)return;slots.forEach(slot=>{if(slot.planeId&&!api.isMine(slot.planeId)){clearLocal(slot);tell('Una reserva venció o fue liberada.',true);}});}
+  function refreshOptions(force=false){if(!select||!lockApi())return;const ids=new Set(selected()),api=lockApi(),planes=ownPlanes(),sig=planes.map(p=>`${p.id}:${planeName(p)}:${api.owner(p.id)?.clientId||''}`).join('|')+'#'+Array.from(ids).join('|');if(!force&&sig===optionSig)return;optionSig=sig;const prev=select.value,available=planes.filter(p=>!ids.has(String(p.id))&&!api.owner(p.id));select.replaceChildren();if(!available.length){const o=document.createElement('option');o.value='';o.textContent=ids.size>=MAX?'LÍMITE DE 4 AERONAVES':'SIN AERONAVES LIBRES';select.appendChild(o);}else available.forEach(p=>{const o=document.createElement('option');o.value=String(p.id);o.textContent=planeName(p).toUpperCase();select.appendChild(o);});if(available.some(p=>String(p.id)===prev))select.value=prev;assignBtn.disabled=!select.value||ids.size>=MAX;countEl.textContent=`${ids.size} / 4`;}
+  function renderRelation(){if(!relationList||!lockApi())return;const locks=lockApi().list();relationList.replaceChildren();if(!locks.length){const e=document.createElement('div');e.className='setca-ppm-none';e.textContent='NO HAY AERONAVES ASIGNADAS';relationList.appendChild(e);return;}locks.sort((a,b)=>String(a.planeName).localeCompare(String(b.planeName))).forEach(row=>{const e=document.createElement('div');e.className='setca-ppm-lock-row';const a=document.createElement('strong'),b=document.createElement('span');a.textContent=String(row.planeName||row.planeId).toUpperCase();b.textContent=String(row.callsign||'PSEUDO PILOTO').toUpperCase();e.append(a,b);relationList.appendChild(e);});}
+  function commitInput(slot,input){const p=plane(slot.planeId);if(!p)return;const k=input.dataset.cmd;let patch={};if(k==='name'){const v=String(input.value||'').trim().slice(0,24);if(!v)return;patch.name=v;}else if(k==='tgtHdg')patch.tgtHdg=norm(input.value);else if(k==='tgtAlt')patch.tgtAlt=Math.max(0,Math.min(80000,Number(input.value)||0));else if(k==='tgtSpd')patch.tgtSpd=Math.max(0,Math.min(4000,(Number(input.value)||0)*1.852));else if(k==='turn')patch.turn=Math.max(.1,Math.min(20,Number(input.value)||2));command(slot,patch,k);}
+  async function command(slot,patch,kind){const p=plane(slot.planeId),api=lockApi();if(!p||!api||!api.isMine(p.id)){tell('La aeronave no está reservada por este PSEUDO PILOTO.',true);validateLocks();return false;}Object.assign(p,patch);try{if(window.__SETCA_markAircraftDirty)window.__SETCA_markAircraftDirty(p);}catch(_){}const ok=!!(window.__SETCA_publishPseudoPilotPatch&&await window.__SETCA_publishPseudoPilotPatch(p,patch,kind));tell(ok?`${planeName(p)} · ORDEN SINCRONIZADA`:'No se pudo sincronizar la orden.',!ok);refreshSlot(slot,p);refreshOptions(true);renderRelation();return ok;}
+  function pointerHeading(slot,e){const r=slot.canvas.getBoundingClientRect();return norm(Math.atan2(e.clientX-r.left-r.width/2,-(e.clientY-r.top-r.height/2))*180/Math.PI);}
+  function arrow(c,cx,cy,a,len,color,dash){const r=norm(a)*Math.PI/180,x=cx+Math.sin(r)*len,y=cy-Math.cos(r)*len;c.save();c.strokeStyle=color;c.fillStyle=color;c.lineWidth=2;if(dash)c.setLineDash([5,4]);c.beginPath();c.moveTo(cx,cy);c.lineTo(x,y);c.stroke();c.setLineDash([]);c.beginPath();c.moveTo(x,y);c.lineTo(x-Math.sin(r-.55)*7,y+Math.cos(r-.55)*7);c.lineTo(x-Math.sin(r+.55)*7,y+Math.cos(r+.55)*7);c.closePath();c.fill();c.restore();}
+  function draw(slot){const c=slot.ctx,cv=slot.canvas;if(!c||!cv)return;const r=cv.getBoundingClientRect(),d=Math.max(1,devicePixelRatio||1),w=Math.max(1,Math.round(r.width)),h=Math.max(1,Math.round(r.height));if(cv.width!==Math.round(w*d)||cv.height!==Math.round(h*d)){cv.width=Math.round(w*d);cv.height=Math.round(h*d);}c.setTransform(d,0,0,d,0,0);c.clearRect(0,0,w,h);c.fillStyle='#07100d';c.fillRect(0,0,w,h);const p=plane(slot.planeId);if(!p)return;const cx=w/2,cy=h/2,current=norm(p.hdg),target=slot.preview===null?norm(Number.isFinite(+p.tgtHdg)?p.tgtHdg:current):slot.preview;c.strokeStyle='rgba(108,133,119,.22)';c.beginPath();c.moveTo(cx-36,cy);c.lineTo(cx+36,cy);c.moveTo(cx,cy-36);c.lineTo(cx,cy+36);c.stroke();arrow(c,cx,cy,current,Math.min(w,h)*.18,'rgba(225,240,231,.65)',false);arrow(c,cx,cy,target,Math.min(w,h)*.34,getComputedStyle(root).getPropertyValue('--ppm-accent').trim()||'#5faee8',true);c.save();c.translate(cx,cy);c.rotate(current*Math.PI/180);c.fillStyle='#fff';c.beginPath();c.moveTo(0,-9);c.lineTo(6,8);c.lineTo(0,5);c.lineTo(-6,8);c.closePath();c.fill();c.restore();}
+  function refreshSlot(slot,p){if(!p)return;slot.el.querySelector('.setca-ppm-name').textContent=planeName(p).toUpperCase();slot.el.querySelector('[data-read="hdg"]').textContent=`${hdg(p.hdg)}°`;slot.el.querySelector('[data-read="alt"]').textContent=`${Math.round(Number(p.alt)||0)} FT`;slot.el.querySelector('[data-read="spd"]').textContent=`${Math.round((Number(p.spd)||0)/1.852)} KT`;const v={name:planeName(p),tgtHdg:Math.round(norm(Number.isFinite(+p.tgtHdg)?p.tgtHdg:p.hdg)),tgtAlt:Math.round(Number.isFinite(+p.tgtAlt)?p.tgtAlt:p.alt||0),tgtSpd:Math.round((Number.isFinite(+p.tgtSpd)?p.tgtSpd:p.spd||0)/1.852),turn:Number(p.turn||2).toFixed(1)};slot.el.querySelectorAll('[data-cmd]').forEach(i=>{if(document.activeElement!==i)i.value=v[i.dataset.cmd];});draw(slot);}
+  function frame(now){try{if(!active()){if(root)root.style.display='none';requestAnimationFrame(frame);return;}build();root.style.display='';restore();if(now-lastPaint>120){lastPaint=now;validateLocks();slots.forEach(s=>{const p=plane(s.planeId);if(p)refreshSlot(s,p);});refreshOptions();if(!relation.hidden)renderRelation();}}catch(e){console.warn('PSEUDO PILOTO MINIMAL:',e);}requestAnimationFrame(frame);}
+  window.__SETCA_PSEUDO_MINIMAL=Object.freeze({ownPlanes:()=>ownPlanes().slice(),selected,locks:()=>lockApi()?lockApi().list():[],assign:id=>assignNext(id),release:async index=>{const s=slots[index];if(s)await releaseSlot(s);},command:async(index,patch)=>{const s=slots[index];return s?command(s,patch,'qa-command'):false;}});
+  if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',()=>{build();requestAnimationFrame(frame);},{once:true});else{build();requestAnimationFrame(frame);}
 })();
 </script>
 
