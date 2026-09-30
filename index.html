@@ -276,11 +276,15 @@
   const __setcaExcsSentMissiles = new Set();
   let __setcaExcsPilotSending = false;
   const __setcaExcsRenderMotion = new Map();
+  const __SETCA_EXCS_POSITION_BROADCAST_MS = 1000;
+  const __SETCA_EXCS_RENDER_TRANSITION_MS = 650;
+  window.__SETCA_EXCS_POSITION_BROADCAST_MS = __SETCA_EXCS_POSITION_BROADCAST_MS;
+  window.__SETCA_EXCS_RENDER_TRANSITION_MS = __SETCA_EXCS_RENDER_TRANSITION_MS;
   window.__SETCA_interpolatedPlane = function(p){
     if(!p || !__SETCA_isExcsSharedRoom() || window.__SETCA_isExcsWhiteController() || (window.st && (st.localPause || (st.serverPause && st.serverPause.active)))) return p;
     const motion=__setcaExcsRenderMotion.get(String(p.id));
     if(!motion) return p;
-    const t=Math.min(1,Math.max(0,(performance.now()-motion.at)/500));
+    const t=Math.min(1,Math.max(0,(performance.now()-motion.at)/__SETCA_EXCS_RENDER_TRANSITION_MS));
     const hdgDelta=((motion.to.hdg-motion.from.hdg+540)%360)-180;
     return {...p,x:motion.from.x+(motion.to.x-motion.from.x)*t,y:motion.from.y+(motion.to.y-motion.from.y)*t,
       hdg:(motion.from.hdg+hdgDelta*t+360)%360};
@@ -2837,11 +2841,11 @@ function __normalizeMissileStats(src){
   
   /* ===== Missile Alerts (tactical) ===== */
   .missileCard{
-    border:1px solid #b21;
-    border-radius:12px;
-    padding:10px 10px 9px;
-    background:linear-gradient(180deg, rgba(35,0,0,.78), rgba(10,0,0,.62));
-    color:#ffe8a3;
+    border:1px solid rgba(248,113,113,.58);
+    border-radius:7px;
+    padding:7px 9px;
+    background:linear-gradient(180deg,rgba(45,10,16,.94),rgba(22,6,10,.92));
+    color:#f8fafc;
     position:relative;
     overflow:hidden;
     font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
@@ -2862,37 +2866,22 @@ function __normalizeMissileStats(src){
   }
   .missileCard::after{
     content:"";
-    position:absolute; left:0; top:0; bottom:0; width:4px;
-    background:linear-gradient(180deg,#ff4d4d,#ffb703);
+    position:absolute; left:0; top:0; bottom:0; width:3px;
+    background:#ef4444;
     opacity:.9;
     pointer-events:none;
   }
-  .missileHdr{display:flex;justify-content:space-between;align-items:center;gap:10px;margin-bottom:6px}
-  .missileTitle{
-    display:flex;align-items:center;gap:8px;
-    font-size:12px; letter-spacing:.12em; text-transform:uppercase;
-    color:#ffd166;
+  .missileTactical{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr) auto;align-items:stretch;width:100%;min-width:0}
+  .missileDatum{display:grid;align-content:center;min-width:0;padding:1px 9px;border-left:1px solid rgba(248,113,113,.24)}
+  .missileDatum:first-child{padding-left:3px;border-left:0}
+  .missileDatum:last-child{padding-right:1px;text-align:right}
+  .missileDatum small{display:block;margin-bottom:4px;color:#aeb8c2;font-size:7px;font-weight:900;letter-spacing:.14em;line-height:1;text-transform:uppercase;white-space:nowrap}
+  .missileDatum strong{display:block;overflow:hidden;color:#f8fafc;font-size:11px;font-weight:900;letter-spacing:.045em;line-height:1.15;text-overflow:ellipsis;white-space:nowrap}
+  .missileDatum.missileDistance strong{color:#fde68a;font-size:12px;letter-spacing:.055em}
+  @media(max-width:520px){
+    .missileTactical{grid-template-columns:1fr 1fr}
+    .missileDatum.missileDistance{grid-column:1/-1;margin-top:6px;padding:6px 2px 0;border-left:0;border-top:1px solid rgba(248,113,113,.24);text-align:right}
   }
-  .missileDot{
-    width:8px;height:8px;border-radius:50%;
-    background:#ff3b3b; box-shadow:0 0 10px rgba(255,59,59,.65);
-    animation:missPulse 1.15s infinite;
-  }
-  @keyframes missPulse{0%{transform:scale(1);opacity:.9}50%{transform:scale(1.35);opacity:.45}100%{transform:scale(1);opacity:.9}}
-  .missileDist{
-    font-size:12px; letter-spacing:.08em;
-    color:#e9ffbf;
-    padding:2px 8px;
-    border:1px solid rgba(255,209,102,.35);
-    border-radius:999px;
-    background:rgba(0,0,0,.25);
-    white-space:nowrap;
-  }
-  .missileGrid{display:grid;grid-template-columns: 1fr; gap:5px}
-  .missileRow{display:flex;flex-wrap:wrap;gap:8px;align-items:baseline}
-  .missileK{font-size:11px; letter-spacing:.14em; text-transform:uppercase; color:rgba(255,209,102,.9)}
-  .missileV{font-size:12px; color:#fff2c2; font-weight:400}
-  .missileArrow{opacity:.85}
   .missileEmpty{
     border:1px solid #2a5;border-radius:12px;padding:10px;
     background:linear-gradient(180deg,#0b160e,#0a1310);
@@ -2901,6 +2890,65 @@ function __normalizeMissileStats(src){
     letter-spacing:.06em;
     text-transform:uppercase;
     font-size:12px;
+  }
+  /* ===== Radar Warning · disponible para todos los puestos ===== */
+  #pRadarWarning{display:flex;gap:5px;padding:6px}
+  #pRadarWarning .panel-header{min-height:25px}
+  #pRadarWarning .panel-header h3{font-size:12px;letter-spacing:.095em}
+  #pRadarWarningBody{gap:3px}
+  #radarWarningList{gap:3px;width:100%;align-items:stretch}
+  .radarWarningEmpty{
+    border:1px solid rgba(100,116,139,.55);border-radius:8px;padding:8px 9px;
+    background:rgba(15,23,42,.72);color:#a8b4c4;
+    font:700 10px/1.3 ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
+    letter-spacing:.09em;text-transform:uppercase;text-align:center;
+  }
+  .radarWarningCard{
+    position:relative;display:block;
+    width:100%;min-height:34px;box-sizing:border-box;padding:4px 6px 4px 9px;border:1px solid rgba(56,189,248,.42);border-radius:5px;
+    background:linear-gradient(180deg,rgba(10,25,39,.92),rgba(5,15,27,.90));
+    color:#dbeafe;font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
+    overflow:hidden;
+  }
+  .radarWarningCard::after{content:"";position:absolute;inset:0 auto 0 0;width:3px;background:#38bdf8;opacity:.9}
+  .radarWarningCard.is-awacs{border-color:rgba(167,139,250,.48);background:linear-gradient(180deg,rgba(24,20,49,.92),rgba(10,12,30,.90))}
+  .radarWarningCard.is-awacs::after{background:#a78bfa}
+  .radarWarningCard.is-missile{border-color:rgba(248,113,113,.62);background:linear-gradient(180deg,rgba(55,12,20,.94),rgba(28,7,12,.92))}
+  .radarWarningCard.is-missile::after{background:#ef4444}
+  .radarWarningCard.is-friend{border-right:3px solid rgba(74,222,128,.78)}
+  .radarWarningCard.is-unknown{border-right:3px solid rgba(250,204,21,.82)}
+  .radarWarningTactical{display:grid;grid-template-columns:minmax(62px,70px) minmax(58px,max-content) minmax(0,1fr) auto;gap:4px;align-items:center;width:100%;min-width:0}
+  .radarWarningAircraft{min-width:0;padding-left:1px;color:#fff;font-size:12px;font-weight:900;letter-spacing:.04em;line-height:1.05;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;text-align:left;text-shadow:0 1px 0 rgba(0,0,0,.6)}
+  .radarWarningState{min-width:58px;padding:3px 5px;border:1px solid currentColor;border-radius:3px;color:#fde68a;background:rgba(250,204,21,.06);font-size:9px;font-weight:900;letter-spacing:.065em;line-height:1;text-align:center;white-space:nowrap}
+  .radarWarningCard.is-friend .radarWarningState{color:#86efac;background:rgba(74,222,128,.07)}
+  .radarWarningCard.is-unknown .radarWarningState{color:#fde047;background:rgba(250,204,21,.07)}
+  .radarWarningCard.is-missile .radarWarningState{min-width:96px;color:#fecaca;background:rgba(239,68,68,.10);border-color:rgba(248,113,113,.72);font-size:8px;letter-spacing:.055em}
+  .radarWarningBearing{min-width:0;display:flex;flex-wrap:wrap;align-items:center;justify-content:flex-start;gap:2px;padding-left:5px;border-left:1px solid rgba(148,163,184,.24);color:#d8f2ff;text-align:left;line-height:1}
+  .radarWarningBearingMark{display:flex;flex:0 1 auto;align-items:center;justify-content:center;gap:3px;min-height:21px;padding:1px 4px;border:1px solid rgba(125,211,252,.24);border-radius:3px;background:rgba(14,116,144,.06)}
+  .radarWarningBearingMark strong{display:block;font-size:16px;font-weight:900;letter-spacing:.02em;line-height:1;white-space:nowrap;text-shadow:0 1px 0 rgba(0,0,0,.55)}
+  .radarWarningBearingMark em{display:block;color:#fecaca;font-size:7px;font-style:normal;font-weight:900;letter-spacing:.045em;white-space:nowrap}
+  .radarWarningBearingMark.is-engaged{border-color:rgba(248,113,113,.65);background:rgba(239,68,68,.11);color:#fecaca}
+  .radarWarningCard.is-missile .radarWarningBearingMark{border-color:rgba(248,113,113,.34);background:rgba(239,68,68,.08);color:#fecaca}
+  .radarWarningCard.is-missile .radarWarningBearing{color:#fecaca}
+  .radarWarningSignal{display:none;min-width:42px;align-items:center;justify-content:flex-end;gap:4px;padding-left:5px;border-left:1px solid rgba(248,113,113,.25)}
+  .radarWarningCard.is-missile .radarWarningSignal{display:flex}
+  .radarWarningPulse{flex:0 0 auto;width:7px;height:7px;border-radius:50%;background:#ff334d;box-shadow:0 0 10px rgba(255,51,77,.85);animation:setcaThreatBlink var(--rw-blink,800ms) steps(1,end) infinite}
+  .radarWarningBars{display:flex;align-items:flex-end;gap:1px;height:14px}
+  .radarWarningBars i{display:block;width:2px;border-radius:1px;background:rgba(248,113,113,.18);border:1px solid rgba(248,113,113,.12)}
+  .radarWarningBars i:nth-child(1){height:4px}.radarWarningBars i:nth-child(2){height:6px}.radarWarningBars i:nth-child(3){height:8px}.radarWarningBars i:nth-child(4){height:11px}.radarWarningBars i:nth-child(5){height:14px}
+  .radarWarningSignal.level-1 .radarWarningBars i:nth-child(-n+1),
+  .radarWarningSignal.level-2 .radarWarningBars i:nth-child(-n+2),
+  .radarWarningSignal.level-3 .radarWarningBars i:nth-child(-n+3),
+  .radarWarningSignal.level-4 .radarWarningBars i:nth-child(-n+4),
+  .radarWarningSignal.level-5 .radarWarningBars i:nth-child(-n+5){background:#fb7185;border-color:#fda4af;box-shadow:0 0 5px rgba(251,113,133,.38)}
+  @keyframes setcaThreatBlink{0%,44%{opacity:1;transform:scale(1.2)}45%,100%{opacity:.12;transform:scale(.72)}}
+  @media(max-width:520px){
+    .radarWarningTactical{grid-template-columns:minmax(56px,62px) minmax(54px,max-content) minmax(0,1fr) auto;gap:3px}
+    .radarWarningAircraft{font-size:11px}
+    .radarWarningState{min-width:54px;padding-inline:3px;font-size:8px}
+    .radarWarningCard.is-missile .radarWarningState{min-width:86px;font-size:7px}
+    .radarWarningBearing{padding-left:3px}
+    .radarWarningSignal{min-width:36px;padding-left:3px}
   }
 .warn{color:var(--warn)}
   /* Focus / Selection contrast */
@@ -4189,6 +4237,15 @@ body[data-setca-role="default"] #pNav{
 .config-format-field{display:flex;flex-direction:column;gap:5px;min-width:0;font-size:11px;font-weight:500;color:#4e5c6b;}
 .config-format-scope{grid-column:1 / -1;}
 .config-format-field select{width:100%;min-width:0;height:32px;border-radius:4px;padding:4px 8px;font-size:12px;}
+.config-bullseye-select{display:grid;grid-template-columns:82px minmax(0,1fr);align-items:center;gap:10px;}
+.config-bullseye-select label{font-size:11px;font-weight:600;color:#4e5c6b;}
+.config-bullseye-select select{width:100%;min-width:0;height:32px;border-radius:4px;padding:4px 8px;font-size:12px;}
+.config-bullseye-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:6px;border:0;padding:0;margin:0;}
+.config-bullseye-check{display:flex;align-items:center;gap:7px;min-width:0;min-height:30px;padding:5px 7px;border:1px solid #d2d9e0;border-radius:4px;background:#f8fafb;color:#334155;font:500 10px/1.15 system-ui,Segoe UI,sans-serif;cursor:pointer;}
+.config-bullseye-check input{width:13px;height:13px;margin:0;accent-color:#526a80;flex:none;}
+.config-bullseye-check span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+.config-bullseye-actions{display:grid;grid-template-columns:1fr 1fr;gap:6px;}
+.config-bullseye-status{min-height:14px;color:#647181;font:500 10px/1.35 system-ui,Segoe UI,sans-serif;}
 .config-pop .btn.mini{min-height:30px;height:30px;padding:0 10px;font-size:12px;border-radius:4px;}
 .config-card{border:0;border-bottom:1px solid #e5e9ed;border-radius:0;padding:16px 0;background:transparent;display:flex;flex-direction:column;gap:11px;box-shadow:none;}
 .config-card:last-child{border-bottom:0;}
@@ -6432,6 +6489,62 @@ body.setca-gal-final-collapsed:is([data-setca-role="odt"],[data-setca-role="sama
   body.observer-mode #right{
     display:none !important;
   }
+  /* El observador conserva el mapa limpio, pero Radar Warning es universal. */
+  body.observer-mode #right{
+    position:fixed !important;
+    inset:0 !important;
+    display:block !important;
+    width:100% !important;
+    height:100% !important;
+    padding:0 !important;
+    margin:0 !important;
+    background:transparent !important;
+    border:0 !important;
+    pointer-events:none !important;
+    z-index:45;
+  }
+  body.observer-mode #right > .panel{display:none !important}
+  body.observer-mode #right > #pRadarWarning{
+    position:fixed !important;
+    right:calc(100vw - var(--setca-center-right, 100vw) + 16px);
+    bottom:calc(100vh - var(--setca-center-bottom, 100vh) + 16px);
+    display:flex !important;
+    width:clamp(260px, calc(var(--setca-center-w, 100vw) * 0.28), 360px) !important;
+    max-height:min(220px, 31vh) !important;
+    overflow:hidden !important;
+    pointer-events:auto !important;
+    background:rgba(6,18,10,.48) !important;
+    border:1px solid rgba(88,255,148,.32) !important;
+    backdrop-filter:blur(6px);
+  }
+  /* La consola PSEUDO PILOTO ocupa la pantalla: el receptor queda sobre ella. */
+  body[data-setca-role="pseudopilot"] #right{
+    position:fixed !important;
+    inset:0 !important;
+    display:block !important;
+    width:100% !important;
+    height:100% !important;
+    padding:0 !important;
+    margin:0 !important;
+    background:transparent !important;
+    border:0 !important;
+    pointer-events:none !important;
+    z-index:8840 !important;
+  }
+  body[data-setca-role="pseudopilot"] #right > .panel{display:none !important}
+  body[data-setca-role="pseudopilot"] #right > #pRadarWarning{
+    position:fixed !important;
+    right:12px;
+    bottom:12px;
+    display:flex !important;
+    width:min(360px,calc(100vw - 24px)) !important;
+    max-height:min(210px,29vh) !important;
+    overflow:hidden !important;
+    pointer-events:auto !important;
+    background:rgba(20,28,33,.96) !important;
+    border:1px solid #52606a !important;
+    box-shadow:0 10px 26px rgba(0,0,0,.38) !important;
+  }
   body.observer-mode header button{
     display:none !important;
   }
@@ -6500,7 +6613,13 @@ body.setca-gal-final-collapsed:is([data-setca-role="odt"],[data-setca-role="sama
   }
   body.mode-odi-overlay #pAlerts{
     right:calc(100vw - var(--setca-center-right, 100vw) + 16px);
+    bottom:calc(100vh - var(--setca-center-bottom, 100vh) + min(238px, 33vh));
+    max-height:min(190px, 27vh) !important;
+  }
+  body.mode-odi-overlay #pRadarWarning{
+    right:calc(100vw - var(--setca-center-right, 100vw) + 16px);
     bottom:calc(100vh - var(--setca-center-bottom, 100vh) + 16px);
+    max-height:min(205px, 29vh) !important;
   }
 
   body.mode-odt-overlay #pGTC{
@@ -6513,7 +6632,13 @@ body.setca-gal-final-collapsed:is([data-setca-role="odt"],[data-setca-role="sama
   }
   body.mode-odt-overlay #pAlerts{
     right:calc(100vw - var(--setca-center-right, 100vw) + 16px);
+    bottom:calc(100vh - var(--setca-center-bottom, 100vh) + min(238px, 33vh));
+    max-height:min(190px, 27vh) !important;
+  }
+  body.mode-odt-overlay #pRadarWarning{
+    right:calc(100vw - var(--setca-center-right, 100vw) + 16px);
     bottom:calc(100vh - var(--setca-center-bottom, 100vh) + 16px);
+    max-height:min(205px, 29vh) !important;
   }
 
   @media (max-width: 1100px){
@@ -6553,7 +6678,14 @@ body.setca-gal-final-collapsed:is([data-setca-role="odt"],[data-setca-role="sama
     body.mode-odt-overlay #pAlerts{
       left:calc(var(--setca-center-left, 8px) + 12px);
       right:calc(100vw - var(--setca-center-right, 100vw) + 12px);
+      bottom:calc(100vh - var(--setca-center-bottom, 100vh) + min(202px, 30vh));
+    }
+    body.mode-odi-overlay #pRadarWarning,
+    body.mode-odt-overlay #pRadarWarning{
+      left:calc(var(--setca-center-left, 8px) + 12px);
+      right:calc(100vw - var(--setca-center-right, 100vw) + 12px);
       bottom:calc(100vh - var(--setca-center-bottom, 100vh) + 12px);
+      max-height:min(170px, 25vh) !important;
     }
   }
 
@@ -9556,6 +9688,7 @@ body.setca-modern-ui header #configBtn[aria-expanded="true"]{background:#3b4b59 
   .config-pop-head{padding:12px 14px;}
   .config-pop-body{padding:0 14px;}
   .config-label-grid{grid-template-columns:repeat(3,minmax(0,1fr));}
+  .config-bullseye-grid{grid-template-columns:repeat(2,minmax(0,1fr));}
 }
 body.setca-modern-ui :is(
   #systemsBtn,
@@ -10318,8 +10451,13 @@ body.setca-modern-ui.setca-excs-session[data-setca-team="red"] header :is(#setca
     </section>
 
     <section class="panel" id="pAlerts">
-      <div class="panel-header"><h3>Misiles Entrantes</h3><button id="setcaLocalDrawLauncher" class="btn mini focusable" type="button" title="Herramientas de dibujo locales">GFX</button><span class="toggle" data-target="#pAlertsBody">▾</span></div>
+      <div class="panel-header"><h3>Misiles Salientes</h3><button id="setcaLocalDrawLauncher" class="btn mini focusable" type="button" title="Herramientas de dibujo locales">GFX</button><span class="toggle" data-target="#pAlertsBody">▾</span></div>
       <div id="pAlertsBody" class="panel-body"><div id="missileAlerts" class="col"></div></div>
+    </section>
+
+    <section class="panel" id="pRadarWarning" aria-label="Radar Warning">
+      <div class="panel-header"><h3>Radar Warning</h3><span id="radarWarningCount" class="pill">0</span><span class="toggle" data-target="#pRadarWarningBody">▾</span></div>
+      <div id="pRadarWarningBody" class="panel-body"><div id="radarWarningList" class="col"></div></div>
     </section>
 
   </aside>
@@ -10379,12 +10517,52 @@ body.setca-modern-ui.setca-excs-session[data-setca-team="red"] header :is(#setca
       </section>
     </div>
     <canvas id="navReportCanvas"></canvas>
+    <div id="setcaNav3DPivot" class="setca-nav3d-pivot" hidden aria-hidden="true"><i></i></div>
+    <div id="setcaNav3DPad" class="setca-nav3d-pad" hidden role="group" aria-label="Control fino de cámara NAV 3D">
+      <span class="setca-nav3d-pad-title">FOCO 3D</span>
+      <button type="button" data-nav3d-nudge="up" aria-label="Inclinar cámara hacia arriba" title="Inclinar arriba · Flecha ↑">↑</button>
+      <button type="button" data-nav3d-nudge="left" aria-label="Girar cámara a la izquierda" title="Girar izquierda · Flecha ←">←</button>
+      <button type="button" data-nav3d-nudge="reset" aria-label="Restablecer orientación alrededor del foco" title="Restablecer orientación">◎</button>
+      <button type="button" data-nav3d-nudge="right" aria-label="Girar cámara a la derecha" title="Girar derecha · Flecha →">→</button>
+      <button type="button" data-nav3d-nudge="down" aria-label="Inclinar cámara hacia abajo" title="Inclinar abajo · Flecha ↓">↓</button>
+      <span class="setca-nav3d-pad-hint">FLECHAS · RUEDA ZOOM</span>
+    </div>
     <div id="navLegend" class="navLegend"></div>
   </div>
 </div>
 <div id="araReport" class="modal"><span id="closeAraReport" class="close">&times;</span><div id="araReportContent"><div class="araTop"><div><h2>ARA - AIRCRAFT RISK ANALYZER</h2><div id="araMeta" class="araSub">Analisis horizontal, vertical, exposicion y maniobras</div></div><div class="araControls"><select id="araFocusSelect" aria-label="Filtro ARA"><option value="">Todas las aeronaves</option></select><button id="araRefreshBtn" type="button">ACTUALIZAR</button></div></div><div id="araKpis" class="araKpis"></div><div id="araBody" class="araBody"></div></div></div>
 <div id="spiderWebPanel" class="modal" aria-hidden="true"><span id="closeSpiderWebPanel" class="close">&times;</span><div id="spiderWebContent"><h2>SPIDER WEB</h2><div class="spiderControls"><label>Avion base<select id="spiderBaseSelect" aria-label="Avion base para Spider Web"></select></label><button id="spiderWebToggle" type="button" class="is-on">ON</button></div><div class="spiderLegend"><span><i class="spiderDot red"></i>Cerca</span><span><i class="spiderDot orange"></i>Medio</span><span><i class="spiderDot green"></i>Lejos</span></div><div id="spiderWebList" class="spiderWebList"></div></div></div>
 <div id="drawingScopeModal" class="modal drawingScopeModal" aria-hidden="true"><span id="closeDrawingScopeModal" class="close">&times;</span><div id="drawingScopeModalContent"><h2>RELACIÓN DE GRÁFICOS</h2><div class="drawingScopeModalToolbar"><span class="drawingScopeModalHint">Grupos minimizables · ocultado local por grupo</span><span id="drawingScopeCount" class="drawingScopeCount">0</span></div><div id="drawingScopeList" class="drawingScopeModalList" aria-label="Listado de gráficos"></div></div></div>
+
+<style id="setca-nav3d-focus-controls-css">
+#setcaNav3DPivot{
+  position:fixed;z-index:9510;width:30px;height:30px;transform:translate(-50%,-50%);pointer-events:none;
+  border:1px solid rgba(125,211,252,.62);border-radius:50%;box-shadow:0 0 0 4px rgba(15,23,42,.46);
+}
+#setcaNav3DPivot::before,#setcaNav3DPivot::after{content:'';position:absolute;background:rgba(224,242,254,.9);}
+#setcaNav3DPivot::before{left:50%;top:-6px;width:1px;height:40px;transform:translateX(-50%);}
+#setcaNav3DPivot::after{top:50%;left:-6px;height:1px;width:40px;transform:translateY(-50%);}
+#setcaNav3DPivot i{position:absolute;inset:10px;border:1px solid #e0f2fe;border-radius:50%;background:rgba(14,116,144,.18);}
+#setcaNav3DPad{
+  position:fixed;z-index:9512;width:132px;display:grid;grid-template-columns:repeat(3,34px);grid-template-rows:18px repeat(3,34px) 16px;
+  justify-content:center;gap:4px;padding:9px 8px 7px;border:1px solid rgba(125,150,170,.72);border-radius:8px;
+  background:rgba(9,20,29,.9);box-shadow:0 8px 24px rgba(0,0,0,.32);backdrop-filter:blur(4px);user-select:none;
+}
+#setcaNav3DPad[hidden],#setcaNav3DPivot[hidden]{display:none!important;}
+#setcaNav3DPad .setca-nav3d-pad-title{grid-column:1/-1;color:#b9c8d4;text-align:center;font:700 9px/14px ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;letter-spacing:.16em;}
+#setcaNav3DPad button{display:grid;place-items:center;min-width:0;height:34px;padding:0;border:1px solid #64798a;border-radius:5px;background:#182936;color:#e5eef5;box-shadow:inset 0 1px 0 rgba(255,255,255,.06);font:700 17px/1 system-ui,Segoe UI,sans-serif;cursor:pointer;}
+#setcaNav3DPad button:hover{background:#243b4b;border-color:#91a7b8;}
+#setcaNav3DPad button:active{background:#0f202c;transform:translateY(1px);}
+#setcaNav3DPad button:focus-visible{outline:2px solid #7dd3fc;outline-offset:1px;}
+#setcaNav3DPad [data-nav3d-nudge="up"]{grid-column:2;grid-row:2;}
+#setcaNav3DPad [data-nav3d-nudge="left"]{grid-column:1;grid-row:3;}
+#setcaNav3DPad [data-nav3d-nudge="reset"]{grid-column:2;grid-row:3;color:#7dd3fc;}
+#setcaNav3DPad [data-nav3d-nudge="right"]{grid-column:3;grid-row:3;}
+#setcaNav3DPad [data-nav3d-nudge="down"]{grid-column:2;grid-row:4;}
+#setcaNav3DPad .setca-nav3d-pad-hint{grid-column:1/-1;grid-row:5;color:#7890a1;text-align:center;font:600 8px/14px ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;letter-spacing:.05em;white-space:nowrap;}
+#navReportCanvas.setca-nav-orbiting{cursor:grabbing!important;}
+@media(max-width:680px){#setcaNav3DPad{transform:scale(.9);transform-origin:bottom right;}}
+</style>
 
 <script>
 /* ===== Utils ===== */
@@ -11487,6 +11665,8 @@ window.__saveLocalPrefs = ()=>{
     __localPrefs.navHiddenGtc = {...(__NAV_STORE.hiddenGtc || {})};
     __localPrefs.navCenterWX = Number.isFinite(+(__NAV_STORE.view && __NAV_STORE.view.centerWX)) ? +(__NAV_STORE.view.centerWX) : null;
     __localPrefs.navCenterWY = Number.isFinite(+(__NAV_STORE.view && __NAV_STORE.view.centerWY)) ? +(__NAV_STORE.view.centerWY) : null;
+    __localPrefs.nav3DYawDeg = Number.isFinite(+(__NAV_STORE.profile3d && __NAV_STORE.profile3d.yawDeg)) ? +__NAV_STORE.profile3d.yawDeg : 0;
+    __localPrefs.nav3DPitchDeg = Number.isFinite(+(__NAV_STORE.profile3d && __NAV_STORE.profile3d.pitchDeg)) ? +__NAV_STORE.profile3d.pitchDeg : 58;
   }
   __lsSave(__PREF_KEY, __localPrefs);
 };
@@ -11584,7 +11764,7 @@ setupAirports();
 const __NAV_STORE = {
   showCoverage: !__localPrefs || __localPrefs.navShowCoverage !== false,
   hiddenGtc: (__localPrefs && __localPrefs.navHiddenGtc && typeof __localPrefs.navHiddenGtc === 'object') ? {...__localPrefs.navHiddenGtc} : {},
-  sampleEveryMs: 500,
+  sampleEveryMs: 1000,
   moveThresholdNm: 0.05,
   maxPointsPerTrack: 7200,
   tracks: Object.create(null),
@@ -11616,8 +11796,8 @@ const __NAV_STORE = {
   profile3d: {
     enabled:false,
     altFtPerNm:6000,
-    pitchDeg:58,
-    yawDeg:0,
+    pitchDeg:Math.max(0.5, Math.min(89, Number.isFinite(+(__localPrefs && __localPrefs.nav3DPitchDeg)) ? +__localPrefs.nav3DPitchDeg : 58)),
+    yawDeg:Number.isFinite(+(__localPrefs && __localPrefs.nav3DYawDeg)) ? +__localPrefs.nav3DYawDeg : 0,
     depthShear:0,
     liftBoost:1.15
   }
@@ -13367,7 +13547,7 @@ function renderNavReport(forceLegend=false){
             const nm = String(missile.name || missile.id || 'MISIL');
             const sub = [missile.launcherName ? `ORIGEN ${missile.launcherName}` : '', missile.targetName ? `OBJ ${missile.targetName}` : ''].filter(Boolean).join(' · ');
             const color = String(missile.color || '#F97316');
-            return `<div class="navLegendItem navLegendMissileItem" data-nav-legend-missile="${missile.id}"><span class="navLegendSwatch navLegendMissileSwatch" style="background:${color}" data-nav-center-missile="${missile.id}" title="Ir al misil entrante ${nm}"></span><div class="navLegendText"><span class="navLegendName">MISIL ENTRANTE · ${nm}</span><span class="navLegendSub">${sub || 'Traza de misil · ubicar'}</span></div></div>`;
+            return `<div class="navLegendItem navLegendMissileItem" data-nav-legend-missile="${missile.id}"><span class="navLegendSwatch navLegendMissileSwatch" style="background:${color}" data-nav-center-missile="${missile.id}" title="Ir al misil saliente ${nm}"></span><div class="navLegendText"><span class="navLegendName">MISIL SALIENTE · ${nm}</span><span class="navLegendSub">${sub || 'Traza de misil · ubicar'}</span></div></div>`;
           }).join('')
       : '';
     legend.innerHTML = aircraftLegendHtml + missileLegendHtml;
@@ -13556,14 +13736,15 @@ document.addEventListener('click', (e)=>{
     const dy = e.clientY - __NAV_STORE.drag.y;
     if(__NAV_STORE.drag.mode3d){
       if(!__NAV_STORE.profile3d) __NAV_STORE.profile3d = {enabled:true, altFtPerNm:6000, pitchDeg:58, yawDeg:0, depthShear:0, liftBoost:1.15};
-      // Control sencillo: el primer eje dominante queda bloqueado hasta soltar.
-      // Sensibilidad al 25 % de la original (mitad de la configuración anterior).
-      if(!__NAV_STORE.drag.axis && Math.max(Math.abs(dx),Math.abs(dy)) >= 4){
-        __NAV_STORE.drag.axis = Math.abs(dx) >= Math.abs(dy) ? 'yaw' : 'pitch';
-        canvas.classList.add('setca-nav-axis-' + __NAV_STORE.drag.axis);
+      // Órbita libre y lenta alrededor del foco central. Ambos ejes pueden
+      // corregirse en el mismo gesto sin desplazar el punto analizado.
+      if(!__NAV_STORE.drag.axis && Math.hypot(dx,dy) >= 4){
+        __NAV_STORE.drag.axis = 'orbit';
+        canvas.classList.add('setca-nav-orbiting');
       }
-      const yaw = (__NAV_STORE.drag.yawDeg || 0) + (__NAV_STORE.drag.axis === 'yaw' ? dx * 0.105 : 0);
-      const pitch = Math.max(0.5, Math.min(89, (__NAV_STORE.drag.pitchDeg || 58) - (__NAV_STORE.drag.axis === 'pitch' ? dy * 0.055 : 0)));
+      if(!__NAV_STORE.drag.axis) return;
+      const yaw = (__NAV_STORE.drag.yawDeg || 0) + dx * 0.07;
+      const pitch = Math.max(0.5, Math.min(89, (__NAV_STORE.drag.pitchDeg || 58) - dy * 0.04));
       __NAV_STORE.profile3d.yawDeg = ((yaw % 360) + 360) % 360;
       if(__NAV_STORE.profile3d.yawDeg > 180) __NAV_STORE.profile3d.yawDeg -= 360;
       __NAV_STORE.profile3d.pitchDeg = pitch;
@@ -13598,6 +13779,7 @@ document.addEventListener('click', (e)=>{
     if(!__NAV_STORE.drag || (e && __NAV_STORE.drag.id !== e.pointerId)) return;
     __NAV_STORE.drag = null;
     canvas.classList.remove('is-dragging');
+    canvas.classList.remove('setca-nav-orbiting');
     canvas.classList.remove('setca-nav-axis-yaw');
     canvas.classList.remove('setca-nav-axis-pitch');
     try{ if(window.__saveLocalPrefs) window.__saveLocalPrefs(); }catch(_){ }
@@ -13607,6 +13789,7 @@ document.addEventListener('click', (e)=>{
   canvas.addEventListener('lostpointercapture', ()=>{
     __NAV_STORE.drag = null;
     canvas.classList.remove('is-dragging');
+    canvas.classList.remove('setca-nav-orbiting');
     canvas.classList.remove('setca-nav-axis-yaw');
     canvas.classList.remove('setca-nav-axis-pitch');
     if(__NAV_STORE.measure){
@@ -15834,7 +16017,48 @@ function getAspectCode(sector){
   }
   return "(?)";
 }
+
+/* Posición LOCAL de las tarjetas BRAA de emparejamiento.
+   Nunca se incorpora a st.pairs ni se publica en Firebase. */
+const __SETCA_PAIR_BRAA_OFFSET_KEY = `SETCA_pair_braa_offsets_v1_${__ROOM_LOCAL}`;
+let __SETCA_pairBraaOffsets = __lsLoad(__SETCA_PAIR_BRAA_OFFSET_KEY, {});
+let __SETCA_pairBraaSaveTimer = null;
+const __SETCA_pairBraaBoxes = [];
+window.__SETCA_pairBraaBoxes = __SETCA_pairBraaBoxes;
+
+function __SETCA_pairBraaId(pr){
+  if(!pr) return '';
+  return String(pr.id || `${String(pr.a||'')}->${String(pr.b||'')}`);
+}
+function __SETCA_pairBraaOffset(prOrId){
+  const id = typeof prOrId === 'string' ? prOrId : __SETCA_pairBraaId(prOrId);
+  const raw = (__SETCA_pairBraaOffsets && __SETCA_pairBraaOffsets[id]) || {};
+  return {
+    x:Number.isFinite(+raw.x) ? +raw.x : 0,
+    y:Number.isFinite(+raw.y) ? +raw.y : 0
+  };
+}
+function __SETCA_setPairBraaOffset(prOrId, x, y){
+  const id = typeof prOrId === 'string' ? prOrId : __SETCA_pairBraaId(prOrId);
+  if(!id) return {x:0,y:0};
+  const next = {
+    x:Math.max(-3000,Math.min(3000,Number.isFinite(+x) ? +x : 0)),
+    y:Math.max(-3000,Math.min(3000,Number.isFinite(+y) ? +y : 0))
+  };
+  __SETCA_pairBraaOffsets[id] = next;
+  if(!__SETCA_pairBraaSaveTimer){
+    __SETCA_pairBraaSaveTimer = setTimeout(()=>{
+      __SETCA_pairBraaSaveTimer = null;
+      __lsSave(__SETCA_PAIR_BRAA_OFFSET_KEY,__SETCA_pairBraaOffsets);
+    },180);
+  }
+  return {...next};
+}
+window.__SETCA_getPairBraaOffset = __SETCA_pairBraaOffset;
+window.__SETCA_setPairBraaOffset = __SETCA_setPairBraaOffset;
+
 function drawPairs(){
+  __SETCA_pairBraaBoxes.length=0;
   st.pairs.forEach(pr=>{
     if(!window.__SETCA_canSeeOwnedEntity(pr)) return;
     const A=st.planes.find(p=>p.id===pr.a),B=st.planes.find(p=>p.id===pr.b); if(!A||!B) return;
@@ -15866,8 +16090,24 @@ const AAinfo = computeAspectAngle360(B, A);
       const AA = Math.round(AAinfo.aa);
       const hemi = AAinfo.hemi;
       const txt = `${brg} / ${dist} / ${BALT} / (${AA}°${hemi}) SNAP (${snapInfo})`;
-    ctx.fillStyle='rgba(0,0,0,.6)';ctx.fillRect(midX-95,midY-10,190,20);
-    ctx.fillStyle=__whitePairPalette?__whitePairPalette.text:'#eaffea';ctx.font='12px monospace';ctx.textAlign='center';ctx.fillText(txt,midX,midY+5);
+    const pairId=__SETCA_pairBraaId(pr);
+    const localOffset=__SETCA_pairBraaOffset(pairId);
+    const labelX=midX+localOffset.x,labelY=midY+localOffset.y;
+    ctx.save();
+    ctx.font='12px monospace';
+    const labelW=Math.max(190,Math.ceil(ctx.measureText(txt).width+16));
+    const labelH=20;
+    if(Math.abs(localOffset.x)>2||Math.abs(localOffset.y)>2){
+      ctx.beginPath();ctx.moveTo(midX,midY);ctx.lineTo(labelX,labelY);
+      ctx.strokeStyle=__whitePairPalette?__whitePairPalette.link:'rgba(234,255,234,.58)';
+      ctx.lineWidth=.8;ctx.setLineDash([3,4]);ctx.stroke();ctx.setLineDash([]);
+    }
+    ctx.fillStyle='rgba(0,0,0,.72)';ctx.fillRect(labelX-labelW/2,labelY-labelH/2,labelW,labelH);
+    ctx.strokeStyle=__whitePairPalette?__whitePairPalette.link:'rgba(234,255,234,.58)';ctx.lineWidth=.8;
+    ctx.strokeRect(labelX-labelW/2+.5,labelY-labelH/2+.5,labelW-1,labelH-1);
+    ctx.fillStyle=__whitePairPalette?__whitePairPalette.text:'#eaffea';ctx.textAlign='center';ctx.textBaseline='alphabetic';ctx.fillText(txt,labelX,labelY+5);
+    ctx.restore();
+    __SETCA_pairBraaBoxes.push({id:pairId,x:labelX-labelW/2,y:labelY-labelH/2,w:labelW,h:labelH,anchorX:midX,anchorY:midY});
   });
 }
 function repaintPairList(){
@@ -18630,12 +18870,13 @@ function paintAlerts(force=false){
 
   const missiles=(typeof __setcaPruneConsumedMissiles === 'function'
     ? __setcaPruneConsumedMissiles()
-    : (st.missiles||[])).filter(m=>typeof __setcaIsActiveMissile === 'function' ? __setcaIsActiveMissile(m) : (!m.status || m.status==='fly'));
+    : (st.missiles||[])).filter(m=>(!window.__SETCA_isOwnTeam || window.__SETCA_isOwnTeam(m)) &&
+      (typeof __setcaIsActiveMissile === 'function' ? __setcaIsActiveMissile(m) : (!m.status || m.status==='fly')));
 
   if(!missiles.length){
     const d=document.createElement('div');
     d.className='missileEmpty';
-    d.textContent='NO HAY MISILES EN VUELO';
+    d.textContent='NO HAY MISILES SALIENTES';
     wrap.replaceChildren(d);
     return;
   }
@@ -18647,35 +18888,269 @@ function paintAlerts(force=false){
     const L = (launcherRef && launcherRef.entity) || {name: m.launcherName || m.launcher, x:m.x, y:m.y};
     const T = (targetRef && targetRef.entity) || {name: m.targetName || m.tgt, x:m.tx||m.x, y:m.ty||m.y};
 
-    // Distancia SIEMPRE en NM y (KM), independiente del toggle Métrico/Imperial
+    // Distancia SIEMPRE en MN y (KM), independiente del toggle Métrico/Imperial
     const distNM = Math.hypot((T.x||0)-(m.x||0), (T.y||0)-(m.y||0));
     const distKM = distNM * NM2KM;
-    const distTxt = `${distNM.toFixed(1)} NM (${distKM.toFixed(1)} KM)`;
+    const distTxt = `${distNM.toFixed(1)} MN (${distKM.toFixed(1)} KM)`;
     const launchName = String(m.launcherName || L.name || m.launcher || 'N/A');
     const targetName = String(m.targetName || T.name || m.tgt || 'N/A');
-    const dartName = String(m.name || m.type || 'N/A');
     const div=document.createElement('div');
     div.className='missileCard';
-    div.innerHTML = `
-      <div class="missileHdr">
-        <div class="missileTitle"><span class="missileDot"></span> MISIL ENTRANTE</div>
-        <div class="missileDist">${distTxt}</div>
-      </div>
-      <div class="missileGrid">
-        <div class="missileRow">
-          <span class="missileK">MISIL</span><span class="missileV">${dartName}</span>
-        </div>
-        <div class="missileRow">
-          <span class="missileK">SALE DE</span><span class="missileV">${launchName}</span>
-          <span class="missileArrow">→</span>
-          <span class="missileK">VA A</span><span class="missileV">${targetName}</span>
-        </div>
-      </div>
-    `;
+    const tactical=document.createElement('div');tactical.className='missileTactical';
+    const datum=(label,value,className='')=>{
+      const cell=document.createElement('div');cell.className=`missileDatum${className?` ${className}`:''}`;
+      const key=document.createElement('small');key.textContent=label;
+      const val=document.createElement('strong');val.textContent=value;
+      cell.append(key,val);return cell;
+    };
+    tactical.append(datum('ARMA',launchName),datum('OBJETIVO',targetName),datum('DISTANCIA',distTxt,'missileDistance'));
+    div.append(tactical);
     fragment.appendChild(div);
   });
   wrap.replaceChildren(fragment);
 }
+
+/* ===== Radar Warning Receiver · todos los roles y modos ===== */
+function __SETCA_isRadarWarningAvailable(){
+  try{ return !!window.st; }catch(_){ return false; }
+}
+/* Alias conservado para módulos y escenarios anteriores. */
+function __SETCA_isExcsOdiRadarWarning(){ return __SETCA_isRadarWarningAvailable(); }
+function __SETCA_warningBearing(fromEntity,toEntity){
+  const dx=Number(toEntity&&toEntity.x||0)-Number(fromEntity&&fromEntity.x||0);
+  const dy=Number(toEntity&&toEntity.y||0)-Number(fromEntity&&fromEntity.y||0);
+  return ((Math.atan2(dx,-dy)*180/Math.PI)%360+360)%360;
+}
+function __SETCA_warningDirection(deg){
+  const labels=['N','NNE','NE','ENE','E','ESE','SE','SSE','S','SSO','SO','OSO','O','ONO','NO','NNO'];
+  return labels[Math.round((((Number(deg)||0)%360)+360)%360/22.5)%16];
+}
+function __SETCA_radarWarningPerspective(){
+  const access=window.__setcaAccess||{};
+  const team=window.__SETCA_getCurrentTeam ? window.__SETCA_getCurrentTeam() : String(access.team||'').toLowerCase();
+  const full=team==='white'||!!(window.__SETCA_isWhiteExcsView&&window.__SETCA_isWhiteExcsView());
+  return {team,full};
+}
+function __SETCA_radarWarningRelation(target,source){
+  const targetTeam=window.__SETCA_entityTeam(target);
+  const sourceTeam=window.__SETCA_entityTeam(source);
+  return targetTeam&&sourceTeam&&targetTeam===sourceTeam?'FRIEND':'UNKNOWN';
+}
+function __SETCA_radarWarningAircraftStatus(plane,perspective){
+  const planeTeam=window.__SETCA_entityTeam(plane);
+  if(perspective.full&&planeTeam) return `TEAM ${String(planeTeam).toUpperCase()}`;
+  return planeTeam&&planeTeam===perspective.team?'FRIEND':'UNKNOWN';
+}
+function __SETCA_radarWarningSourceName(sensor,kind,relation,perspective){
+  const realName=String(sensor&&sensor.name||sensor&&sensor.callsign||sensor&&sensor.id||'RADAR');
+  if(relation==='FRIEND'||perspective.full) return realName;
+  if(kind==='awacs'||kind==='airradar') return 'AIR RADAR UNK';
+  return 'GTC UNK';
+}
+function __SETCA_radarWarningIsEngaged(sensor,target){
+  const targetId=String(target&&target.id||'');
+  if(!sensor||!targetId) return false;
+  const selected=[
+    sensor.targetId,sensor.trackPlaneId,sensor.lockedTargetId,sensor.lockTargetId,sensor.tgt,
+    sensor.samDual&&sensor.samDual.targetId
+  ].map(value=>String(value||''));
+  return selected.includes(targetId);
+}
+function __SETCA_airborneRadarRangeNm(sensor){
+  if(!sensor) return 0;
+  if(typeof isAwacsPlane==='function'&&isAwacsPlane(sensor)){
+    return window.__SETCA_awacsRangeNm?Number(window.__SETCA_awacsRangeNm(sensor)||0):0;
+  }
+  const candidates=[sensor.airRadarRangeNm,sensor.radarRangeNm,sensor.sensorRangeNm,sensor.radarRange];
+  const range=candidates.map(Number).find(v=>Number.isFinite(v)&&v>0);
+  return range||0;
+}
+function __SETCA_collectRadarWarnings(){
+  if(!__SETCA_isRadarWarningAvailable()||!window.st) return [];
+  const perspective=__SETCA_radarWarningPerspective();
+  const planes=Array.isArray(st.planes)?st.planes:[];
+  const monitoredPlanes=planes.filter(p=>{
+    if(!p||p._hit||!Number.isFinite(+p.x)||!Number.isFinite(+p.y)) return false;
+    if(typeof isPlaneKillConfirmed==='function'&&isPlaneKillConfirmed(p)) return false;
+    if(perspective.full) return true;
+    const planeTeam=window.__SETCA_entityTeam(p);
+    if(perspective.team==='blue'||perspective.team==='red') return planeTeam===perspective.team;
+    return typeof isPlaneVisibleToCurrentRole==='function'?isPlaneVisibleToCurrentRole(p):true;
+  });
+  const warnings=[];
+  const detections=[];
+  const pushDetection=(plane,sensor,kind)=>{
+    const bearing=__SETCA_warningBearing(plane,sensor);
+    const relation=__SETCA_radarWarningRelation(plane,sensor);
+    const source=__SETCA_radarWarningSourceName(sensor,kind,relation,perspective);
+    detections.push({
+      id:`detect:${plane.id}:${kind}:${sensor.id||sensor.name||'sensor'}`,
+      kind, title:kind==='awacs'?'IRRADIACIÓN AWACS':(kind==='airradar'?'IRRADIACIÓN AIRE-AIRE':'IRRADIACIÓN GTC'),
+      aircraftId:String(plane.id||''),sourceId:String(sensor.id||sensor.name||'sensor'),
+      aircraft:String(plane.name||plane.id||'AERONAVE'),
+      aircraftStatus:__SETCA_radarWarningAircraftStatus(plane,perspective),
+      source,classification:relation,
+      bearing,direction:__SETCA_warningDirection(bearing),engaged:__SETCA_radarWarningIsEngaged(sensor,plane),sort:relation==='UNKNOWN'?2:4
+    });
+  };
+  monitoredPlanes.forEach(plane=>{
+    (Array.isArray(st.gtc)?st.gtc:[]).forEach(u=>{
+      if(!u||u._hit||u.enabled===false||u.active===false||u.radarOn===false) return;
+      const radius=Number(u.covR),ceiling=Number(u.covH),alt=Number(plane.alt);
+      if(!(Number.isFinite(radius)&&radius>0&&Number.isFinite(ceiling)&&ceiling>0&&Number.isFinite(alt)&&alt<=ceiling)) return;
+      const distance=Math.hypot(Number(plane.x)-Number(u.x),Number(plane.y)-Number(u.y));
+      if(distance<=radius) pushDetection(plane,u,'radar');
+    });
+    planes.forEach(sensor=>{
+      if(!sensor||sensor===plane||sensor._hit||sensor.radarOn===false||sensor.awacsCoverage===false) return;
+      if(typeof isPlaneKillConfirmed==='function'&&isPlaneKillConfirmed(sensor)) return;
+      const radius=__SETCA_airborneRadarRangeNm(sensor);
+      if(!(radius>0)) return;
+      const ceiling=Number(sensor.radarCeilingFt||sensor.sensorCeilingFt||Infinity);
+      if(Number.isFinite(ceiling)&&Number(plane.alt)>ceiling) return;
+      const distance=Math.hypot(Number(plane.x)-Number(sensor.x),Number(plane.y)-Number(sensor.y));
+      if(distance<=radius) pushDetection(plane,sensor,(typeof isAwacsPlane==='function'&&isAwacsPlane(sensor))?'awacs':'airradar');
+    });
+  });
+
+  const detectionGroups=new Map();
+  detections.forEach(item=>{
+    const key=String(item.aircraftId||item.aircraft);
+    let group=detectionGroups.get(key);
+    if(!group){
+      group={
+        id:`detect:${key}`,kind:item.kind,aircraftId:key,aircraft:item.aircraft,aircraftStatus:item.aircraftStatus,
+        classifications:new Set(),kinds:new Set(),bearings:new Map(),sort:item.sort
+      };
+      detectionGroups.set(key,group);
+    }
+    group.classifications.add(item.classification);
+    group.kinds.add(item.kind);
+    group.sort=Math.min(group.sort,item.sort);
+    const bearing=Math.round(Number(item.bearing)||0)%360;
+    const bearingKey=String((bearing+360)%360).padStart(3,'0');
+    const prior=group.bearings.get(bearingKey);
+    group.bearings.set(bearingKey,{bearing:(bearing+360)%360,engaged:!!(item.engaged||(prior&&prior.engaged))});
+  });
+  detectionGroups.forEach(group=>{
+    const classifications=Array.from(group.classifications);
+    const mixed=classifications.includes('FRIEND')&&classifications.includes('UNKNOWN');
+    const classification=classifications.includes('UNKNOWN')?'UNKNOWN':'FRIEND';
+    warnings.push({
+      id:group.id,kind:group.kinds.size===1?Array.from(group.kinds)[0]:'radar',aircraftId:group.aircraftId,
+      aircraft:group.aircraft,aircraftStatus:group.aircraftStatus,classification,
+      stateText:mixed?'FRIEND / UNKNOWN':classification,
+      bearings:Array.from(group.bearings.values()).sort((a,b)=>a.bearing-b.bearing),
+      engaged:Array.from(group.bearings.values()).some(mark=>mark.engaged),sort:group.sort
+    });
+  });
+
+  const monitoredById=new Map(monitoredPlanes.map(p=>[String(p.id||''),p]));
+  const sourceById=new Map([].concat(planes,Array.isArray(st.gtc)?st.gtc:[]).filter(Boolean).map(item=>[String(item.id||''),item]));
+  const missileWarnings=[];
+  (Array.isArray(st.missiles)?st.missiles:[]).forEach(m=>{
+    if(!m) return;
+    if(typeof __setcaIsActiveMissile==='function'&&!__setcaIsActiveMissile(m)) return;
+    if(typeof __setcaIsActiveMissile!=='function'&&m.status&&String(m.status).toLowerCase()!=='fly') return;
+    const target=monitoredById.get(String(m.tgt||m.targetId||m.target||''));
+    if(!target) return;
+    const distance=Math.hypot(Number(target.x)-Number(m.x),Number(target.y)-Number(m.y));
+    const bearing=__SETCA_warningBearing(target,m);
+    const launcherType=String(m.launcherType||'').toLowerCase();
+    const launcher=sourceById.get(String(m.launcher||m.launcherId||''))||m;
+    const relation=__SETCA_radarWarningRelation(target,launcher);
+    const source=__SETCA_radarWarningSourceName(launcher,launcherType==='gtc'||launcherType==='ground'?'radar':'airradar',relation,perspective);
+    const blinkMs=distance<=3?160:(distance<=8?260:(distance<=20?420:(distance<=40?650:950)));
+    const signalLevel=distance<=3?5:(distance<=8?4:(distance<=20?3:(distance<=40?2:1)));
+    missileWarnings.push({
+      id:`missile:${m.id||m.name||target.id}`,kind:'missile',
+      title:launcherType==='gtc'||launcherType==='ground'?'MISIL TIERRA-AIRE':'MISIL AIRE-AIRE',
+      aircraft:String(target.name||target.id||'AERONAVE'),aircraftStatus:__SETCA_radarWarningAircraftStatus(target,perspective),
+      source,classification:relation,bearing,direction:__SETCA_warningDirection(bearing),blinkMs,signalLevel,
+      sort:0,__distance:distance
+    });
+  });
+  missileWarnings.sort((a,b)=>a.__distance-b.__distance).forEach(item=>{delete item.__distance;warnings.push(item);});
+  return warnings.sort((a,b)=>a.sort-b.sort||a.aircraft.localeCompare(b.aircraft)||a.id.localeCompare(b.id)).slice(0,48);
+}
+function paintRadarWarnings(){
+  const panel=document.getElementById('pRadarWarning');
+  const wrap=document.getElementById('radarWarningList');
+  const count=document.getElementById('radarWarningCount');
+  if(!panel||!wrap) return false;
+  if(!__SETCA_isRadarWarningAvailable()){
+    if(count) count.textContent='0';
+    if(wrap.childElementCount) wrap.replaceChildren();
+    return false;
+  }
+  const warnings=__SETCA_collectRadarWarnings();
+  if(count) count.textContent=String(warnings.length);
+  if(!warnings.length){
+    let empty=wrap.querySelector('.radarWarningEmpty');
+    if(!empty){empty=document.createElement('div');empty.className='radarWarningEmpty';empty.textContent='SIN EMISIONES NI AMENAZAS';wrap.replaceChildren(empty);}
+    return true;
+  }
+  const existing=new Map(Array.from(wrap.querySelectorAll('.radarWarningCard[data-warning-id]')).map(el=>[el.dataset.warningId,el]));
+  wrap.querySelectorAll('.radarWarningEmpty').forEach(el=>el.remove());
+  const wanted=new Set();
+  warnings.forEach(item=>{
+    wanted.add(item.id);
+    let card=existing.get(item.id);
+    if(!card){
+      card=document.createElement('div');card.className='radarWarningCard';card.dataset.warningId=item.id;
+      const tactical=document.createElement('div');tactical.className='radarWarningTactical';
+      const aircraft=document.createElement('div');aircraft.className='radarWarningAircraft';
+      const state=document.createElement('div');state.className='radarWarningState';
+      const bearing=document.createElement('div');bearing.className='radarWarningBearing';
+      const signal=document.createElement('div');signal.className='radarWarningSignal';
+      const pulse=document.createElement('span');pulse.className='radarWarningPulse';
+      const bars=document.createElement('span');bars.className='radarWarningBars';
+      for(let i=0;i<5;i++) bars.appendChild(document.createElement('i'));
+      signal.append(pulse,bars);tactical.append(aircraft,state,bearing,signal);card.append(tactical);
+    }else if(!card.querySelector('.radarWarningTactical')){
+      card.replaceChildren();
+      const tactical=document.createElement('div');tactical.className='radarWarningTactical';
+      const aircraft=document.createElement('div');aircraft.className='radarWarningAircraft';
+      const state=document.createElement('div');state.className='radarWarningState';
+      const bearing=document.createElement('div');bearing.className='radarWarningBearing';
+      const signal=document.createElement('div');signal.className='radarWarningSignal';
+      const pulse=document.createElement('span');pulse.className='radarWarningPulse';
+      const bars=document.createElement('span');bars.className='radarWarningBars';
+      for(let i=0;i<5;i++) bars.appendChild(document.createElement('i'));
+      signal.append(pulse,bars);tactical.append(aircraft,state,bearing,signal);card.append(tactical);
+    }
+    card.className=`radarWarningCard is-${item.kind} is-${String(item.classification||'UNKNOWN').toLowerCase()}`;
+    card.style.setProperty('--rw-blink',`${Math.max(140,Number(item.blinkMs)||800)}ms`);
+    card.querySelector('.radarWarningAircraft').textContent=String(item.aircraft||'AERONAVE');
+    card.querySelector('.radarWarningState').textContent=item.kind==='missile'?'MISSILE INCOMING':String(item.stateText||item.classification||'UNKNOWN');
+    const bearingEl=card.querySelector('.radarWarningBearing');
+    const bearingMarks=item.kind==='missile'?[{bearing:item.bearing,engaged:false}]:(Array.isArray(item.bearings)&&item.bearings.length?item.bearings:[{bearing:item.bearing,engaged:!!item.engaged}]);
+    bearingEl.replaceChildren(...bearingMarks.map(mark=>{
+      const box=document.createElement('span');box.className=`radarWarningBearingMark${mark.engaged?' is-engaged':''}`;
+      if(mark.engaged){const engaged=document.createElement('em');engaged.textContent='ENGAGED';box.appendChild(engaged);}
+      const value=document.createElement('strong');
+      value.textContent=`${String(Math.round(((Number(mark.bearing)||0)%360+360)%360)).padStart(3,'0')}°`;
+      box.appendChild(value);return box;
+    }));
+    const signalEl=card.querySelector('.radarWarningSignal');
+    const signalLevel=item.kind==='missile'?Math.max(1,Math.min(5,Math.round(Number(item.signalLevel)||1))):0;
+    signalEl.className=`radarWarningSignal${signalLevel?` level-${signalLevel}`:''}`;
+    if(signalLevel) signalEl.setAttribute('aria-label',`INTENSIDAD ${signalLevel} DE 5`);
+    else signalEl.removeAttribute('aria-label');
+    wrap.appendChild(card);
+  });
+  existing.forEach((card,id)=>{if(!wanted.has(id))card.remove();});
+  return true;
+}
+try{
+  window.__SETCA_isRadarWarningAvailable=__SETCA_isRadarWarningAvailable;
+  window.__SETCA_isExcsOdiRadarWarning=__SETCA_isExcsOdiRadarWarning;
+  window.__SETCA_collectRadarWarnings=__SETCA_collectRadarWarnings;
+  window.paintRadarWarnings=paintRadarWarnings;
+}catch(_){ }
+setInterval(()=>{try{paintRadarWarnings();}catch(_){ }},250);
+if(document.readyState==='loading') document.addEventListener('DOMContentLoaded',()=>{try{paintRadarWarnings();}catch(_){ }},{once:true});
+else try{paintRadarWarnings();}catch(_){ }
 
 /* ===== Telemetría y Reporte ===== */
 // ======================================================
@@ -19958,7 +20433,8 @@ function loop(ts){
       __setcaDidAuthTick = true;
     }
     __SETCA_EXCS_PUBLISH_ACC += dt;
-    if(__setcaDidAuthTick && (!excsSession || __SETCA_EXCS_PUBLISH_ACC>=0.5)){
+    const __setcaPublishSec=Math.max(1,Number(window.__SETCA_EXCS_POSITION_BROADCAST_MS||1000)/1000);
+    if(__setcaDidAuthTick && (!excsSession || __SETCA_EXCS_PUBLISH_ACC>=__setcaPublishSec)){
       __SETCA_EXCS_PUBLISH_ACC=0;
       __SETCA_publishAuthoritativeTick();
     }
@@ -21535,6 +22011,74 @@ requestAnimationFrame(()=>{ repaintPlanesList(); repaintNav(); repaintStudent();
           __SETCA_refreshLocalFormatControls();
         });
 
+        const bullseyeCard = document.createElement('section');
+        bullseyeCard.className = 'config-card config-bullseye-card';
+        bullseyeCard.setAttribute('aria-labelledby','configBullseyeHeading');
+        bullseyeCard.innerHTML = `
+          <h3 class="config-card-title" id="configBullseyeHeading">Bulls Eye</h3>
+          <div class="config-bullseye-select"><label for="configBullseyeSelect">Referencia</label>
+            <select id="configBullseyeSelect" aria-label="Bulls Eye para asignación masiva"></select>
+          </div>
+          <fieldset class="config-bullseye-grid" aria-label="Clasificaciones que recibirán el Bulls Eye">
+            <label class="config-bullseye-check"><input type="checkbox" data-be-filter="all" checked><span>Todos visibles</span></label>
+            <label class="config-bullseye-check"><input type="checkbox" data-be-filter="friend"><span>Friend</span></label>
+            <label class="config-bullseye-check"><input type="checkbox" data-be-filter="enemy"><span>Rival visible</span></label>
+            <label class="config-bullseye-check"><input type="checkbox" data-be-filter="commercial"><span>Commercial</span></label>
+            <label class="config-bullseye-check"><input type="checkbox" data-be-filter="neutral"><span>Neutral</span></label>
+            <label class="config-bullseye-check"><input type="checkbox" data-be-filter="unknown"><span>Unknown</span></label>
+            <label class="config-bullseye-check"><input type="checkbox" data-be-filter="boogey"><span>Boogey</span></label>
+            <label class="config-bullseye-check"><input type="checkbox" data-be-filter="bandit"><span>Bandit</span></label>
+            <label class="config-bullseye-check"><input type="checkbox" data-be-filter="hostile"><span>Hostile</span></label>
+          </fieldset>
+          <div class="config-bullseye-actions">
+            <button id="configBullseyeApply" class="btn mini focusable" type="button">ASIGNAR</button>
+            <button id="configBullseyeClear" class="btn mini focusable" type="button">QUITAR</button>
+          </div>
+          <output id="configBullseyeStatus" class="config-bullseye-status" aria-live="polite">Solo aeronaves actualmente visibles.</output>`;
+        body.appendChild(bullseyeCard);
+        const beSelect = bullseyeCard.querySelector('#configBullseyeSelect');
+        const beStatus = bullseyeCard.querySelector('#configBullseyeStatus');
+        const beApply = bullseyeCard.querySelector('#configBullseyeApply');
+        const beClear = bullseyeCard.querySelector('#configBullseyeClear');
+        const refreshBullseye = ()=>{
+          const old = beSelect.value;
+          let options=[];
+          try{ options = window.__SETCA_getBullseyeBulkOptions ? window.__SETCA_getBullseyeBulkOptions() : []; }catch(_){ options=[]; }
+          beSelect.innerHTML='';
+          if(options.length){
+            options.forEach(item=>{ const o=document.createElement('option'); o.value=String(item.id||''); o.textContent=String(item.label||item.name||item.id||'Bulls Eye'); beSelect.appendChild(o); });
+            if(old && options.some(item=>String(item.id)===old)) beSelect.value=old;
+            beStatus.textContent=`${options.length} referencia${options.length===1?'':'s'} disponible${options.length===1?'':'s'} · solo contactos visibles`;
+          }else{
+            const o=document.createElement('option'); o.value=''; o.textContent='Sin Bulls Eye disponible'; beSelect.appendChild(o);
+            beStatus.textContent='Crea o carga un Bulls Eye de tu bando para asignarlo.';
+          }
+          beSelect.disabled=!options.length; beApply.disabled=!options.length; beClear.disabled=!options.length;
+        };
+        const selectedFilters = ()=>Array.from(bullseyeCard.querySelectorAll('[data-be-filter]:checked')).map(x=>x.dataset.beFilter);
+        bullseyeCard.addEventListener('change',ev=>{
+          const input=ev.target && ev.target.matches('[data-be-filter]') ? ev.target : null;
+          if(!input) return;
+          const all=bullseyeCard.querySelector('[data-be-filter="all"]');
+          if(input.dataset.beFilter==='all' && input.checked){
+            bullseyeCard.querySelectorAll('[data-be-filter]:not([data-be-filter="all"])').forEach(x=>{x.checked=false;});
+          }else if(input.checked && all){ all.checked=false; }
+          if(!selectedFilters().length && all) all.checked=true;
+        });
+        const runBullseyeAction = remove=>{
+          const filters=selectedFilters();
+          if(!beSelect.value || !filters.length || !window.__SETCA_assignBullseyeByFilters) return;
+          const result=window.__SETCA_assignBullseyeByFilters(beSelect.value,filters,!!remove);
+          if(result && result.ok){
+            const verb=remove?'retirado de':'asignado a';
+            beStatus.textContent=`Bulls Eye ${verb} ${result.count} aeronave${result.count===1?'':'s'} visible${result.count===1?'':'s'}.`;
+          }else beStatus.textContent='No hay aeronaves visibles que coincidan con la selección.';
+        };
+        beApply.addEventListener('click',()=>runBullseyeAction(false));
+        beClear.addEventListener('click',()=>runBullseyeAction(true));
+        panel.__setcaRefreshBullseye=refreshBullseye;
+        refreshBullseye();
+
         const presentationCard = document.createElement('section');
         presentationCard.className = 'config-card';
         presentationCard.setAttribute('aria-labelledby','configPresentationHeading');
@@ -21648,6 +22192,7 @@ requestAnimationFrame(()=>{ repaintPlanesList(); repaintNav(); repaintStudent();
       configBtn.__setcaWired = true;
       configBtn.addEventListener('click', ()=>{
         const panel = ensureConfigPanel();
+        try{ if(panel.__setcaRefreshBullseye) panel.__setcaRefreshBullseye(); }catch(_){ }
         setConfigPanelOpen(panel,!panel.classList.contains('open'));
         try{ if(typeof window.__updateLocalUI === 'function') window.__updateLocalUI(); }catch(_){ }
       });
@@ -21923,9 +22468,9 @@ requestAnimationFrame(()=>{ repaintPlanesList(); repaintNav(); repaintStudent();
 
     ensureConfigPanel();
 
-    const allPanels = ['#pCmd','#pPlanes','#pNav','#pVuelos','#pPair','#pAlt','#pDraw','#pGTC','#pAlerts'];
-    const odiOnlyPanels = ['#pVuelos','#pPair','#pAlt','#pAlerts'];
-    const odtOnlyPanels = ['#pAlt','#pGTC','#pAlerts'];
+    const allPanels = ['#pCmd','#pPlanes','#pNav','#pVuelos','#pPair','#pAlt','#pDraw','#pGTC','#pRadarWarning','#pAlerts'];
+    const odiOnlyPanels = ['#pVuelos','#pPair','#pAlt','#pRadarWarning','#pAlerts'];
+    const odtOnlyPanels = ['#pAlt','#pGTC','#pAlerts','#pRadarWarning'];
 
     function updateHeaderOverlayMetric(){
       try{
@@ -22350,16 +22895,17 @@ requestAnimationFrame(()=>{ repaintPlanesList(); repaintNav(); repaintStudent();
     };
   }
 
-  // --- Mejorar alertas de misiles (origen→destino + distancia restante) ---
+  // --- Panel de misiles salientes (origen→destino + distancia restante) ---
   function refreshMissilePanel(){
     const panel = document.getElementById('missileAlerts');
     if(!panel) return;
     panel.innerHTML = '';
-    const missiles = (typeof __setcaPruneConsumedMissiles === 'function') ? __setcaPruneConsumedMissiles() : (st.missiles || []);
+    const missiles = ((typeof __setcaPruneConsumedMissiles === 'function') ? __setcaPruneConsumedMissiles() : (st.missiles || []))
+      .filter(m=>!window.__SETCA_isOwnTeam || window.__SETCA_isOwnTeam(m));
     if(!missiles.length){
       const d=document.createElement('div');
       d.className='card';
-      d.textContent='No hay misiles en vuelo.';
+      d.textContent='No hay misiles salientes.';
       panel.appendChild(d);
       return;
     }
@@ -22382,7 +22928,7 @@ requestAnimationFrame(()=>{ repaintPlanesList(); repaintNav(); repaintStudent();
       card.style.background='rgba(20,0,0,0.6)';
       card.style.borderColor='#b00';
       card.style.color='#ffe066';
-      card.innerHTML = `<strong>!! MISIL ENTRANTE !!</strong><br>
+      card.innerHTML = `<strong>!! MISIL SALIENTE !!</strong><br>
         <strong>${dartName}</strong> salió de <strong>${launchName}</strong> → se dirige a <strong>${targetName}</strong><br>
         DISTANCIA RESTANTE: <strong>${distTxt}</strong>`;
       panel.appendChild(card);
@@ -25133,6 +25679,71 @@ document.querySelectorAll('#pCmdBody .btn').forEach(btn=>{
 })();
 </script>
 
+<script id="setca-local-pair-braa-drag">
+/* BRAA de emparejamiento: Z + arrastre, exclusivamente en esta estación. */
+(function(){
+  if(window.__SETCA_LOCAL_PAIR_BRAA_DRAG__) return;
+  window.__SETCA_LOCAL_PAIR_BRAA_DRAG__ = true;
+
+  const cvs=document.getElementById('radar');
+  if(!cvs) return;
+  let zDown=false;
+  let drag=null;
+
+  function isEditable(target){
+    return !!(target && (target.matches?.('input,textarea,select,[contenteditable="true"]') || target.closest?.('[contenteditable="true"]')));
+  }
+  function canvasPoint(e){
+    const r=cvs.getBoundingClientRect();
+    const x=e.clientX-r.left,y=e.clientY-r.top;
+    return (x>=0&&y>=0&&x<=r.width&&y<=r.height)?{x,y}:null;
+  }
+  function stop(e){
+    if(drag&&Number.isFinite(drag.pointerId)){
+      try{cvs.releasePointerCapture(drag.pointerId);}catch(_){ }
+    }
+    drag=null;
+    if(e){
+      try{e.preventDefault();}catch(_){ }
+      try{e.stopImmediatePropagation();}catch(_){ }
+    }
+  }
+
+  addEventListener('keydown',e=>{
+    if((e.key==='z'||e.key==='Z')&&!isEditable(e.target)) zDown=true;
+  },true);
+  addEventListener('keyup',e=>{if(e.key==='z'||e.key==='Z')zDown=false;},true);
+  addEventListener('blur',()=>{zDown=false;stop();},true);
+
+  cvs.addEventListener('pointerdown',e=>{
+    if(e.button!==0||!zDown) return;
+    const pt=canvasPoint(e),boxes=window.__SETCA_pairBraaBoxes||[];
+    if(!pt||!boxes.length) return;
+    for(let i=boxes.length-1;i>=0;i--){
+      const box=boxes[i];
+      if(!box||pt.x<box.x||pt.x>box.x+box.w||pt.y<box.y||pt.y>box.y+box.h) continue;
+      const offset=typeof window.__SETCA_getPairBraaOffset==='function'
+        ? window.__SETCA_getPairBraaOffset(box.id):{x:0,y:0};
+      drag={id:String(box.id||''),startX:e.clientX,startY:e.clientY,baseX:+offset.x||0,baseY:+offset.y||0,pointerId:e.pointerId};
+      try{cvs.setPointerCapture(e.pointerId);}catch(_){ }
+      e.preventDefault();e.stopImmediatePropagation();
+      return;
+    }
+  },true);
+
+  addEventListener('pointermove',e=>{
+    if(!drag) return;
+    if(!(e.buttons&1)){stop(e);return;}
+    const x=drag.baseX+(e.clientX-drag.startX),y=drag.baseY+(e.clientY-drag.startY);
+    if(typeof window.__SETCA_setPairBraaOffset==='function') window.__SETCA_setPairBraaOffset(drag.id,x,y);
+    try{if(typeof draw==='function')draw();}catch(_){ }
+    e.preventDefault();e.stopImmediatePropagation();
+  },true);
+  addEventListener('pointerup',e=>{if(drag)stop(e);},true);
+  addEventListener('pointercancel',e=>{if(drag)stop(e);},true);
+})();
+</script>
+
 
 <script>
 /* === MODULO B — IA / Combate (4 MISILES + CONO 30° + 10s ENTRE LANZAMIENTOS) === */
@@ -26732,7 +27343,7 @@ document.querySelectorAll('#pCmdBody .btn').forEach(btn=>{
   }
   function isOdiBullseyeRole(){
     const r = roleRaw();
-    return r === 'odi' || r === 'odico' || r === 'atc' || r === 'odt';
+    return r === 'odi' || r === 'odico' || r === 'atc' || r === 'odt' || r === 'samallocator' || r === 'observer' || r === 'pseudopilot';
   }
   function localBeRoleLabel(){
     const r = roleRaw();
@@ -26868,6 +27479,60 @@ document.querySelectorAll('#pCmdBody .btn').forEach(btn=>{
   }
   window.__SETCA_canBulkAssignBullseye = canBulkAssignBullseye;
   window.__SETCA_assignBullseyeToVisiblePlanes = assignBullseyeToVisiblePlanes;
+
+  function bullseyeRoleKey(plane){
+    let raw='Neutral';
+    try{ raw=window.__SETCA_getContactRole ? window.__SETCA_getContactRole(plane,st.roles||{}) : ((st.roles&&st.roles[plane.id])||plane.role||'Neutral'); }catch(_){ }
+    const key=String(raw||'Neutral').trim().toLowerCase();
+    if(key==='civilian') return 'commercial';
+    if(key==='desconocido') return 'unknown';
+    if(key==='bogey') return 'boogey';
+    return key;
+  }
+  function bullseyeMatchesFilters(plane, filters){
+    const chosen=new Set((Array.isArray(filters)?filters:[]).map(x=>String(x||'').trim().toLowerCase()).filter(Boolean));
+    if(!chosen.size || chosen.has('all')) return !!chosen.size;
+    const team=window.__SETCA_getCurrentTeam();
+    if(chosen.has('enemy') && window.__SETCA_entityTeam(plane)!==team) return true;
+    return chosen.has(bullseyeRoleKey(plane));
+  }
+  function getBullseyeBulkOptions(){
+    return getBullseyeDrawings().filter(canBulkAssignBullseye).map(d=>({
+      id:String(d.id||''),
+      label:String(d.name||d.label||d.callsign||d.id||'Bulls Eye')
+    }));
+  }
+  function assignBullseyeByFilters(beId, filters, remove=false){
+    const be=getBullseyeDrawings().find(d=>String(d.id)===String(beId));
+    if(!canBulkAssignBullseye(be)) return {ok:false,count:0};
+    const team=window.__SETCA_getCurrentTeam();
+    const planes=(Array.isArray(st.planes)?st.planes:[]).filter(p=>p&&p.id&&!p._hit&&isPlaneVisibleToCurrentRole(p)&&bullseyeMatchesFilters(p,filters));
+    if(!planes.length) return {ok:false,count:0,team};
+    const local=isOdiBullseyeRole();
+    const ownPlanes=planes.filter(p=>window.__SETCA_entityTeam(p)===team);
+    const enemyPlanes=planes.filter(p=>window.__SETCA_entityTeam(p)!==team);
+    const value=remove?'':String(be.id);
+    let changed=false,sharedChanged=false;
+    const contacts=readContactBeMap();
+    enemyPlanes.forEach(p=>{ const id=String(p.id); if(String(contacts[id]||'')!==value){ contacts[id]=value; changed=true; } });
+    if(enemyPlanes.length) writeContactBeMap(contacts);
+    if(local){
+      const map=readOdiBeMap();
+      ownPlanes.forEach(p=>{ const id=String(p.id); if(String(map[id]||'')!==value){ map[id]=value; changed=true; } });
+      if(ownPlanes.length) writeOdiBeMap(map);
+    }else{
+      ownPlanes.forEach(p=>{
+        if(String(p.beAssignedId||'')===value) return;
+        p.beAssignedId=value; changed=true; sharedChanged=true;
+        if(window.__SETCA_markAircraftDirty) window.__SETCA_markAircraftDirty(p);
+      });
+      if(sharedChanged) pushSync();
+    }
+    if(changed){ repaintAll(); try{ if(typeof draw==='function') draw(); }catch(_){ } }
+    return {ok:true,count:planes.length,enemyCount:enemyPlanes.length,team,local,removed:!!remove};
+  }
+  window.__SETCA_getBullseyeBulkOptions=getBullseyeBulkOptions;
+  window.__SETCA_assignBullseyeByFilters=assignBullseyeByFilters;
 
   function pushSync(){
     try{
@@ -35588,7 +36253,7 @@ import { getDatabase, ref, get, set } from "https://www.gstatic.com/firebasejs/1
   function drawHeaderOverlay(c, cssW, cssH, tracks, missiles, mode3d, replayActive){
     c.save();
     const txt = `NAV MAPA TÁCTICO · ${tracks.length} AERONAVES · ${missiles.length} MISILES · ${mode3d?'3D':'2D'} · ${replayActive?'REPLAY':'LIVE'}`;
-    const hint = mode3d ? 'ARRASTRA: ↔ GIRAR · ↕ INCLINAR · RUEDA: ZOOM' : '';
+    const hint = mode3d ? 'FOCO FIJO · ARRASTRA: ORBITAR · FLECHAS: AJUSTE FINO · RUEDA: ZOOM' : '';
     c.font='900 11px ui-monospace,SFMono-Regular,Menlo,Consolas,monospace';
     const w=Math.min(cssW-24, Math.max(c.measureText(txt).width,hint?c.measureText(hint).width:0)+28);
     roundRect(c,12,12,w,mode3d?42:28,10); c.fillStyle='rgba(2,6,23,.78)'; c.fill(); c.strokeStyle='rgba(125,211,252,.30)'; c.stroke();
@@ -35679,7 +36344,7 @@ import { getDatabase, ref, get, set } from "https://www.gstatic.com/firebasejs/1
     function sy(vy){ return (cssH/2)+panY+((vy-centerY)*scale); }
     function ptScreen(pt){ const proj=__navProjectPoint(pt,mode3d); return {x:sx(proj.vx),y:sy(proj.vy),proj}; }
     canvas.__navViewMetrics={cssW,cssH,centerX,centerY,centerVX:centerX,centerVY:centerY,centerWX,centerWY,scale,zoom,panX,panY,mode3d};
-    canvas.title=mode3d ? '3D simple: arrastra horizontal para girar, vertical para inclinar y usa la rueda para zoom' : 'NAV táctico local: arrastra para mover, rueda para zoom';
+    canvas.title=mode3d ? 'NAV 3D: órbita libre sobre el foco central · flechas para ajuste fino · rueda para acercar o alejar' : 'NAV táctico local: arrastra para mover, rueda para zoom';
 
     drawTacticalBackground(c,cssW,cssH);
     drawPeruMapOnNav(c,ptScreen);
@@ -35766,7 +36431,7 @@ import { getDatabase, ref, get, set } from "https://www.gstatic.com/firebasejs/1
       }).join('');
       const missileHtml=missiles.slice().sort((a,b)=>String(a.name||a.id||'').localeCompare(String(b.name||b.id||''))).map(m=>{
         const nm=String(m.name||m.id||'MISIL'); const sub=[m.launcherName?`ORIGEN ${m.launcherName}`:'',m.targetName?`OBJ ${m.targetName}`:''].filter(Boolean).join(' · ');
-        return `<div class="navLegendItem navLegendMissileItem" data-nav-legend-missile="${escHtml(m.id)}"><span class="navLegendSwatch navLegendMissileSwatch" style="background:${escHtml(m.color||'#fb923c')}" data-nav-center-missile="${escHtml(m.id)}" title="Ir al misil ${escHtml(nm)}"></span><div class="navLegendText"><span class="navLegendName">MISIL ENTRANTE · ${escHtml(nm)}</span><span class="navLegendSub">${escHtml(sub||'traza de misil · ubicar en mapa')}</span></div></div>`;
+        return `<div class="navLegendItem navLegendMissileItem" data-nav-legend-missile="${escHtml(m.id)}"><span class="navLegendSwatch navLegendMissileSwatch" style="background:${escHtml(m.color||'#fb923c')}" data-nav-center-missile="${escHtml(m.id)}" title="Ir al misil saliente ${escHtml(nm)}"></span><div class="navLegendText"><span class="navLegendName">MISIL SALIENTE · ${escHtml(nm)}</span><span class="navLegendSub">${escHtml(sub||'traza de misil · ubicar en mapa')}</span></div></div>`;
       }).join('');
       const bullseyeHtml=bullseyes.map(be=>`<div class="navLegendItem"><button class="navMiniBtn" type="button" data-nav-center-be="${escHtml(be.id)}" aria-label="Ubicar BE ${escHtml(be.name||be.label||be.id)}">◎ BE</button><div class="navLegendText"><span class="navLegendName">${escHtml(be.name||be.label||be.id)}</span><span class="navLegendSub">Bullseye · ubicar en mapa</span></div></div>`).join('');
       legend.innerHTML=aircraftHtml+missileHtml+bullseyeHtml;
@@ -36135,16 +36800,19 @@ import { getDatabase, ref, get, set } from "https://www.gstatic.com/firebasejs/1
     if(Math.abs(newZoom - oldZoom) < 0.00001) return false;
 
     var rect = canvas.getBoundingClientRect();
+    var mode3d = !!m.mode3d;
     var px = Number.isFinite(+clientX) ? (+clientX - rect.left) : (m.cssW / 2);
     var py = Number.isFinite(+clientY) ? (+clientY - rect.top) : (m.cssH / 2);
     px = Math.max(0, Math.min(m.cssW, px));
     py = Math.max(0, Math.min(m.cssH, py));
+    // En 3D el zoom siempre aproxima o aleja respecto del foco central.
+    // El cursor no vuelve a desplazar el eje de análisis.
+    if(mode3d){ px = m.cssW / 2; py = m.cssH / 2; }
 
     var oldScale = Math.max(0.000001, Number.isFinite(+m.scale) ? +m.scale : 1);
     var newScale = Math.max(0.000001, (oldScale / Math.max(0.000001, oldZoom)) * newZoom);
-    var panX = Number.isFinite(+m.panX) ? +m.panX : (Number.isFinite(+store.view.panX) ? +store.view.panX : 0);
-    var panY = Number.isFinite(+m.panY) ? +m.panY : (Number.isFinite(+store.view.panY) ? +store.view.panY : 0);
-    var mode3d = !!m.mode3d;
+    var panX = mode3d ? 0 : (Number.isFinite(+m.panX) ? +m.panX : (Number.isFinite(+store.view.panX) ? +store.view.panX : 0));
+    var panY = mode3d ? 0 : (Number.isFinite(+m.panY) ? +m.panY : (Number.isFinite(+store.view.panY) ? +store.view.panY : 0));
     var centerVX = Number.isFinite(+m.centerVX) ? +m.centerVX : 0;
     var centerVY = Number.isFinite(+m.centerVY) ? +m.centerVY : 0;
 
@@ -36285,14 +36953,82 @@ import { getDatabase, ref, get, set } from "https://www.gstatic.com/firebasejs/1
 })();
 </script>
 
+<!-- ===== SETCA · NAV 3D con foco central y control fino local ===== -->
+<script id="setca-nav3d-focus-controls-js">
+(function(){
+  if(window.__SETCA_NAV3D_FOCUS_CONTROLS__) return;
+  window.__SETCA_NAV3D_FOCUS_CONTROLS__ = true;
+  function qs(s){ return document.querySelector(s); }
+  function store(){ try{ return typeof __NAV_STORE !== 'undefined' ? __NAV_STORE : window.__NAV_STORE; }catch(_){ return window.__NAV_STORE || null; } }
+  function active(){
+    const s=store(), modal=qs('#navReport');
+    if(!s || !s.profile3d || !s.profile3d.enabled || !modal) return false;
+    try{ return getComputedStyle(modal).display !== 'none'; }catch(_){ return modal.style.display !== 'none'; }
+  }
+  function signed(v){ const n=((Number(v)||0)%360+360)%360; return n>180?n-360:n; }
+  function render(){
+    try{ if(typeof __navUpdateReplayUI === 'function') __navUpdateReplayUI(); }catch(_){ }
+    try{ if(typeof renderNavReport === 'function') renderNavReport(false); }catch(_){ }
+  }
+  function save(){ try{ if(window.__saveLocalPrefs) window.__saveLocalPrefs(); }catch(_){ } }
+  function nudge(direction, persist=true){
+    const s=store(); if(!s || !s.profile3d) return false;
+    let yaw=Number(s.profile3d.yawDeg)||0, pitch=Number(s.profile3d.pitchDeg)||58;
+    if(direction==='left') yaw-=3;
+    else if(direction==='right') yaw+=3;
+    else if(direction==='up') pitch+=2.5;
+    else if(direction==='down') pitch-=2.5;
+    else if(direction==='reset'){ yaw=0; pitch=58; }
+    else return false;
+    s.profile3d.yawDeg=signed(yaw);
+    s.profile3d.pitchDeg=Math.max(.5,Math.min(89,pitch));
+    s.view.panX=0; s.view.panY=0;
+    render(); if(persist) save(); sync(); return true;
+  }
+  function position(){
+    const canvas=qs('#navReportCanvas'), pad=qs('#setcaNav3DPad'), pivot=qs('#setcaNav3DPivot');
+    if(!canvas || !pad || !pivot || pad.hidden) return;
+    const r=canvas.getBoundingClientRect();
+    pivot.style.left=(r.left+r.width/2)+'px'; pivot.style.top=(r.top+r.height/2)+'px';
+    const padW=pad.offsetWidth||132, padH=pad.offsetHeight||151;
+    pad.style.left=Math.max(r.left+10,r.right-padW-18)+'px';
+    pad.style.top=Math.max(r.top+10,r.bottom-padH-18)+'px';
+  }
+  function sync(){
+    const on=active(), pad=qs('#setcaNav3DPad'), pivot=qs('#setcaNav3DPivot');
+    if(pad) pad.hidden=!on; if(pivot) pivot.hidden=!on;
+    if(on) requestAnimationFrame(position);
+  }
+  function install(){
+    const pad=qs('#setcaNav3DPad'); if(!pad) return;
+    if(!pad.__setcaBound){
+      pad.__setcaBound=true;
+      pad.addEventListener('click',e=>{ const b=e.target.closest('[data-nav3d-nudge]'); if(!b)return; e.preventDefault(); nudge(b.dataset.nav3dNudge,true); });
+      window.addEventListener('resize',position,{passive:true});
+      document.addEventListener('keydown',e=>{
+        if(!active() || !['ArrowUp','ArrowDown','ArrowLeft','ArrowRight'].includes(e.key)) return;
+        const tag=String(e.target&&e.target.tagName||'').toLowerCase();
+        if(['input','select','textarea','button'].includes(tag) || (e.target&&e.target.isContentEditable)) return;
+        const dir={ArrowUp:'up',ArrowDown:'down',ArrowLeft:'left',ArrowRight:'right'}[e.key];
+        if(nudge(dir,true)){ e.preventDefault(); e.stopPropagation(); }
+      },true);
+    }
+    sync();
+  }
+  window.__SETCA_NAV3D_FOCUS={nudge,reset:()=>nudge('reset',true),sync,position};
+  if(document.readyState==='loading') document.addEventListener('DOMContentLoaded',install); else install();
+  setTimeout(install,250); setInterval(sync,700);
+})();
+</script>
+
 <style id="setca-pseudo-pilot-hud-css">
 body[data-setca-role="pseudopilot"] .app{
   grid-template-columns:minmax(0,1fr)!important;
   grid-template-rows:auto minmax(0,1fr)!important;
   grid-template-areas:"top" "center"!important;
 }
-body[data-setca-role="pseudopilot"] #left,
-body[data-setca-role="pseudopilot"] #right{display:none!important;}
+body[data-setca-role="pseudopilot"] #left{display:none!important;}
+body[data-setca-role="pseudopilot"] #right{display:block!important;}
 body[data-setca-role="pseudopilot"] #center{
   min-height:calc(100vh - 70px)!important;
   height:auto!important;
