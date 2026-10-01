@@ -24824,6 +24824,48 @@ document.addEventListener('keydown', (ev)=>{
     }
     return out;
   }
+  const __SETCA_IMPORT_TEAM_KEYS = ['planes','gtc','drawings','pairs','missiles','impactMarks'];
+  function __SETCA_playableImportTeam(value){
+    const team=window.__SETCA_normalizeTeam(value);
+    return team==='blue'||team==='red'?team:'';
+  }
+  function __SETCA_scenePlayableTeams(scene){
+    return window.__SETCA_sceneTeams(scene).filter(team=>team==='blue'||team==='red');
+  }
+  function __SETCA_resolveImportTeam(scene,data,file,mode,currentTeam){
+    const declared=__SETCA_playableImportTeam(scene&&scene.team)||__SETCA_playableImportTeam(data&&data.team);
+    if(declared) return declared;
+    const embedded=__SETCA_scenePlayableTeams(scene);
+    if(embedded.length===1) return embedded[0];
+    const own=__SETCA_playableImportTeam(currentTeam);
+    if(own) return own;
+    // WHITE nunca decide el equipo por nombre de archivo, orden de carga o estado previo.
+    // El propietario debe venir grabado por Planning Tool dentro de la misión.
+    return '';
+  }
+  function __SETCA_prepareImportedCombatScene(scene,fallbackTeam){
+    const copy=cloneDeep((scene&&typeof scene==='object')?scene:{});
+    const fallback=__SETCA_playableImportTeam(fallbackTeam);
+    let missingOwner=false;
+    __SETCA_IMPORT_TEAM_KEYS.forEach(key=>{
+      (Array.isArray(copy[key])?copy[key]:[]).forEach(entity=>{
+        if(!entity||typeof entity!=='object') return;
+        const team=__SETCA_playableImportTeam(entity.team);
+        if(!team&&!fallback){missingOwner=true;return;}
+        entity.team=team||fallback;
+        if(Array.isArray(entity.routePlan)) entity.routePlan.forEach(point=>{
+          if(point&&typeof point==='object') point.team=entity.team;
+        });
+      });
+    });
+    if(missingOwner) throw new Error('La misión no contiene equipo BLUE/RED. Ábrela en Planning Tool, selecciona el bando correcto y vuelve a exportarla.');
+    if(!__SETCA_playableImportTeam(copy.team)&&fallback) copy.team=fallback;
+    return window.__SETCA_prepareSceneTeams(copy,fallback||copy.team);
+  }
+  try{
+    window.__SETCA_resolveImportTeam=__SETCA_resolveImportTeam;
+    window.__SETCA_prepareImportedCombatScene=__SETCA_prepareImportedCombatScene;
+  }catch(_){ }
   function buildSceneSnapshot(){
     const planes = __exportList(Array.isArray(st.planes) ? st.planes.filter(window.__SETCA_isOwnTeam) : []);
     for(let i=0;i<planes.length;i++){
@@ -24997,23 +25039,26 @@ document.addEventListener('keydown', (ev)=>{
         let scene = data && typeof data === 'object' && data.scene ? data.scene : data;
         if(!scene || !Array.isArray(scene.planes)) throw new Error('Archivo inválido');
         const currentTeam = window.__SETCA_getCurrentTeam();
-        const declaredTeam = window.__SETCA_normalizeTeam(scene.team) || window.__SETCA_normalizeTeam(data.team);
+        const declaredTeam = __SETCA_playableImportTeam(scene.team) || __SETCA_playableImportTeam(data.team);
+        const importTeam = __SETCA_resolveImportTeam(scene,data,file,mode,currentTeam);
         const originalTeams = window.__SETCA_sceneTeams(scene);
         if(declaredTeam && !originalTeams.includes(declaredTeam)) originalTeams.push(declaredTeam);
         const missingTeam = ['planes','gtc','drawings','pairs','missiles','impactMarks'].some(key=>
-          (Array.isArray(scene[key]) ? scene[key] : []).some(entity=>entity && !window.__SETCA_normalizeTeam(entity.team)));
+          (Array.isArray(scene[key]) ? scene[key] : []).some(entity=>entity && !__SETCA_playableImportTeam(entity.team)));
         const warnings = [];
-        if(missingTeam) warnings.push('Los elementos sin equipo se asignarán a ' + window.__SETCA_teamLabel(declaredTeam || currentTeam) + '.');
+        if(missingTeam&&!importTeam) throw new Error('La misión no contiene equipo BLUE/RED. Ábrela en Planning Tool, selecciona el bando correcto y vuelve a exportarla.');
+        if(missingTeam) warnings.push('Los elementos sin equipo se asignarán a ' + window.__SETCA_teamLabel(importTeam) + '.');
         if(currentTeam!=='white' && originalTeams.some(team=>team !== currentTeam)) warnings.push('El archivo contiene ' + originalTeams.map(window.__SETCA_teamLabel).join(', ') + '. Se conservarán esos equipos; tu sesión seguirá en ' + window.__SETCA_teamLabel(currentTeam) + '.');
         if(warnings.length && !window.confirm(warnings.join('\n') + '\n¿Continuar?')) return;
-        scene = window.__SETCA_prepareSceneTeams(cloneDeep(scene), declaredTeam || currentTeam);
+        scene = __SETCA_prepareImportedCombatScene(scene,importTeam);
+        const missionLabel=window.__SETCA_sceneTeams(scene).map(window.__SETCA_teamLabel).join(', ')||window.__SETCA_teamLabel(importTeam);
 
         if(mode === 'merge'){
           const merged = mergeSceneIntoCurrent(scene);
           if(typeof scene.showAwacsCoverage === 'boolean' && !st.showAwacsCoverage) st.showAwacsCoverage = !!scene.showAwacsCoverage;
           refreshImportedScene();
           if(window._SETCA_SYNC) await window._SETCA_SYNC.pushNow();
-          status.textContent=`Misión añadida: ${merged.planes.length} aeronaves · ${merged.gtc.length} GTC.`;
+          status.textContent=`Misión ${missionLabel} añadida: ${merged.planes.length} aeronaves · ${merged.gtc.length} GTC.`;
           return;
         }
 
@@ -25022,7 +25067,7 @@ document.addEventListener('keydown', (ev)=>{
         if(typeof scene.showAwacsCoverage === 'boolean') st.showAwacsCoverage = !!scene.showAwacsCoverage;
         refreshImportedScene();
         if(window._SETCA_SYNC) await window._SETCA_SYNC.pushNow();
-        status.textContent='Misión cargada: ' + (window.__SETCA_sceneTeams(scene).map(window.__SETCA_teamLabel).join(', ') || window.__SETCA_teamLabel(scene.team)) + '.';
+        status.textContent='Misión cargada: ' + missionLabel + '.';
       }catch(err){
         status.textContent='Error al cargar la misión: '+err.message;
       }finally{
