@@ -10580,13 +10580,13 @@ body.setca-modern-ui.setca-excs-session[data-setca-team="red"] header :is(#setca
           <button id="navZoomReset" class="navZoomBtn" type="button" title="Restablecer vista">Reset</button>
         </div>
         <div class="navReplayGroup">
-          <button id="navMeasureToggle" class="navModeBtn" type="button" title="Usar regla local en NAV">📏 Regla</button>
-          <button id="nav3DToggle" class="navModeBtn" type="button" title="Ver perfil de vuelo 3D local">🧱 3D</button>
+          <button id="navMeasureToggle" class="navModeBtn" type="button" title="Usar regla local en NAV">Regla</button>
+          <button id="nav3DToggle" class="navModeBtn" type="button" title="Ver perfil de vuelo 3D local">3D</button>
           <button id="navCoverageToggle" class="navModeBtn" type="button" aria-pressed="true" title="Mostrar u ocultar todos los volúmenes de detección y fuego. Solo cambia tu vista NAV; no desactiva sensores ni misiles.">Cobertura ON</button>
-          <button id="navReplayToggle" class="navModeBtn" type="button" title="Activar replay local">⏯ Replay</button>
-          <button id="navReplayBack" class="navMiniBtn" type="button" title="Retroceder 5 segundos">⏪</button>
+          <button id="navReplayToggle" class="navModeBtn" type="button" title="Activar replay local">Replay</button>
+          <button id="navReplayBack" class="navMiniBtn" type="button" title="Retroceder 5 segundos">◀ 5 s</button>
           <button id="navReplayPlay" class="navMiniBtn" type="button" title="Reproducir o pausar replay">▶</button>
-          <button id="navReplayFwd" class="navMiniBtn" type="button" title="Avanzar 5 segundos">⏩</button>
+          <button id="navReplayFwd" class="navMiniBtn" type="button" title="Avanzar 5 segundos">5 s ▶</button>
           <button id="navReplaySpeedDown" class="navMiniBtn" type="button" title="Disminuir velocidad de replay en pasos de 5X">−5X</button>
           <output id="navReplaySpeedValue" class="navReplaySpeedValue" aria-label="Velocidad de replay">1X</output>
           <button id="navReplaySpeedUp" class="navMiniBtn" type="button" title="Aumentar velocidad de replay hasta 20X">+5X</button>
@@ -10598,25 +10598,40 @@ body.setca-modern-ui.setca-excs-session[data-setca-team="red"] header :is(#setca
         <label for="navMapOpacity"><span>MAPA PERÚ</span><output id="navMapOpacityValue">55%</output></label>
         <input id="navMapOpacity" type="range" min="0" max="100" step="5" value="55" aria-label="Opacidad local del mapa del Perú">
       </div>
+      <details id="navAircraftSelector" class="navAircraftSelector">
+        <summary>AERONAVES Y REFERENCIAS <span id="navAircraftVisibleCount">Todas</span></summary>
+        <div class="navAircraftSelectorBody">
+          <div class="navAircraftSelectorActions">
+            <span>VISIBILIDAD Y COLOR · SOLO EN TU NAV</span>
+            <button id="navAircraftShowAll" type="button">Mostrar todas</button>
+            <button id="navAircraftClearAll" type="button">Limpiar todas</button>
+          </div>
+          <div id="navAircraftList" class="navAircraftList" aria-label="Visibilidad y color local de aeronaves en NAV"></div>
+          <div id="navLegend" class="navLegend" aria-label="Referencias NAV"></div>
+        </div>
+      </details>
       <div class="navPairLocalWrap">
         <div class="navPairLocalGroup">
           <span class="navPairLocalLabel">Pareo local NAV</span>
           <select id="navPairLocalA" aria-label="Aeronave A para pareo local"></select>
           <select id="navPairLocalB" aria-label="Aeronave B para pareo local"></select>
           <button id="navPairLocalAdd" class="navModeBtn" type="button" title="Agregar pareo local para análisis">PAREAR</button>
-          <button id="navPairLocalClear" class="navMiniBtn" type="button" title="Limpiar todos los pareos locales">✕</button>
+          <button id="navPairLocalClear" class="navMiniBtn" type="button" title="Limpiar todos los pareos locales">Limpiar pareos</button>
           <span class="navPairLocalHint">Solo local · arrastra con el mouse en 2D o 3D · no sincroniza</span>
         </div>
         <div id="navPairLocalList" class="navPairLocalList"></div>
       </div>
-      <section class="navGtcControls" aria-label="GTC en NAV · visibilidad local">
-        <div class="navGtcHeading"><strong>GTC · VISTA LOCAL</strong><span id="navGtcVisibleCount"></span>
+      <details id="navGtcSection" class="navGtcControls" aria-label="GTC en NAV · visibilidad local">
+        <summary class="navGtcSummary"><strong>GTC · VISTA LOCAL</strong><span id="navGtcVisibleCount"></span></summary>
+        <div class="navGtcBody">
+        <div class="navGtcHeading">
           <button id="navGtcShowAll" type="button">Mostrar todos</button>
           <button id="navGtcHideAll" type="button">Ocultar todos</button>
         </div>
         <p class="navGtcHint">VISIBILIDAD, COLOR Y OPACIDAD LOCALES · NO MODIFICA EL SENSOR</p>
         <div id="navGtcList" class="navGtcList"></div>
-      </section>
+        </div>
+      </details>
     </div>
     <canvas id="navReportCanvas"></canvas>
     <div id="setcaNav3DPivot" class="setca-nav3d-pivot" hidden aria-hidden="true"><i></i></div>
@@ -10629,9 +10644,71 @@ body.setca-modern-ui.setca-excs-session[data-setca-team="red"] header :is(#setca
       <button type="button" data-nav3d-nudge="down" aria-label="Inclinar cámara hacia abajo" title="Inclinar abajo · Flecha ↓">↓</button>
       <span class="setca-nav3d-pad-hint">FLECHAS · RUEDA ZOOM</span>
     </div>
-    <div id="navLegend" class="navLegend"></div>
   </div>
 </div>
+<style id="nav-aircraft-local-selector-css">
+#navReport .navAircraftSelector{margin-top:7px;border:1px solid rgba(125,211,252,.28);border-radius:7px;background:#0b1623;color:#e0f2fe;font:700 11px/1.3 ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;}
+#navReport .navAircraftSelector>summary{padding:9px 11px;cursor:pointer;list-style:none;display:flex;align-items:center;justify-content:space-between;gap:8px;}
+#navReport .navAircraftSelector>summary::-webkit-details-marker{display:none;}
+#navReport .navAircraftSelector>summary::after{content:'+';font-size:16px;color:#7dd3fc;order:1;}
+#navReport .navAircraftSelector[open]>summary::after{content:'−';}
+#navReport .navAircraftSelector>summary:hover{background:rgba(56,189,248,.08);}
+#navReport #navAircraftVisibleCount{margin-left:auto;color:#93c5fd;font-weight:600;}
+#navReport .navAircraftSelectorBody{padding:0 9px 9px;border-top:1px solid rgba(125,211,252,.16);}
+#navReport .navAircraftSelectorActions{display:flex;align-items:center;flex-wrap:wrap;gap:7px;padding:8px 0;color:#94a3b8;font:600 11px system-ui,sans-serif;}
+#navReport .navAircraftSelectorActions span{margin-right:auto;}
+#navReport .navAircraftSelectorActions button{border:1px solid rgba(125,211,252,.38);border-radius:6px;background:#142538;color:#e0f2fe;padding:5px 10px;min-height:28px;font:700 11px system-ui,sans-serif;cursor:pointer;}
+#navReport .navAircraftSelectorActions button:hover{background:#1e3a52;border-color:#7dd3fc;}
+#navReport .navAircraftList{display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:6px;max-height:245px;overflow:auto;padding:2px;}
+#navReport .navAircraftChoice{display:flex;align-items:center;gap:8px;padding:6px 8px;border:1px solid rgba(125,211,252,.22);border-radius:8px;background:linear-gradient(180deg,#101c2b,#091323);color:#e2e8f0;font:700 12px system-ui,sans-serif;min-width:0;}
+#navReport .navAircraftChoice.is-hidden{opacity:.58;border-style:dashed;}
+#navReport .navAircraftVisibility{display:flex;align-items:center;gap:7px;min-width:0;flex:1;cursor:pointer;}
+#navReport .navAircraftVisibility input{accent-color:#38bdf8;flex:0 0 auto;width:15px;height:15px;margin:0;}
+#navReport .navAircraftVisibility .navAircraftName{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+#navReport .navAircraftChoice .navLegendSwatch{width:11px!important;height:11px!important;flex:0 0 11px!important;margin:0!important;}
+#navReport .navAircraftChoice .navColorSelect{width:112px;min-width:90px;height:27px;flex:0 0 auto;border:1px solid rgba(125,211,252,.30);border-radius:6px;background:#132338;color:#e0f2fe;font:600 11px system-ui,sans-serif;}
+#navReport .navAircraftEmpty{padding:9px;color:#94a3b8;font:11px system-ui,sans-serif;}
+#navReport #navLegend{margin-top:8px!important;padding-top:8px!important;border-top:1px solid rgba(125,211,252,.20)!important;}
+#navReport #navLegend:empty{display:none!important;}
+/* Consola NAV: niveles visuales claros y botones de mando sobrios. */
+#navReport .navControlsDrawer{background:#0a1420!important;border-color:#667e92!important;box-shadow:0 14px 36px rgba(0,0,0,.42),inset 0 1px 0 rgba(255,255,255,.08)!important;}
+#navReport .navControlsDrawer .navReportToolbar{background:#152635!important;border-color:#50677a!important;box-shadow:inset 0 1px 0 rgba(255,255,255,.08)!important;}
+#navReport .navControlsDrawer button{min-height:35px!important;padding:5px 10px!important;background:#22394b!important;border:1px solid #8299aa!important;border-bottom-color:#536b7e!important;border-radius:5px!important;color:#f4f8fb!important;box-shadow:inset 0 1px 0 rgba(255,255,255,.13),0 2px 0 rgba(0,0,0,.36)!important;text-shadow:none!important;font:750 11px/1.15 system-ui,Segoe UI,sans-serif!important;letter-spacing:.035em!important;text-transform:uppercase!important;cursor:pointer;transition:background-color .12s ease,border-color .12s ease,box-shadow .12s ease;}
+#navReport .navControlsDrawer button:hover:not(:disabled){background:#315069!important;border-color:#bad0de!important;box-shadow:inset 0 1px 0 rgba(255,255,255,.16),0 2px 0 rgba(0,0,0,.40)!important;}
+#navReport .navControlsDrawer button:active:not(:disabled){transform:translateY(1px);background:#1a3041!important;box-shadow:inset 0 2px 4px rgba(0,0,0,.30)!important;}
+#navReport .navControlsDrawer button:disabled{opacity:.48!important;cursor:not-allowed!important;background:#162633!important;border-color:#4a5c6b!important;box-shadow:none!important;}
+#navReport .navControlsDrawer button:focus-visible,#navReport .navControlsDrawer summary:focus-visible,#navReport .navControlsDrawer select:focus-visible{outline:2px solid #8ddcff!important;outline-offset:2px!important;}
+#navReport .navControlsDrawer .navModeBtn.active,#navReport .navControlsDrawer .navMiniBtn.active,#navReport .navControlsDrawer #navCoverageToggle[aria-pressed="true"]{background:#28556a!important;border-color:#a7d8e6!important;color:#ffffff!important;box-shadow:inset 3px 0 0 #9be4ed,inset 0 1px 0 rgba(255,255,255,.14),0 2px 0 rgba(0,0,0,.34)!important;}
+#navReport .navControlsDrawer #navReplayToggle{border-color:#9db8ca!important;font-weight:850!important;}
+#navReport .navControlsDrawer #navPairLocalClear{background:#1b2b38!important;color:#d5e3eb!important;}
+#navReport .navControlsDrawer .navReplayGroup button{min-width:0!important;}
+#navReport .navControlsDrawer .navReplaySpeedValue,#navReport .navControlsDrawer .navZoomReadout{color:#f2f8fc!important;font-weight:800!important;}
+#navReport details.navGtcControls{margin-top:8px!important;padding:0!important;border:1px solid #507086!important;border-radius:8px!important;background:#102638!important;box-shadow:0 3px 12px rgba(0,0,0,.25)!important;color:#eaf4fa!important;}
+#navReport .navGtcSummary{display:flex;align-items:center;gap:8px;min-height:36px;padding:8px 11px;list-style:none;cursor:pointer;background:linear-gradient(180deg,#1a394d,#133044);border-radius:7px;font:800 11px/1.2 system-ui,Segoe UI,sans-serif;color:#f1f8fc;}
+#navReport .navGtcSummary::-webkit-details-marker,#navReport .navGtcRowSummary::-webkit-details-marker{display:none;}
+#navReport .navGtcSummary::after,#navReport .navGtcRowSummary::after{content:'+';margin-left:5px;color:#9bdcf1;font-size:16px;font-weight:800;}
+#navReport .navGtcControls[open]>.navGtcSummary::after,#navReport .navGtcRow[open]>.navGtcRowSummary::after{content:'−';}
+#navReport .navGtcSummary:hover,#navReport .navGtcRowSummary:hover{filter:brightness(1.12);}
+#navReport .navGtcSummary #navGtcVisibleCount{margin-left:auto;color:#c7e8f5;font:700 10px system-ui,Segoe UI,sans-serif;white-space:nowrap;}
+#navReport .navGtcBody{padding:9px;border-top:1px solid #42657a;background:#0d2030;}
+#navReport .navGtcHeading{display:grid!important;grid-template-columns:1fr 1fr!important;gap:7px!important;}
+#navReport .navGtcHeading button{width:100%!important;padding:5px 7px!important;}
+#navReport .navGtcHint{color:#bdcfda!important;margin:8px 1px!important;font-size:10px!important;}
+#navReport .navGtcList{gap:7px!important;max-height:none!important;}
+#navReport details.navGtcRow{min-width:0;padding:0!important;border:1px solid #507086!important;border-radius:7px!important;background:#182f40!important;overflow:hidden;}
+#navReport details.navGtcRow.is-hidden{opacity:.72;border-style:dashed!important;}
+#navReport .navGtcRowSummary{display:flex;align-items:center;gap:7px;min-height:34px;padding:7px 9px;list-style:none;cursor:pointer;background:#1d3a4f;color:#f1f8fc;}
+#navReport .navGtcRowSummary strong{min-width:0;flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font:800 11px system-ui,Segoe UI,sans-serif;}
+#navReport .navGtcStatus{flex:0 0 auto;padding:3px 6px;border:1px solid #76adae;border-radius:4px;background:#255355;color:#eafffb;font:800 9px system-ui,Segoe UI,sans-serif;}
+#navReport .navGtcRow.is-hidden .navGtcStatus{background:#374553;border-color:#6d8493;color:#d9e3e8;}
+#navReport .navGtcRowBody{padding:9px;background:#0b1a28;border-top:1px solid #3e5c70;}
+#navReport .navGtcLabel{color:#edf7fb!important;font-size:11px!important;font-weight:700!important;}
+#navReport .navGtcValues{margin:8px 0!important;padding:7px;border:1px solid #344f63;border-radius:5px;background:#132b3c;color:#b8e8fa!important;font-size:10px!important;}
+#navReport .navGtcValues .fire{color:#ffb7b7!important;}
+#navReport .navGtcLayerControls{margin:8px 0 0!important;gap:7px!important;}
+#navReport .navGtcLayerControl{grid-template-columns:42px 31px minmax(0,1fr) 34px!important;color:#dae8ef!important;font-size:10px!important;}
+#navReport .navGtcLayerControl strong,#navReport .navGtcLayerControl output{font-size:10px!important;color:#f0f7fb!important;}
+</style>
 <div id="araReport" class="modal"><button id="closeAraReport" class="close" type="button" aria-label="Cerrar análisis ARA">&times;</button><div id="araReportContent"><div class="araTop"><div><h2>ARA - AIRCRAFT RISK ANALYZER</h2><div id="araMeta" class="araSub">Analisis horizontal, vertical, exposicion y maniobras</div></div><div class="araControls"><select id="araFocusSelect" aria-label="Filtro ARA"><option value="">Todas las aeronaves</option></select><button id="araRefreshBtn" type="button">ACTUALIZAR</button></div></div><div id="araKpis" class="araKpis"></div><div id="araBody" class="araBody"></div></div></div>
 <div id="spiderWebPanel" class="modal" aria-hidden="true"><span id="closeSpiderWebPanel" class="close">&times;</span><div id="spiderWebContent"><h2>SPIDER WEB</h2><div class="spiderControls"><label>Avion base<select id="spiderBaseSelect" aria-label="Avion base para Spider Web"></select></label><button id="spiderWebToggle" type="button" class="is-on">ON</button></div><div class="spiderLegend"><span><i class="spiderDot red"></i>Cerca</span><span><i class="spiderDot orange"></i>Medio</span><span><i class="spiderDot green"></i>Lejos</span></div><div id="spiderWebList" class="spiderWebList"></div></div></div>
 <div id="drawingScopeModal" class="modal drawingScopeModal" aria-hidden="true"><span id="closeDrawingScopeModal" class="close">&times;</span><div id="drawingScopeModalContent"><h2>RELACIÓN DE GRÁFICOS</h2><div class="drawingScopeModalToolbar"><span class="drawingScopeModalHint">Grupos minimizables · ocultado local por grupo</span><span id="drawingScopeCount" class="drawingScopeCount">0</span></div><div id="drawingScopeList" class="drawingScopeModalList" aria-label="Listado de gráficos"></div></div></div>
@@ -11900,6 +11977,7 @@ const __NAV_STORE = {
   },
   localPairs: [],
   selectedTrackId: null,
+  aircraftFilter: { mode:'all', ids:new Set() },
   missileTracks: Object.create(null),
   profile3d: {
     enabled:false,
@@ -11910,6 +11988,67 @@ const __NAV_STORE = {
     liftBoost:1.15
   }
 };
+
+function __navAvailableAircraft(){
+  const planes = Array.isArray(st && st.planes) ? st.planes : [];
+  const visible = new Map();
+  planes.filter(isPlaneVisibleToCurrentRole).forEach(p=>{
+    const id=String(p && p.id || '');
+    if(id) visible.set(id,{id,name:String(p.name||id)});
+  });
+  const showAllTracks=!!(window.__SETCA_hasFullAircraftVisibility && window.__SETCA_hasFullAircraftVisibility());
+  if(showAllTracks){
+    Object.values(__NAV_STORE.tracks||{}).forEach(track=>{
+      const id=String(track && track.id || '');
+      if(id && !visible.has(id) && (!window.__SETCA_isOwnTeam || window.__SETCA_isOwnTeam(track))){
+        visible.set(id,{id,name:String(track.name||id)});
+      }
+    });
+  }
+  return Array.from(visible.values()).sort((a,b)=>a.name.localeCompare(b.name)||a.id.localeCompare(b.id));
+}
+function __navAircraftIsSelected(id){
+  const filter=__NAV_STORE.aircraftFilter;
+  return !filter || filter.mode==='all' || filter.ids.has(String(id||''));
+}
+function __navRefreshAircraftSelector(aircraft){
+  const list=document.getElementById('navAircraftList');
+  const count=document.getElementById('navAircraftVisibleCount');
+  if(!list || !count) return;
+  const arr=Array.isArray(aircraft)?aircraft:__navAvailableAircraft();
+  const selected=arr.filter(p=>__navAircraftIsSelected(p.id)).length;
+  count.textContent=`${selected} / ${arr.length} AERONAVES`;
+  const selector=document.getElementById('navAircraftSelector');
+  if(selector && !selector.open) return;
+  const signature=JSON.stringify(arr.map(p=>[p.id,p.name,__navGetTrackColor(p.id,(__NAV_STORE.tracks[p.id]||{}).color)]));
+  const selectedSignature=arr.filter(p=>__navAircraftIsSelected(p.id)).map(p=>p.id).join('|');
+  if(list.dataset.sig===signature){
+    if(list.dataset.selected!==selectedSignature){
+      list.dataset.selected=selectedSignature;
+      list.querySelectorAll('input[data-nav-aircraft-id]').forEach(input=>{
+        input.checked=__navAircraftIsSelected(input.dataset.navAircraftId);
+        const row=input.closest('.navAircraftChoice');
+        if(row) row.classList.toggle('is-hidden',!input.checked);
+      });
+    }
+    return;
+  }
+  list.dataset.sig=signature;
+  list.dataset.selected=selectedSignature;
+  const escape=s=>String(s||'').replace(/[&<>"']/g,ch=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[ch]));
+  list.innerHTML=arr.length ? arr.map(p=>{
+    const color=__navGetTrackColor(p.id,(__NAV_STORE.tracks[p.id]||{}).color);
+    const selectedColor=__navGetPendingColor(p.id,color);
+    const options=__NAV_COLOR_PRESETS.map(item=>`<option value="${item.value}" ${item.value===selectedColor?'selected':''}>${item.label}</option>`).join('');
+    const shown=__navAircraftIsSelected(p.id);
+    return `<div class="navAircraftChoice${shown?'':' is-hidden'}" title="${escape(p.name)}"><label class="navAircraftVisibility"><input type="checkbox" data-nav-aircraft-id="${escape(p.id)}" aria-label="Mostrar ${escape(p.name)} en NAV" ${shown?'checked':''}><span class="navAircraftName">${escape(p.name)}</span></label><span class="navLegendSwatch" style="background:${escape(color)}" data-nav-center-track="${escape(p.id)}" title="Ir a ${escape(p.name)}"></span><select class="navColorSelect" data-nav-pending-color="${escape(p.id)}" aria-label="Color local para ${escape(p.name)}">${options}</select></div>`;
+  }).join('') : '<div class="navAircraftEmpty">No hay aeronaves disponibles en esta vista.</div>';
+}
+function __navSetAllAircraftVisible(visible){
+  __NAV_STORE.aircraftFilter={mode:visible?'all':'custom',ids:new Set()};
+  __navRefreshAircraftSelector(__navAvailableAircraft());
+  if(typeof renderNavReport==='function') renderNavReport(true);
+}
 
 function __navClampZoom(z){
   return Math.max(1, Math.min(250, Number.isFinite(+z) ? +z : 1));
@@ -12005,19 +12144,30 @@ function __navRefreshGtcList(){
   const list = document.getElementById('navGtcList');
   if(!list) return;
   const units = __navAvailableGtcUnits();
-  const signature = JSON.stringify(units.map(u=>[__navGtcVisibilityKey(u),u.name,u.covR,u.covH,u.misR,u.misH,u.canLaunch,u.kind,__navIsGtcShown(u),__navGetCoverageStyle(u),__navGetCoverageStyle(u,'fire')]));
+  const count = document.getElementById('navGtcVisibleCount');
+  if(count) count.textContent = `${units.filter(__navIsGtcShown).length} / ${units.length} visibles`;
+  const section = document.getElementById('navGtcSection');
+  if(section && !section.open) return;
+  const signature = JSON.stringify(units.map(u=>[__navGtcVisibilityKey(u),u.name,u.covR,u.covH,u.misR,u.misH,u.canLaunch,u.kind,__navIsGtcShown(u)]));
   if(list.dataset.sig === signature) return;
+  const expanded = new Set(Array.from(list.children||[]).filter(row=>row.open).map(row=>row.dataset.navGtcKey));
   list.dataset.sig = signature;
   const rows = units.map(u=>{
     const key = __navGtcVisibilityKey(u), visible = __navIsGtcShown(u);
-    const row = document.createElement('div'); row.className = 'navGtcRow' + (visible ? '' : ' is-hidden');
+    const row = document.createElement('details'); row.className = 'navGtcRow' + (visible ? '' : ' is-hidden');
+    row.dataset.navGtcKey=key; row.open=expanded.has(key);
+    const summary=document.createElement('summary');summary.className='navGtcRowSummary';
+    const name=document.createElement('strong');
+    name.textContent=`${u.name || u.id || 'GTC'} · ${window.__SETCA_entityTeam(u).toUpperCase()}`;
+    const status=document.createElement('span');status.className='navGtcStatus';status.textContent=visible?'VISIBLE':'OCULTO';
+    summary.append(name,status);row.appendChild(summary);
+    const body=document.createElement('div');body.className='navGtcRowBody';
     const label = document.createElement('label'); label.className = 'navGtcLabel';
     const input = document.createElement('input'); input.type = 'checkbox'; input.checked = visible;
     input.setAttribute('aria-label', `Mostrar ${u.name || u.id || 'GTC'} en NAV`);
     input.onchange = ()=>__navSetGtcVisible(key,input.checked);
-    const name = document.createElement('span');
-    name.textContent = `${u.name || u.id || 'GTC'} · ${window.__SETCA_entityTeam(u).toUpperCase()}`;
-    label.append(input,name); row.appendChild(label);
+    const visibleText=document.createElement('span');visibleText.textContent='Mostrar en mi NAV';
+    label.append(input,visibleText);body.appendChild(label);
     const detection = __navCoverageProfile(u), fire = __navCoverageProfile(u,'fire');
     const values = document.createElement('div'); values.className = 'navGtcValues';
     if(detection){
@@ -12028,7 +12178,7 @@ function __navRefreshGtcList(){
       const span=document.createElement('span');span.className='navGtcTacticalLine fire';
       span.textContent=`FUEGO ${fire.r.toFixed(1)} NM // ${Math.round(fire.h)} FT`;values.appendChild(span);
     }
-    row.appendChild(values);
+    body.appendChild(values);
     const controls=document.createElement('div');controls.className='navGtcLayerControls';
     [['detection',detection,'DET'],['fire',fire,'FUEGO']].forEach(([layer,profile,shortLabel])=>{
       if(!profile) return;
@@ -12042,12 +12192,10 @@ function __navRefreshGtcList(){
       opacity.oninput=()=>{output.textContent=`${opacity.value}%`;__navSetCoverageStyle(u,layer,{opacity:(+opacity.value||0)/100});};
       control.append(title,color,opacity,output);controls.appendChild(control);
     });
-    row.appendChild(controls);return row;
+    body.appendChild(controls);row.appendChild(body);return row;
   });
   if(!rows.length){const empty=document.createElement('span');empty.className='navGtcEmpty';empty.textContent='Sin GTC disponibles para tu bando.';rows.push(empty);}
   list.replaceChildren(...rows);
-  const count = document.getElementById('navGtcVisibleCount');
-  if(count) count.textContent = `${units.filter(__navIsGtcShown).length} / ${units.length} visibles`;
 }
 function __navCoverageUnits(){
   return __navAvailableGtcUnits().filter(u=>__navIsGtcShown(u) && (__navCoverageProfile(u) || __navCoverageProfile(u,'fire')));
@@ -13068,9 +13216,11 @@ function __navCollectRenderData(){
   const currentState = replayActive ? null : ((st && st.localPause && st.pauseSnapshot) ? st.pauseSnapshot : st);
   const planeMap = new Map((Array.isArray(currentState && currentState.planes) ? currentState.planes : []).map(p=>[String(p && p.id || ''), p]));
   const missileMap = new Map((Array.isArray(currentState && currentState.missiles) ? currentState.missiles : []).map(m=>[String(m && m.id || ''), m]));
-  const visibleIds = new Set((Array.isArray(st.planes) ? st.planes : []).filter(isPlaneVisibleToCurrentRole).map(p=>String(p.id || '')));
-  const showAllTracks = !!(window.__SETCA_hasFullAircraftVisibility && window.__SETCA_hasFullAircraftVisibility());
-  const tracks = Object.values(__NAV_STORE.tracks || {}).filter(track=>(showAllTracks && (!window.__SETCA_isOwnTeam || window.__SETCA_isOwnTeam(track))) || visibleIds.has(String(track.id || ''))).map(track=>{
+  const aircraft=__navAvailableAircraft();
+  __navRefreshAircraftSelector(aircraft);
+  const selectedIds=new Set(aircraft.filter(p=>__navAircraftIsSelected(p.id)).map(p=>p.id));
+  const mapOnly=!!(__NAV_STORE.aircraftFilter && __NAV_STORE.aircraftFilter.mode==='custom' && selectedIds.size===0);
+  const tracks = Object.values(__NAV_STORE.tracks || {}).filter(track=>selectedIds.has(String(track.id || ''))).map(track=>{
     const pts = (Array.isArray(track.pts) ? track.pts : []).filter(pt=>!Number.isFinite(cutoff) || pt.t <= cutoff);
     const plane = replayActive ? null : planeMap.get(String(track.id || ''));
     const replayPoint = replayActive ? __navPointAtCutoff(track.pts, cutoff) : null;
@@ -13093,7 +13243,7 @@ function __navCollectRenderData(){
       selected:String(__NAV_STORE.selectedTrackId||'')===String(track.id||'')||!!(plane&&Array.isArray(st.sel)&&st.sel.some(id=>String(id||'')===String(plane.id||'')))
     };
   }).filter(track=>track.pts.length || track.current);
-  const missiles = Object.values(__NAV_STORE.missileTracks || {}).filter(track=>window.__SETCA_canSeeOwnedEntity(track)).map(track=>{
+  const missiles = mapOnly ? [] : Object.values(__NAV_STORE.missileTracks || {}).filter(track=>window.__SETCA_canSeeOwnedEntity(track)).map(track=>{
     const pts = (Array.isArray(track.pts) ? track.pts : []).filter(pt=>!Number.isFinite(cutoff) || pt.t <= cutoff);
     const live = replayActive ? null : missileMap.get(String(track.id || ''));
     // En LIVE, una traza histórica no puede mantener un misil consumido en pantalla.
@@ -13124,7 +13274,7 @@ function __navCollectRenderData(){
       current
     };
   }).filter(track=>track && (track.pts.length || track.current));
-  return { cutoff, tracks, missiles, replayActive, mode3d:__navIs3DEnabled() };
+  return { cutoff, tracks, missiles, replayActive, mode3d:__navIs3DEnabled(), mapOnly };
 }
 function __navDrawMissileMarker(c, x, y, color, hdgDeg, mode3d=false){
   const ang = ((__navNormalizeDeg(hdgDeg) - 90) * Math.PI / 180);
@@ -13351,7 +13501,7 @@ function __navRefreshLocalPairUI(tracks){
   if(!selA || !selB || !list) return;
   const arr = (Array.isArray(tracks) ? tracks : []).slice().sort((a,b)=>String(a && a.name || '').localeCompare(String(b && b.name || '')));
   const ids = new Set(arr.map(t=>String(t && t.id || '')).filter(Boolean));
-  __navNormalizeLocalPairs(ids);
+  __navNormalizeLocalPairs();
   const prevA = String(selA.value || '');
   const prevB = String(selB.value || '');
   const opts = ['<option value="">-- aeronave --</option>'].concat(arr.map(track=>{
@@ -13375,7 +13525,8 @@ function __navRefreshLocalPairUI(tracks){
   list.innerHTML = chips.length ? chips.join('') : '<div class="navPairLocalEmpty">Sin pareos locales activos.</div>';
 }
 function __navDrawLocalPairs(c, tracks, ptScreen, mode3d=false){
-  const arr = __navNormalizeLocalPairs(new Set((Array.isArray(tracks) ? tracks : []).map(t=>String(t && t.id || '')).filter(Boolean)));
+  const visibleIds = new Set((Array.isArray(tracks) ? tracks : []).map(t=>String(t && t.id || '')).filter(Boolean));
+  const arr = __navNormalizeLocalPairs().filter(pr=>visibleIds.has(pr.a) && visibleIds.has(pr.b));
   if(!arr.length) return 0;
   const trackMap = new Map((Array.isArray(tracks) ? tracks : []).map(t=>[String(t && t.id || ''), t]));
   let drawn = 0;
@@ -13485,7 +13636,7 @@ function renderNavReport(forceLegend=false){
     zoomReadout.textContent = `${Math.round(__navClampZoom(__NAV_STORE.view.zoom) * 100)}%`;
   }
 
-  const legendSig = tracks.map(track=>String(track.id || '')).sort().join('|') + '::MS:' + missiles.map(m=>String(m.id || '')).sort().join('|');
+  const legendSig = 'MS:' + missiles.map(m=>String(m.id || '')).sort().join('|');
   const shouldRebuildLegend = !!forceLegend || legend.dataset.sig !== legendSig;
 
   if(!projectedCloud.length){
@@ -13752,17 +13903,9 @@ function renderNavReport(forceLegend=false){
     meta.style.display = 'block';
   }
 
-  if(shouldRebuildLegend){
+  const aircraftSelector=document.getElementById('navAircraftSelector');
+  if(aircraftSelector && aircraftSelector.open && shouldRebuildLegend){
     legend.dataset.sig = legendSig;
-    const aircraftLegendHtml = tracks
-      .slice()
-      .sort((a,b)=>a.name.localeCompare(b.name))
-      .map(track=>{
-        const selectedColor = __navGetPendingColor(track.id, track.color);
-        const options = __NAV_COLOR_PRESETS.map(p=>`<option value="${p.value}" ${p.value === selectedColor ? 'selected' : ''}>${p.label}</option>`).join('');
-        const altLabel = track.current ? `<span class="navLegendSub">${__navFormatAltLabel(track.current.alt || 0)}</span>` : '';
-        return `<div class="navLegendItem" data-nav-legend-item="${track.id}"><span class="navLegendSwatch" style="background:${track.color}" data-nav-center-track="${track.id}" title="Ir al avión ${track.name}"></span><div class="navLegendText"><span class="navLegendName">${track.name}</span>${altLabel}</div><div class="navColorControl"><select class="navColorSelect" data-nav-pending-color="${track.id}" aria-label="Color local para ${track.name}">${options}</select></div></div>`;
-      }).join('');
     const missileLegendHtml = missiles.length
       ? missiles
           .slice()
@@ -13774,14 +13917,14 @@ function renderNavReport(forceLegend=false){
             return `<div class="navLegendItem navLegendMissileItem" data-nav-legend-missile="${missile.id}"><span class="navLegendSwatch navLegendMissileSwatch" style="background:${color}" data-nav-center-missile="${missile.id}" title="Ir al misil saliente ${nm}"></span><div class="navLegendText"><span class="navLegendName">MISIL SALIENTE · ${nm}</span><span class="navLegendSub">${sub || 'Traza de misil · ubicar'}</span></div></div>`;
           }).join('')
       : '';
-    legend.innerHTML = aircraftLegendHtml + missileLegendHtml;
+    legend.innerHTML = missileLegendHtml;
   }
 }
 
 window.renderNavReport = renderNavReport;
 
 document.addEventListener('change', (e)=>{
-  const sel = e.target && e.target.closest ? e.target.closest('#navLegend select[data-nav-pending-color]') : null;
+  const sel = e.target && e.target.closest ? e.target.closest('#navAircraftList select[data-nav-pending-color], #navLegend select[data-nav-pending-color]') : null;
   if(!sel) return;
   __navApplyColorSelection(sel.dataset.navPendingColor, sel.value);
 });
@@ -13796,7 +13939,7 @@ document.addEventListener('click', (e)=>{
       return;
     }
   }
-  const centerNode = e.target && e.target.closest ? e.target.closest('#navLegend [data-nav-center-track]') : null;
+  const centerNode = e.target && e.target.closest ? e.target.closest('#navAircraftList [data-nav-center-track], #navLegend [data-nav-center-track]') : null;
   if(centerNode){
     const trackId = String(centerNode.dataset.navCenterTrack || '');
     if(trackId){
@@ -13830,7 +13973,31 @@ document.addEventListener('click', (e)=>{
   const mapOpacity = document.getElementById('navMapOpacity');
   const controlsToggle = document.getElementById('navControlsToggle');
   const controlsDrawer = document.getElementById('navControlsDrawer');
+  const aircraftList = document.getElementById('navAircraftList');
+  const aircraftShowAll = document.getElementById('navAircraftShowAll');
+  const aircraftClearAll = document.getElementById('navAircraftClearAll');
+  const aircraftSelector = document.getElementById('navAircraftSelector');
   if(!canvas) return;
+
+  if(aircraftShowAll) aircraftShowAll.onclick=()=>__navSetAllAircraftVisible(true);
+  if(aircraftClearAll) aircraftClearAll.onclick=()=>__navSetAllAircraftVisible(false);
+  if(aircraftList) aircraftList.addEventListener('change',e=>{
+    const input=e.target && e.target.closest ? e.target.closest('input[data-nav-aircraft-id]') : null;
+    if(!input) return;
+    const id=String(input.dataset.navAircraftId||'');
+    if(!id) return;
+    const filter=__NAV_STORE.aircraftFilter;
+    if(filter.mode==='all'){
+      filter.ids=new Set(__navAvailableAircraft().map(p=>p.id));
+      filter.mode='custom';
+    }
+    if(input.checked) filter.ids.add(id); else filter.ids.delete(id);
+    __navRefreshAircraftSelector(__navAvailableAircraft());
+    if(typeof renderNavReport==='function') renderNavReport(true);
+  });
+  if(aircraftSelector) aircraftSelector.addEventListener('toggle',()=>{
+    if(aircraftSelector.open && typeof renderNavReport==='function') renderNavReport(true);
+  });
 
   if(typeof __navSetMapOpacity==='function') __navSetMapOpacity(__NAV_STORE.mapOpacity,false);
   if(mapOpacity) mapOpacity.addEventListener('input',()=>{if(typeof __navSetMapOpacity==='function')__navSetMapOpacity((+mapOpacity.value||0)/100,true);});
@@ -13838,6 +14005,8 @@ document.addEventListener('click', (e)=>{
   const navControlsPreferenceKey = 'setca.nav.controls.open.v1';
   const gtcShowAll = document.getElementById('navGtcShowAll');
   const gtcHideAll = document.getElementById('navGtcHideAll');
+  const gtcSection = document.getElementById('navGtcSection');
+  if(gtcSection) gtcSection.addEventListener('toggle',()=>{if(gtcSection.open) __navRefreshGtcList();});
   if(gtcShowAll) gtcShowAll.onclick = ()=>__navSetAllGtcVisible(true);
   if(gtcHideAll) gtcHideAll.onclick = ()=>__navSetAllGtcVisible(false);
   const coverageBtn = document.getElementById('navCoverageToggle');
@@ -37594,11 +37763,14 @@ import { getDatabase, ref, get, set } from "https://www.gstatic.com/firebasejs/1
     const info = (typeof __navCollectRenderData === 'function') ? __navCollectRenderData() : {tracks:[],missiles:[],replayActive:false,mode3d:false};
     const tracks = safeArr(info.tracks);
     const missiles = safeArr(info.missiles);
-    const bullseyes = __navVisibleBullseyes();
+    const bullseyes = info.mapOnly ? [] : __navVisibleBullseyes();
     const replayActive = !!info.replayActive;
     const mode3d = !!info.mode3d;
-    __navRefreshGtcList();
-    try{ if(typeof __navRefreshLocalPairUI === 'function') __navRefreshLocalPairUI(tracks); }catch(_){ }
+    const controls=document.getElementById('navControlsDrawer');
+    if(controls && !controls.hidden){
+      __navRefreshGtcList();
+      try{ if(typeof __navRefreshLocalPairUI === 'function') __navRefreshLocalPairUI(tracks); }catch(_){ }
+    }
     const dpr=Math.max(1,Math.min(2,window.devicePixelRatio||1));
     const rect=canvas.getBoundingClientRect();
     const cssW=Math.max(420,Math.round(rect.width||canvas.clientWidth||1000));
@@ -37616,12 +37788,22 @@ import { getDatabase, ref, get, set } from "https://www.gstatic.com/firebasejs/1
     missiles.forEach(m=>{ safeArr(m.pts).forEach(addPt); if(m.current) addPt(m.current); });
     bullseyes.forEach(be=>addPt({x:+be.x,y:+be.y,alt:0,hdg:0}));
     // Incluir mapa y assets en el autoencuadre para que sea réplica de mapa, no solo nube de trazas.
-    try{
+    if(!info.mapOnly) try{
       safeArr(window.st && st.gtc).filter(u=>u && !u._hit && window.__SETCA_canSeeOwnedEntity(u)).forEach(u=>addPt({x:+u.x||0,y:+u.y||0,alt:0,hdg:0}));
       // Encuadre estable al encender/apagar la capa: solo los sensores de mi bando.
       __navAvailableGtcUnits().forEach(u=>['detection','fire'].forEach(layer=>__navCoverageMesh(u,mode3d,layer).forEach(path=>path.forEach(addPt))));
       ((window.st && Array.isArray(st.airports))?st.airports:[]).filter(ap=>ap && (ap.primary||ap.type==='large_airport'||ap.type==='medium_airport'||ap.iata)).slice(0,40).forEach(ap=>{ const p=airportXY(ap); if(p) addPt({x:p.x,y:p.y,alt:0,hdg:0}); });
     }catch(_){ }
+    if(!projected.length && typeof SOUTH_AMERICA_NATIONAL_RINGS!=='undefined'){
+      if(!__NAV_STORE.mapFrame){
+        let minX=Infinity,minY=Infinity,maxX=-Infinity,maxY=-Infinity;
+        SOUTH_AMERICA_NATIONAL_RINGS.forEach(country=>(country.rings||[]).forEach(ring=>{
+          for(let i=0;i<ring.length;i+=2){ minX=Math.min(minX,ring[i]);maxX=Math.max(maxX,ring[i]);minY=Math.min(minY,ring[i+1]);maxY=Math.max(maxY,ring[i+1]); }
+        }));
+        if(Number.isFinite(minX)) __NAV_STORE.mapFrame=[minX,minY,maxX,maxY];
+      }
+      if(__NAV_STORE.mapFrame){const b=__NAV_STORE.mapFrame;addPt({x:b[0],y:b[1],alt:0,hdg:0});addPt({x:b[2],y:b[3],alt:0,hdg:0});}
+    }
     if(!projected.length){
       drawTacticalBackground(c,cssW,cssH);
       c.fillStyle='#e0f2fe'; c.font='700 16px Segoe UI,Arial,sans-serif'; c.textAlign='center'; c.fillText('Sin trazas NAV registradas todavía.', cssW/2, cssH/2);
@@ -37658,12 +37840,14 @@ import { getDatabase, ref, get, set } from "https://www.gstatic.com/firebasejs/1
 
     drawTacticalBackground(c,cssW,cssH);
     c.save();c.globalAlpha=Math.max(0,Math.min(1,Number(__NAV_STORE.mapOpacity)||0));drawPeruMapOnNav(c,ptScreen);c.restore();
-    __navDrawCoverage(c,ptScreen,mode3d);
-    drawAirwaysOnNav(c,ptScreen);
-    drawDrawingsOnNav(c,ptScreen);
-    __navDrawBullseyes(c,ptScreen,bullseyes);
-    drawAirportsOnNav(c,ptScreen);
-    drawGtcOnNav(c,ptScreen);
+    if(!info.mapOnly){
+      __navDrawCoverage(c,ptScreen,mode3d);
+      drawAirwaysOnNav(c,ptScreen);
+      drawDrawingsOnNav(c,ptScreen);
+      __navDrawBullseyes(c,ptScreen,bullseyes);
+      drawAirportsOnNav(c,ptScreen);
+      drawGtcOnNav(c,ptScreen);
+    }
     if(mode3d && typeof __navDraw3DAltitudeScale === 'function'){
       c.save(); c.globalAlpha=.82; try{ __navDraw3DAltitudeScale(c,cssW,cssH,maxAltFt); }catch(_){ } c.restore();
     }
@@ -37737,21 +37921,16 @@ import { getDatabase, ref, get, set } from "https://www.gstatic.com/firebasejs/1
     meta.textContent = metaTxt;
     meta.style.display='block';
 
-    const legendSig = tracks.map(t=>String(t.id||'')).sort().join('|')+'::MS:'+missiles.map(m=>String(m.id||'')).sort().join('|')+'::BE:'+JSON.stringify(bullseyes.map(be=>[be.id,be.name,be.label]));
-    if(forceLegend || legend.dataset.sig!==legendSig){
+    const legendSig='MS:'+missiles.map(m=>String(m.id||'')).sort().join('|')+'::BE:'+JSON.stringify(bullseyes.map(be=>[be.id,be.name,be.label]));
+    const aircraftSelector=document.getElementById('navAircraftSelector');
+    if(controls && !controls.hidden && aircraftSelector && aircraftSelector.open && (forceLegend || legend.dataset.sig!==legendSig)){
       legend.dataset.sig=legendSig;
-      const aircraftHtml=tracks.slice().sort((a,b)=>String(a.name||a.id||'').localeCompare(String(b.name||b.id||''))).map(track=>{
-        const selectedColor = (typeof __navGetPendingColor==='function') ? __navGetPendingColor(track.id, track.color) : track.color;
-        const opts = (typeof __NAV_COLOR_PRESETS!=='undefined' && Array.isArray(__NAV_COLOR_PRESETS)) ? __NAV_COLOR_PRESETS.map(p=>`<option value="${p.value}" ${p.value===selectedColor?'selected':''}>${p.label}</option>`).join('') : '';
-        const alt = track.current ? `<span class="navLegendSub">${Math.round(+track.current.alt||0)} FT · ubicar en mapa</span>` : '<span class="navLegendSub">ubicar en mapa</span>';
-        return `<div class="navLegendItem" data-nav-legend-item="${escHtml(track.id)}"><span class="navLegendSwatch" style="background:${escHtml(track.color)}" data-nav-center-track="${escHtml(track.id)}" title="Ir al avión ${escHtml(track.name)}"></span><div class="navLegendText"><span class="navLegendName">${escHtml(track.name||track.id)}</span>${alt}</div><div class="navColorControl"><select class="navColorSelect" data-nav-pending-color="${escHtml(track.id)}" aria-label="Color local para ${escHtml(track.name||track.id)}">${opts}</select></div></div>`;
-      }).join('');
       const missileHtml=missiles.slice().sort((a,b)=>String(a.name||a.id||'').localeCompare(String(b.name||b.id||''))).map(m=>{
         const nm=String(m.name||m.id||'MISIL'); const sub=[m.launcherName?`ORIGEN ${m.launcherName}`:'',m.targetName?`OBJ ${m.targetName}`:''].filter(Boolean).join(' · ');
         return `<div class="navLegendItem navLegendMissileItem" data-nav-legend-missile="${escHtml(m.id)}"><span class="navLegendSwatch navLegendMissileSwatch" style="background:${escHtml(m.color||'#fb923c')}" data-nav-center-missile="${escHtml(m.id)}" title="Ir al misil saliente ${escHtml(nm)}"></span><div class="navLegendText"><span class="navLegendName">MISIL SALIENTE · ${escHtml(nm)}</span><span class="navLegendSub">${escHtml(sub||'traza de misil · ubicar en mapa')}</span></div></div>`;
       }).join('');
       const bullseyeHtml=bullseyes.map(be=>`<div class="navLegendItem"><button class="navMiniBtn" type="button" data-nav-center-be="${escHtml(be.id)}" aria-label="Ubicar BE ${escHtml(be.name||be.label||be.id)}">◎ BE</button><div class="navLegendText"><span class="navLegendName">${escHtml(be.name||be.label||be.id)}</span><span class="navLegendSub">Bullseye · ubicar en mapa</span></div></div>`).join('');
-      legend.innerHTML=aircraftHtml+missileHtml+bullseyeHtml;
+      legend.innerHTML=missileHtml+bullseyeHtml;
     }
   }
 
