@@ -256,13 +256,13 @@
   import { getDatabase, ref, onValue, onChildAdded, set, get, onDisconnect, serverTimestamp, runTransaction } from "https://www.gstatic.com/firebasejs/10.12.3/firebase-database.js";
 
   const firebaseConfig = {
-  apiKey: "AIzaSyDzwPIoWMV14NyvfxykylPjpB4GpFVwW9M",
-  authDomain: "odi-gci.firebaseapp.com",
-  databaseURL: "https://odi-gci-default-rtdb.firebaseio.com",
-  projectId: "odi-gci",
-  storageBucket: "odi-gci.firebasestorage.app",
-  messagingSenderId: "324648898211",
-  appId: "1:324648898211:web:3ef3adf57747e329fc3916"
+  apiKey: "AIzaSyDy2QgqmWWJD1LjNCB2RcF6KU3PeLzkYlY",
+  authDomain: "setca-project.firebaseapp.com",
+  databaseURL: "https://setca-project-default-rtdb.firebaseio.com",
+  projectId: "setca-project",
+  storageBucket: "setca-project.firebasestorage.app",
+  messagingSenderId: "1038810574479",
+  appId: "1:1038810574479:web:666eeb697d9db4e6e74afa"
   };
 
   const app = initializeApp(firebaseConfig);
@@ -958,12 +958,14 @@
   function __setcaNextStageDueFromState(src){
     const s = (src && typeof src === 'object') ? src : null;
     if(!s) return 0;
+    const now = __setcaStageNow();
     let nextDue = 0;
     ['planes','missiles'].forEach(key=>{
       const arr = Array.isArray(s[key]) ? s[key] : [];
       arr.forEach(item=>{
         const at = Number(item && item.__syncAfter || 0) || 0;
-        if(at && (!nextDue || at < nextDue)) nextDue = at;
+        // Un elemento ya sincronizado no debe rearmar el temporizador a 0 ms.
+        if(at > now && (!nextDue || at < nextDue)) nextDue = at;
       });
     });
     return nextDue;
@@ -4179,6 +4181,12 @@ body[data-setca-role="default"] #pNav{
 .config-label-grid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:6px;}
 .config-control-row{display:flex;align-items:center;justify-content:space-between;gap:10px;min-height:30px;}
 .config-control-label{font-size:12px;font-weight:400;color:#4e5c6b;}
+.config-collision-row{align-items:center;gap:12px;}
+.config-collision-text{display:flex;flex-direction:column;gap:3px;min-width:0;color:#263544;}
+.config-collision-text strong{font:650 12px/1.3 system-ui,Segoe UI,sans-serif;}
+.config-collision-text span,.config-collision-note{color:#607080;font:500 10px/1.4 system-ui,Segoe UI,sans-serif;}
+.config-collision-note{margin:0;}
+.config-collision-row #configCollisionRiskToggle{flex:0 0 auto;min-width:94px;}
 .config-stepper,.config-segment{display:flex;align-items:center;gap:4px;}
 .config-size-controls{display:flex;flex-direction:column;gap:10px;}
 .config-stepper .btn{min-width:30px;}
@@ -9707,6 +9715,9 @@ body.setca-modern-ui #configPanel.config-pop :is(.chip,.pill){background:transpa
 body.setca-modern-ui #configPanel.config-pop :is(button,select,input):focus-visible{outline:2px solid #61788f;outline-offset:2px;}
 body.setca-modern-ui #configPanel.config-pop #configCloseBtn{background:transparent !important;border-color:transparent !important;font-size:20px;color:#647181 !important;}
 body.setca-modern-ui #configPanel.config-pop #configCloseBtn:hover{background:#e9edf1 !important;color:#172b3e !important;}
+body.setca-modern-ui #configPanel.config-pop #configCollisionRiskToggle{min-width:94px;font-weight:750;border-radius:5px;}
+body.setca-modern-ui #configPanel.config-pop #configCollisionRiskToggle[aria-pressed="true"]{background:#e5f1eb!important;border-color:#7cae91!important;color:#195a37!important;}
+body.setca-modern-ui #configPanel.config-pop #configCollisionRiskToggle[aria-pressed="false"]{background:#f0f2f4!important;border-color:#adb8c2!important;color:#415263!important;}
 body.setca-modern-ui header #configBtn{background:#24313a !important;border:1px solid #586671 !important;box-shadow:none !important;text-shadow:none !important;color:#e7edf2 !important;}
 body.setca-modern-ui header #configBtn[aria-expanded="true"]{background:#3b4b59 !important;border-color:#9aaaba !important;}
 @media(max-width:440px){
@@ -11541,6 +11552,21 @@ window.__saveLocalDrawingsSoon = __saveLocalDrawingsSoon;
 window.__hydrateLocalDrawingsIntoState = __hydrateLocalDrawingsIntoState;
 
 let __localPrefs = __lsLoad(__PREF_KEY, {});
+if(!__localPrefs || typeof __localPrefs !== 'object') __localPrefs = {};
+// Solo controla la capa dibujada en este navegador; no cambia la evaluación ni el estado compartido.
+window.__SETCA_collisionRiskOverlayVisible = ()=>__localPrefs.showCollisionRiskOverlay !== false;
+window.__SETCA_setCollisionRiskOverlayVisible = visible=>{
+  __localPrefs.showCollisionRiskOverlay = !!visible;
+  if(typeof window.__saveLocalPrefs === 'function') window.__saveLocalPrefs();
+  else __lsSave(__PREF_KEY,__localPrefs);
+  const button=document.getElementById('configCollisionRiskToggle');
+  if(button){
+    button.textContent=visible?'ACTIVADO':'APAGADO';
+    button.setAttribute('aria-pressed',String(!!visible));
+    button.setAttribute('aria-label',visible?'Apagar alerta local de riesgo de colisión':'Activar alerta local de riesgo de colisión');
+  }
+  return !!visible;
+};
 // Predicción siempre inicia en 0 al abrir esta vista.
 if(__localPrefs && typeof __localPrefs === 'object') __localPrefs.predMin = 0;
 const __SETCA_LOCAL_ALTITUDE_FORMATS = (()=>{
@@ -22910,6 +22936,33 @@ requestAnimationFrame(()=>{ repaintPlanesList(); repaintNav(); repaintStudent();
           </div>`;
         body.appendChild(labelsCard);
 
+        const collisionCard = document.createElement('section');
+        collisionCard.className = 'config-card config-collision-card';
+        collisionCard.setAttribute('aria-labelledby','configCollisionHeading');
+        collisionCard.innerHTML = `
+          <h3 class="config-card-title" id="configCollisionHeading">Alertas del radar</h3>
+          <div class="config-control-row config-collision-row">
+            <div class="config-collision-text"><strong>Riesgo de colisión</strong><span>Círculos, línea y aviso entre aeronaves</span></div>
+            <button id="configCollisionRiskToggle" class="btn mini focusable" type="button" aria-pressed="true">ACTIVADO</button>
+          </div>
+          <p class="config-collision-note">Solo cambia esta vista. El cálculo de riesgo y el ejercicio continúan activos.</p>`;
+        body.appendChild(collisionCard);
+        const collisionButton = collisionCard.querySelector('#configCollisionRiskToggle');
+        const refreshCollisionButton = ()=>{
+          const visible = !window.__SETCA_collisionRiskOverlayVisible || window.__SETCA_collisionRiskOverlayVisible();
+          collisionButton.textContent = visible ? 'ACTIVADO' : 'APAGADO';
+          collisionButton.setAttribute('aria-pressed',String(visible));
+          collisionButton.setAttribute('aria-label',visible ? 'Apagar alerta local de riesgo de colisión' : 'Activar alerta local de riesgo de colisión');
+        };
+        collisionButton.addEventListener('click',()=>{
+          if(window.__SETCA_setCollisionRiskOverlayVisible){
+            window.__SETCA_setCollisionRiskOverlayVisible(!window.__SETCA_collisionRiskOverlayVisible());
+          }
+          refreshCollisionButton();
+        });
+        panel.__setcaRefreshCollisionButton=refreshCollisionButton;
+        refreshCollisionButton();
+
         const formatsCard = document.createElement('section');
         formatsCard.className = 'config-card';
         formatsCard.setAttribute('aria-labelledby','configFormatsHeading');
@@ -23157,6 +23210,7 @@ requestAnimationFrame(()=>{ repaintPlanesList(); repaintNav(); repaintStudent();
       configBtn.addEventListener('click', ()=>{
         const panel = ensureConfigPanel();
         try{ if(panel.__setcaRefreshBullseye) panel.__setcaRefreshBullseye(); }catch(_){ }
+        try{ if(panel.__setcaRefreshCollisionButton) panel.__setcaRefreshCollisionButton(); }catch(_){ }
         setConfigPanelOpen(panel,!panel.classList.contains('open'));
         try{ if(typeof window.__updateLocalUI === 'function') window.__updateLocalUI(); }catch(_){ }
       });
@@ -23824,6 +23878,7 @@ requestAnimationFrame(()=>{ repaintPlanesList(); repaintNav(); repaintStudent();
   }
 
   function drawCollisionAlerts(){
+    if(window.__SETCA_collisionRiskOverlayVisible && !window.__SETCA_collisionRiskOverlayVisible()) return;
     if(!st.collisionRisks || !st.collisionRisks.length) return;
     const t = (performance.now()%1000)/1000;
     const pulse = 1 + 0.6*Math.sin(t*2*Math.PI);
