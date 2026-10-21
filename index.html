@@ -300,6 +300,9 @@
   window.__SETCA_EXCS_RENDER_TRANSITION_MS = __SETCA_EXCS_RENDER_TRANSITION_MS;
   window.__SETCA_interpolatedPlane = function(p){
     if(!p || (window.st && (st.localPause || (st.serverPause && st.serverPause.active)))) return p;
+    // La réplica ya avanza su propia cinemática; predecir también al dibujar
+    // duplicaría el movimiento y produciría saltos al recibir una muestra.
+    if(window.__SETCA_replicaMotionRunning) return p;
     const excs=__SETCA_isExcsSharedRoom();
     if(excs ? window.__SETCA_isExcsWhiteController() : __SETCA_isInstructorAuthority()) return p;
     const id=String(p.id || '');
@@ -2073,6 +2076,29 @@ let __setcaLastAppliedRemoteTs = 0;
           p.__liveAt=live.at;
           p.__cmdAt=Math.max(Number(p.__cmdAt)||0,live.at);
         });
+        // Los puestos alumnos ya están avanzando la misma orden entre muestras.
+        // Una instantánea enviada segundos antes no debe devolverlos hacia atrás.
+        if(!force && !(excs ? (white || __SETCA_getSharedWriteRole()==='default') : __SETCA_isInstructorAuthority()) &&
+           !(v.serverPause && v.serverPause.active) && !(st.serverPause && st.serverPause.active) && !st.localPause){
+          const previousById=new Map((Array.isArray(st.planes)?st.planes:[]).filter(p=>p&&p.id).map(p=>[String(p.id),p]));
+          const sampleAge=remoteStamp ? Math.min(12,Math.max(0,((Date.now()+__setcaServerTimeOffsetMs)-remoteStamp)/1000)) : 0;
+          nextPlanes.forEach(p=>{
+            if(!p || !p.id) return;
+            const previous=previousById.get(String(p.id));
+            if(!previous) return;
+            const distance=Math.hypot((Number(p.x)||0)-(Number(previous.x)||0),(Number(p.y)||0)-(Number(previous.y)||0));
+            const speed=Math.max(Number(p.spd)||0,Number(previous.spd)||0);
+            const expectedTravel=(speed/1.852/3600)*(sampleAge+1)+0.12;
+            const commandNewer=(Number(p.__cmdAt)||0)>(Number(previous.__cmdAt)||0)+1;
+            const sameTargets=Number(p.tgtHdg)===Number(previous.tgtHdg) &&
+              Number(p.tgtSpd)===Number(previous.tgtSpd) && Number(p.tgtAlt)===Number(previous.tgtAlt);
+            const manualPosition=commandNewer && sameTargets && distance>0.01;
+            if(distance>expectedTravel || manualPosition) return; // reposición deliberada: aplicar de inmediato
+            for(const field of ['x','y','hdg','spd','alt','speedRateKmhps','vsFpm']){
+              if(Number.isFinite(+previous[field])) p[field]=+previous[field];
+            }
+          });
+        }
         __setcaPendingAircraftFallbackUntil.forEach((until, id)=>{
           if(remotePlaneIds.has(id) || Number(until || 0) <= nowTs) __setcaPendingAircraftFallbackUntil.delete(id);
         });
@@ -15444,6 +15470,34 @@ if (Math.min(diffCW, diffCCW) > 0.1) {
   __SETCA_updatePlaneFuel(p,dt,turnDeltaDeg);
   p._gt=(p._gt||0)+dt*1000;if(p._gt>1800){p.ghosts.push({x:p.x,y:p.y});if(p.ghosts.length>40)p.ghosts.shift();p._gt=0;}
 }
+// Réplica cinemática de los puestos no autoritativos: cumple las órdenes
+// recibidas sin calcular impactos, combustible, detecciones ni publicar estado.
+function __SETCA_stepReplicaPlane(p,dt){
+  if(!p || isPlaneKillConfirmed(p)) return;
+  const step=Math.min(0.25,Math.max(0,Number(dt)||0));
+  if(!step) return;
+  const fp=p.flightProcedure;
+  if(fp && fp.mode==='arrival' && fp.phase==='rollout') return;
+  updatePlaneSpeed(p,step);
+  updatePlaneAltitude(p,step);
+  let heading=Number.isFinite(+p.hdg)?+p.hdg:(Number(p.tgtHdg)||0);
+  const target=Number.isFinite(+p.tgtHdg)?+p.tgtHdg:heading;
+  const cw=(target-heading+360)%360,ccw=(heading-target+360)%360;
+  if(Math.min(cw,ccw)>0.1){
+    const turn=(Number.isFinite(+p.turn)?Math.max(0,+p.turn):2)*step;
+    if(p.turnBias==='L' || (p.turnBias!=='R' && cw>180)) heading-=Math.min(ccw,turn);
+    else heading+=Math.min(cw,turn);
+    heading=(heading+360)%360;
+    p.hdg=heading;
+  }
+  const speed=Math.max(0,Number(p.spd)||0);
+  const radians=(heading-90)*Math.PI/180;
+  const windRadians=((Number(st.windDir)||0)-90)*Math.PI/180;
+  const distance=(speed/NM2KM/3600)*step;
+  const windDistance=((Number(st.windKmh)||0)/NM2KM/3600)*step;
+  p.x=(Number(p.x)||0)+Math.cos(radians)*distance+Math.cos(windRadians)*windDistance;
+  p.y=(Number(p.y)||0)+Math.sin(radians)*distance+Math.sin(windRadians)*windDistance;
+}
 function drawPlane(p){
   if(!p || typeof window.__SETCA_canRenderPlane !== 'function' || !window.__SETCA_canRenderPlane(p)) return;
   if(!Array.isArray(p.ghosts)) p.ghosts=[];
@@ -21542,7 +21596,7 @@ function repaintAlt(){
 setInterval(()=>{ try{ repaintAlt(); }catch(e){} }, 900);
 
 /* ===== Loop ===== */
-let lastTS=0,accFPS=0,frames=0,__SETCA_AUTH_TICK_ACC=0,__SETCA_AUTH_TICK_SEQ=0,__SETCA_LOCAL_GTC_TICK_ACC=0;
+let lastTS=0,accFPS=0,frames=0,__SETCA_AUTH_TICK_ACC=0,__SETCA_AUTH_SENSOR_ACC=0,__SETCA_AUTH_TICK_SEQ=0,__SETCA_LOCAL_GTC_TICK_ACC=0;
 const __SETCA_AUTH_TICK_SEC = 1;
 const __SETCA_GTC_TICK_SEC = 0.2;
 function __SETCA_isAuthoritativeSimulationHost(){
@@ -21578,7 +21632,11 @@ function loop(ts){
   const authHost = __SETCA_isAuthoritativeSimulationHost();
   const serverPaused = __SETCA_isServerPaused();
   const excsSession=String((window.__setcaAccess||{}).room||'').toLowerCase()==='excs';
-  const simStep=excsSession ? 0.05 : __SETCA_AUTH_TICK_SEC;
+  const simStep=excsSession ? 0.05 : 0.1;
+  // El instructor BLUE/RED en EXCS envía diferencias de aviones a WHITE:
+  // nunca predecir en su estado, o publicaría esa predicción como una orden.
+  const excsPilotWriter=excsSession && String((window.__setcaAccess||{}).role||'').toLowerCase()==='default';
+  window.__SETCA_replicaMotionRunning=!authHost && !excsPilotWriter && !planningMode && !serverPaused && !st.localPause && !window.__SETCA_SCENE_LOADING;
   if(excsSession && st.excsClock){
     st.elapsed=Number(st.excsClock.elapsed||0)+(serverPaused?0:Math.max(0,Date.now()-Number(st.excsClock.startedAt||Date.now())));
     st.t0=performance.now()-st.elapsed;
@@ -21592,29 +21650,46 @@ function loop(ts){
     __SETCA_AUTH_TICK_ACC = Math.min(3, __SETCA_AUTH_TICK_ACC + Math.max(0, dt));
     let __setcaDidAuthTick = false;
     let __setcaTickGuard = 0;
-    while(__SETCA_AUTH_TICK_ACC >= simStep && __setcaTickGuard < (excsSession?6:3)){
+    while(__SETCA_AUTH_TICK_ACC >= simStep && __setcaTickGuard < (excsSession?6:8)){
       __SETCA_AUTH_TICK_ACC -= simStep;
       __setcaTickGuard++;
       __SETCA_AUTH_TICK_SEQ++;
       st.planes.forEach(p=>updatePlane(p,simStep));
-      updateMissiles(simStep, {excludeGtc:true});
-      updatePairs();
-      sweepDetect(simStep);
+      if(excsSession){
+        updateMissiles(simStep, {excludeGtc:true});
+        updatePairs();
+        sweepDetect(simStep);
+      }else{
+        // Conservar el costo/frecuencia previa de armas y sensores (1 Hz).
+        __SETCA_AUTH_SENSOR_ACC+=simStep;
+        if(__SETCA_AUTH_SENSOR_ACC>=__SETCA_AUTH_TICK_SEC){
+          __SETCA_AUTH_SENSOR_ACC-=__SETCA_AUTH_TICK_SEC;
+          updateMissiles(__SETCA_AUTH_TICK_SEC, {excludeGtc:true});
+          updatePairs();
+          sweepDetect(__SETCA_AUTH_TICK_SEC);
+        }
+      }
       st.__authoritativeTick = __SETCA_AUTH_TICK_SEQ;
       st.__authoritativeTickAt = Date.now();
       __setcaDidAuthTick = true;
     }
     __SETCA_EXCS_PUBLISH_ACC += dt;
     const __setcaPublishSec=Math.max(1,Number(window.__SETCA_EXCS_POSITION_BROADCAST_MS||1000)/1000);
-    if(__setcaDidAuthTick && (!excsSession || __SETCA_EXCS_PUBLISH_ACC>=__setcaPublishSec)){
+    if(__setcaDidAuthTick && __SETCA_EXCS_PUBLISH_ACC>=__setcaPublishSec){
       __SETCA_EXCS_PUBLISH_ACC=0;
       __SETCA_publishAuthoritativeTick();
     }
   }else if(!planningMode){
     __SETCA_AUTH_TICK_ACC = 0;
+    __SETCA_AUTH_SENSOR_ACC = 0;
+    if(window.__SETCA_replicaMotionRunning){
+      const replicaDt=Math.min(0.25,Math.max(0,dt));
+      st.planes.forEach(p=>__SETCA_stepReplicaPlane(p,replicaDt));
+    }
     updatePairs();
   }else{
     __SETCA_AUTH_TICK_ACC = 0;
+    __SETCA_AUTH_SENSOR_ACC = 0;
     __SETCA_LOCAL_GTC_TICK_ACC = 0;
   }
   if(!planningMode && !serverPaused){
@@ -39002,3 +39077,4 @@ import { getDatabase, ref, onValue, set } from "https://www.gstatic.com/firebase
 
 </body>
 </html>
+BY WALLACE
