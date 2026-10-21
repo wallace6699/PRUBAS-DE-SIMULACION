@@ -290,15 +290,18 @@
   const __setcaExcsGtcBaseline = new Map();
   const __setcaExcsSentMissiles = new Set();
   let __setcaExcsPilotSending = false;
+  let __setcaExcsPilotQueued = false;
   const __setcaExcsRenderMotion = new Map();
   const __SETCA_EXCS_POSITION_BROADCAST_MS = 1000;
-  const __SETCA_EXCS_RENDER_TRANSITION_MS = 650;
+  const __SETCA_EXCS_RENDER_TRANSITION_MS = 180;
   window.__SETCA_EXCS_POSITION_BROADCAST_MS = __SETCA_EXCS_POSITION_BROADCAST_MS;
   window.__SETCA_EXCS_RENDER_TRANSITION_MS = __SETCA_EXCS_RENDER_TRANSITION_MS;
   window.__SETCA_interpolatedPlane = function(p){
     if(!p || !__SETCA_isExcsSharedRoom() || window.__SETCA_isExcsWhiteController() || (window.st && (st.localPause || (st.serverPause && st.serverPause.active)))) return p;
     const motion=__setcaExcsRenderMotion.get(String(p.id));
     if(!motion) return p;
+    // Un salto manual de posición es una orden, no movimiento continuo: mostrarlo ya.
+    if(Math.hypot(motion.to.x-motion.from.x,motion.to.y-motion.from.y)>0.35) return p;
     const t=Math.min(1,Math.max(0,(performance.now()-motion.at)/__SETCA_EXCS_RENDER_TRANSITION_MS));
     const hdgDelta=((motion.to.hdg-motion.from.hdg+540)%360)-180;
     return {...p,x:motion.from.x+(motion.to.x-motion.from.x)*t,y:motion.from.y+(motion.to.y-motion.from.y)*t,
@@ -916,7 +919,7 @@
     // El Instructor es la fuente mandatoria del estado compartido.
     planeAddMs: 3000,
     missileAddMs: 1000,
-    remoteApplyMs: 180,
+    remoteApplyMs: 24,
     planePanelRefreshMs: 1000,
     refreshMs: 1000
   });
@@ -1493,11 +1496,16 @@
   function __setcaMergeAuthoritativePayload(current, payload){
     if(!current || typeof current !== 'object') return payload;
     const out = {...payload};
+    const currentPauseAt = Number(current.serverPauseChangedAt || 0) || 0;
+    const payloadPauseAt = Number(payload.serverPauseChangedAt || 0) || 0;
     // En EXCS solo WHITE controla el reloj global. Los escritores BLUE/RED
     // conservan la pausa que ya existe mientras maniobran sus propios medios.
-    if((typeof ROOM_ID !== 'undefined' && ROOM_ID.toLowerCase() === 'excs') || (window.__SETCA_canControlGlobalPause && !window.__SETCA_canControlGlobalPause())){
+    if((typeof ROOM_ID !== 'undefined' && ROOM_ID.toLowerCase() === 'excs') || (window.__SETCA_canControlGlobalPause && !window.__SETCA_canControlGlobalPause()) || currentPauseAt > payloadPauseAt){
       out.serverPause = (current.serverPause && current.serverPause.active) ? current.serverPause : null;
       out.globalStarted = !!current.globalStarted;
+      out.serverPauseChangedAt = currentPauseAt;
+    }else{
+      out.serverPauseChangedAt = payloadPauseAt;
     }
     if(current.excsClock) out.excsClock = current.excsClock;
     if(payload.contingencies) out.contingencies = {...payload.contingencies,
@@ -1543,7 +1551,7 @@
     if(!__setcaStateHydrated || !__SETCA_isExcsSharedRoom()) return false;
     const role = __SETCA_getSharedWriteRole();
     if(!['default','odt','samallocator'].includes(role)) return false;
-    if(__setcaExcsPilotSending) return false;
+    if(__setcaExcsPilotSending){ __setcaExcsPilotQueued=true; return false; }
     __setcaExcsPilotSending=true;
     try{
     const scene = local || window.st || {};
@@ -1591,7 +1599,13 @@
       if(u && typeof window.logEvent==='function') window.logEvent(`GTC: ${u.name||u.id} · ${Object.keys(row.patch).join(', ')}`,u);
     });
     return true;
-    }finally{ __setcaExcsPilotSending=false; }
+    }finally{
+      __setcaExcsPilotSending=false;
+      if(__setcaExcsPilotQueued){
+        __setcaExcsPilotQueued=false;
+        queueMicrotask(()=>__SETCA_publishExcsPilotChanges(window.st).catch(error=>console.warn('SETCA: error al enviar la última maniobra EXCS',error)));
+      }
+    }
   }
 
   // Si el tick de WHITE coincide con una orden BLUE/RED, la transacción conserva
@@ -1693,6 +1707,7 @@
           planes: planesClean,
           roles: rolesClean,
           serverPause: snap.serverPause && snap.serverPause.active ? {active:true,callsign:String(snap.serverPause.callsign||'INSTRUCTOR'),startedAt:Number(snap.serverPause.startedAt||Date.now())} : null,
+          serverPauseChangedAt: Number(snap.serverPauseChangedAt || 0) || 0,
           contingencies: __SETCA_cleanContingenciesForSync(snap.contingencies),
           drawings: Array.isArray(snap.drawings) ? snap.drawings.filter(d=>window.__SETCA_isOwnTeam(d) && !(d && d.visibility === 'local')).map(d=>__normalizeDrawingScope(__clonePlain(d))) : [],
           gtc: Array.isArray(snap.gtc) ? snap.gtc.filter(window.__SETCA_isOwnTeam).map(u=>__SETCA_cleanGtcForGlobalSync(u)).filter(Boolean) : [],
@@ -1974,12 +1989,15 @@ let __setcaLastAppliedRemoteTs = 0;
 
       {
         const wasServerPaused = !!(st.serverPause && st.serverPause.active);
+        const remotePauseAt = Number(v.serverPauseChangedAt || 0) || 0;
+        const localPauseAt = Number(st.serverPauseChangedAt || 0) || 0;
         const nextServerPause = (v.serverPause && v.serverPause.active) ? {
           active:true,
           callsign:String(v.serverPause.callsign || 'INSTRUCTOR'),
           startedAt:Number(v.serverPause.startedAt || Date.now())
         } : null;
-        serverPauseChanged = (__setcaSafeJson(st.serverPause || null) !== __setcaSafeJson(nextServerPause));
+        serverPauseChanged = remotePauseAt >= localPauseAt && (__setcaSafeJson(st.serverPause || null) !== __setcaSafeJson(nextServerPause));
+        if(remotePauseAt >= localPauseAt) st.serverPauseChangedAt = remotePauseAt;
         if(serverPauseChanged){
           st.serverPause = nextServerPause;
           // Al recibir PLAY GLOBAL de WHITE, reanudar el reloj vivo sin recargar ni saltar
@@ -2124,8 +2142,10 @@ let __setcaLastAppliedRemoteTs = 0;
         samValidationChanged = (__setcaSafeJson(st.samValidation || null) !== __setcaSafeJson(nextSamValidation));
         if(samValidationChanged) st.samValidation = nextSamValidation;
         const nextGlobalStarted = !!v.globalStarted;
-        globalStartedChanged = (!!st.globalStarted !== nextGlobalStarted);
-        if(globalStartedChanged) st.globalStarted = nextGlobalStarted;
+        if((Number(v.serverPauseChangedAt || 0) || 0) >= (Number(st.serverPauseChangedAt || 0) || 0)){
+          globalStartedChanged = (!!st.globalStarted !== nextGlobalStarted);
+          if(globalStartedChanged) st.globalStarted = nextGlobalStarted;
+        }
       }
 
       const nextWindKmh = Number.isFinite(+v.windKmh) ? +v.windKmh : st.windKmh;
@@ -2140,7 +2160,7 @@ let __setcaLastAppliedRemoteTs = 0;
       if(excs){
         if(white) (st.gtc||[]).forEach(u=>__setcaExcsGtcBaseline.set(String(u.id),JSON.parse(JSON.stringify(u))));
         (v.missiles||[]).forEach(m=>__setcaExcsSentMissiles.add(String(m.id)));
-        if(v.excsClock) st.excsClock={...v.excsClock};
+        if(v.excsClock && (Number(v.serverPauseChangedAt || 0) || 0) >= (Number(st.serverPauseChangedAt || 0) || 0)) st.excsClock={...v.excsClock};
         if(v.exerciseId) st.exerciseId=String(v.exerciseId);
       }
 
@@ -2174,7 +2194,7 @@ let __setcaLastAppliedRemoteTs = 0;
     } catch(e){ console.warn("Apply remote state error:", e); return false; }
   }
 
-  const __SETCA_REMOTE_APPLY_DELAY_MS = (__SETCA_SYNC_STAGING && __SETCA_SYNC_STAGING.remoteApplyMs) || 180;
+  const __SETCA_REMOTE_APPLY_DELAY_MS = (__SETCA_SYNC_STAGING && __SETCA_SYNC_STAGING.remoteApplyMs) || 24;
   let __setcaRemoteStateQueued = null;
   let __setcaRemoteApplyTimer = null;
 
@@ -2185,7 +2205,7 @@ let __setcaLastAppliedRemoteTs = 0;
       __setcaRemoteApplyTimer = null;
       const next = __setcaRemoteStateQueued;
       __setcaRemoteStateQueued = null;
-      if(next) __SETCA_runWhenFrameIsFree(()=>applyCloudState(next), 360);
+      if(next) requestAnimationFrame(()=>applyCloudState(next));
     }, __SETCA_REMOTE_APPLY_DELAY_MS);
   }
 
@@ -2377,6 +2397,36 @@ let __setcaLastAppliedRemoteTs = 0;
         console.warn("Manual cloud refresh error:", e);
         return false;
       }
+    }
+  };
+
+  window.__SETCA_noteServerPauseChange = function(){
+    if(!window.st) return 0;
+    const at = Math.max(Date.now(), (Number(st.serverPauseChangedAt || 0) || 0) + 1);
+    st.serverPauseChangedAt = at;
+    return at;
+  };
+  window.__SETCA_publishServerPauseNow = async function(paused, changedAt){
+    if(__localOnlyMode || __SETCA_isExcsSharedRoom() || !window.__SETCA_canControlGlobalPause()) return false;
+    const stamp = Number(changedAt || 0) || 0;
+    const desired = paused ? {...(st.serverPause || {}), active:true} : null;
+    try{
+      const result = await runTransaction(stateRef, current=>{
+        const base = (current && typeof current === 'object') ? {...current} : {};
+        if((Number(base.serverPauseChangedAt || 0) || 0) > stamp) return;
+        base.serverPause = desired;
+        base.serverPauseChangedAt = stamp;
+        base.lastWriteBy = currentUID || 'instructor-pending';
+        base.lastWriteClient = __setcaStateClientId;
+        base.lastWriteRole = 'default';
+        base.instructorAuthority = true;
+        base.lastUpdate = serverTimestamp();
+        return base;
+      });
+      return !!(result && result.committed);
+    }catch(error){
+      console.warn('SETCA server pause sync error:', error);
+      return false;
     }
   };
 
@@ -12830,8 +12880,19 @@ function __toggleInstructorServerPause(){
       st.serverPause = { active:true, callsign:__SETCA_getInstructorCallsign(), startedAt:Date.now() };
       if(st.localPause){ st.localPause = false; try{ __clearLocalPauseSnapshot(); }catch(_){} }
     }
+    const pauseChangedAt = window.__SETCA_noteServerPauseChange
+      ? window.__SETCA_noteServerPauseChange()
+      : (st.serverPauseChangedAt = Date.now());
     __setLocalPauseUI();
-    try{ if(window._SETCA_SYNC && typeof window._SETCA_SYNC.pushNow === 'function') window._SETCA_SYNC.pushNow(); else if(window._SETCA_SYNC && typeof window._SETCA_SYNC.push === 'function') window._SETCA_SYNC.push(); }catch(_){ }
+    try{
+      if(typeof window.__SETCA_publishServerPauseNow === 'function'){
+        Promise.resolve(window.__SETCA_publishServerPauseNow(__SETCA_isServerPaused(), pauseChangedAt))
+          .then(ok=>{ if(!ok) console.warn('SETCA: la pausa del instructor no se confirmó en Firebase.'); })
+          .catch(error=>console.warn('SETCA: error al publicar la pausa del instructor', error));
+      }else if(window._SETCA_SYNC && typeof window._SETCA_SYNC.pushNow === 'function'){
+        Promise.resolve(window._SETCA_SYNC.pushNow()).catch(error=>console.warn('SETCA: error al publicar la pausa del instructor', error));
+      }
+    }catch(error){ console.warn('SETCA: error al publicar la pausa del instructor', error); }
     return true;
   }
   return false;
@@ -19453,8 +19514,11 @@ addEventListener('mouseup',(e)=>{
     if(movedPlane) try{ if(window.__SETCA_markAircraftDirty) window.__SETCA_markAircraftDirty(movedPlane); }catch(_){ }
     if(movedDrawing) try{ if(window.__saveLocalDrawingsSoon) window.__saveLocalDrawingsSoon(); }catch(_){ }
     if(movedPlane){
-      if(typeof window.__SETCA_scheduleAircraftSync1s === 'function') window.__SETCA_scheduleAircraftSync1s();
-      else if(window._SETCA_SYNC && typeof window._SETCA_SYNC.push==='function') window._SETCA_SYNC.push();
+      // Un movimiento terminado es una orden puntual: publicarlo sin esperar el ciclo de 1 s.
+      try{ e.__setcaFastAircraftSync = true; }catch(_){ }
+      if(window._SETCA_SYNC && typeof window._SETCA_SYNC.pushNow === 'function')
+        Promise.resolve(window._SETCA_SYNC.pushNow()).catch(error=>console.warn('SETCA: no se pudo sincronizar el movimiento', error));
+      else if(typeof window.__SETCA_scheduleAircraftSync1s === 'function') window.__SETCA_scheduleAircraftSync1s();
     }
     if(movedDrawing && movedDrawing.visibility === 'global' && window._SETCA_SYNC && typeof window._SETCA_SYNC.push==='function') window._SETCA_SYNC.push();
   }
@@ -21182,9 +21246,11 @@ function __SETCA_isImmediatePlanningMode(){
 function __SETCA_pushInstructorCommandNow(){
   try{
     if(__SETCA_isLocalPlanningLike()) return false;
-    if(typeof window.__SETCA_scheduleAircraftSync1s === 'function') return window.__SETCA_scheduleAircraftSync1s();
-    if(typeof scheduleSync === 'function') return scheduleSync(1000);
+    // Rumbo, velocidad y altitud son órdenes discretas: no esperar al ciclo
+    // periódico de publicación, que añadía aproximadamente un segundo.
+    if(window._SETCA_SYNC && typeof window._SETCA_SYNC.pushNow === 'function') return window._SETCA_SYNC.pushNow();
     if(window._SETCA_SYNC && typeof window._SETCA_SYNC.push === 'function') return window._SETCA_SYNC.push();
+    if(typeof scheduleSync === 'function') return scheduleSync(0);
   }catch(_){ }
   return false;
 }
@@ -21497,7 +21563,19 @@ requestAnimationFrame(loop);
 /* ===== Wire buttons ===== */
 $('#start').onclick=()=>{
   if(__SETCA_enforcePlanningPause()) return;
-  if(__SETCA_isInstructorSession() && __SETCA_isServerPaused()){ st.serverPause = null; __setLocalPauseUI(); try{ if(window._SETCA_SYNC && typeof window._SETCA_SYNC.pushNow === 'function') window._SETCA_SYNC.pushNow(); }catch(_){} }
+  if(__SETCA_isInstructorSession() && __SETCA_isServerPaused()){
+    st.serverPause = null;
+    const pauseChangedAt = window.__SETCA_noteServerPauseChange
+      ? window.__SETCA_noteServerPauseChange()
+      : (st.serverPauseChangedAt = Date.now());
+    __setLocalPauseUI();
+    try{
+      if(typeof window.__SETCA_publishServerPauseNow === 'function')
+        Promise.resolve(window.__SETCA_publishServerPauseNow(false, pauseChangedAt)).catch(error=>console.warn('SETCA: error al reanudar el servidor', error));
+      else if(window._SETCA_SYNC && typeof window._SETCA_SYNC.pushNow === 'function')
+        Promise.resolve(window._SETCA_SYNC.pushNow()).catch(error=>console.warn('SETCA: error al reanudar el servidor', error));
+    }catch(error){ console.warn('SETCA: error al reanudar el servidor', error); }
+  }
   if(st.localPause){
     st.localPause = false;
     __clearLocalPauseSnapshot();
@@ -22658,7 +22736,7 @@ requestAnimationFrame(()=>{ repaintPlanesList(); repaintNav(); repaintStudent();
   });
 
   // Cuando se suelta el mouse (mover aviones o dibujos)
-  addEventListener('mouseup', ()=>scheduleSync(__SETCA_SYNC_DEBOUNCE_MS), {passive:true});
+  addEventListener('mouseup', e=>{ if(!e.__setcaFastAircraftSync) scheduleSync(__SETCA_SYNC_DEBOUNCE_MS); }, {passive:true});
 
   // ENTER en navegación/vuelos => aplicar change y FLUSH inmediato
   addEventListener('keydown', (e)=>{
@@ -32079,6 +32157,9 @@ import { getAuth } from "https://www.gstatic.com/firebasejs/10.12.3/firebase-aut
     const paused = !!active;
     const callsign = gateState.callsign.trim() || String((window.__setcaAccess && window.__setcaAccess.callsign) || 'WHITE TEAM');
     const now = Date.now();
+    const pauseChangedAt = window.__SETCA_noteServerPauseChange
+      ? window.__SETCA_noteServerPauseChange()
+      : Math.max(now,(Number(window.st && st.serverPauseChangedAt || 0) || 0)+1);
     const localClock = window.st && st.excsClock;
     const previousPause = window.st && st.serverPause;
     const elapsed = localClock ? Number(localClock.elapsed||0)+((previousPause && previousPause.active)?0:Math.max(0,now-Number(localClock.startedAt||now))) : Number(window.st && st.elapsed || 0);
@@ -32086,6 +32167,7 @@ import { getAuth } from "https://www.gstatic.com/firebasejs/10.12.3/firebase-aut
     try{
       if(window.st){
         st.serverPause = paused ? {active:true,callsign,startedAt:now,whiteControlled:true} : null;
+        st.serverPauseChangedAt = pauseChangedAt;
         st.globalStarted = !paused;
         st.excsClock = {elapsed,startedAt:now};
         st.paused = false;
@@ -32101,10 +32183,12 @@ import { getAuth } from "https://www.gstatic.com/firebasejs/10.12.3/firebase-aut
     }catch(_){ }
     const result = await runTransaction(ref(db, `rooms/${EXCS_ROOM_ID}/state`), current=>{
       const next = current && typeof current === 'object' ? {...current} : {};
+      if((Number(next.serverPauseChangedAt || 0) || 0)>pauseChangedAt) return;
       const clock = next.excsClock;
       const total = clock ? Number(clock.elapsed||0)+((next.serverPause && next.serverPause.active)?0:Math.max(0,now-Number(clock.startedAt||now))) : elapsed;
       next.excsClock = {elapsed:total,startedAt:now};
       next.serverPause = paused ? {active:true,callsign,startedAt:now,whiteControlled:true} : null;
+      next.serverPauseChangedAt = pauseChangedAt;
       next.globalStarted = !paused;
       next.lastWriteBy = (auth.currentUser && auth.currentUser.uid) || 'white-team';
       next.lastWriteClient = window.__SETCA_stateClientId || 'white-access';
@@ -34309,9 +34393,10 @@ import { getDatabase, ref, get, set } from "https://www.gstatic.com/firebasejs/1
     }catch(_){}
   }, true);
 
-  addEventListener('mouseup', ()=>{
+  addEventListener('mouseup', e=>{
     if(!maybeSharedDrag) return;
     maybeSharedDrag = false;
+    if(e.__setcaFastAircraftSync) return;
     try{
       if(typeof window.__SETCA_scheduleAircraftSync1s === 'function') window.__SETCA_scheduleAircraftSync1s();
       else if(typeof window.scheduleSync === 'function') window.scheduleSync(1000);
@@ -34484,10 +34569,10 @@ import { getDatabase, ref, get, set } from "https://www.gstatic.com/firebasejs/1
       if(window.__SETCA_isLocalOnlyMode && window.__SETCA_isLocalOnlyMode()) return false;
       const access = window.__setcaAccess || {};
       if(access.planning || access.freeplay) return false;
-      if(typeof window.__SETCA_scheduleAircraftSync1s === 'function') window.__SETCA_scheduleAircraftSync1s();
-      else if(typeof window.scheduleSync === 'function') window.scheduleSync(1000);
-      else if(window._SETCA_SYNC && typeof window._SETCA_SYNC.push === 'function') window._SETCA_SYNC.push();
+      if(window._SETCA_SYNC && typeof window._SETCA_SYNC.pushNow === 'function') return window._SETCA_SYNC.pushNow();
+      if(typeof window.scheduleSync === 'function') return window.scheduleSync(0);
     }catch(_){}
+    return false;
   }
   function refreshPanels(){
     try{
@@ -35376,7 +35461,7 @@ import { getDatabase, ref, get, set } from "https://www.gstatic.com/firebasejs/1
     try{ if(typeof draw === 'function') draw(); }catch(_){ }
   }
   function scheduleShared(delay=1000){
-    try{ if(window.__SETCA_scheduleAircraftSync1s) return window.__SETCA_scheduleAircraftSync1s(); }catch(_){ }
+    try{ if(window._SETCA_SYNC && window._SETCA_SYNC.pushNow) return window._SETCA_SYNC.pushNow(); }catch(_){ }
     try{ if(window.scheduleSync) return window.scheduleSync(delay); }catch(_){ }
     try{ if(window._SETCA_SYNC && window._SETCA_SYNC.push) return window._SETCA_SYNC.push(); }catch(_){ }
     return false;
@@ -36098,18 +36183,30 @@ import { getDatabase, ref, get, set } from "https://www.gstatic.com/firebasejs/1
     log(`VALIDACIÓN ODT/SAM: fase ${p.toUpperCase()} seleccionada.`);
   }
 
+  let __setcaInitialInstructorPauseChecked = false;
   function ensureDefaultInstructorGlobalPause(){
     if(!isInstructor() || !canUseSharedRoom() || !window.st) return;
     // EXCS tiene un único reloj general administrado explícitamente por WHITE.
     // El inicializador heredado de salas normales no debe volver a pausar tras PLAY GLOBAL.
     if(roomId().toLowerCase() === 'excs') return;
+    // Esta inicialización ocurre una sola vez. El refresco de la interfaz cada
+    // 900 ms no puede volver a activar la pausa tras un PLAY del instructor.
+    if(__setcaInitialInstructorPauseChecked) return;
+    __setcaInitialInstructorPauseChecked = true;
     const key = globalPauseKey();
     if(localStorage.getItem(key) === '1') return;
     if(st.serverPause && st.serverPause.active) return;
     st.serverPause = { active:true, callsign:(typeof __SETCA_getInstructorCallsign === 'function' ? __SETCA_getInstructorCallsign() : 'INSTRUCTOR'), startedAt:Date.now(), boot:true };
+    const pauseChangedAt = window.__SETCA_noteServerPauseChange
+      ? window.__SETCA_noteServerPauseChange()
+      : (st.serverPauseChangedAt = Date.now());
     try{ if(st.localPause){ st.localPause = false; if(typeof __clearLocalPauseSnapshot === 'function') __clearLocalPauseSnapshot(); } }catch(_){ }
     try{ if(typeof __setLocalPauseUI === 'function') __setLocalPauseUI(); else if(typeof __setServerPauseUI === 'function') __setServerPauseUI(); }catch(_){ }
-    try{ if(window._SETCA_SYNC && typeof window._SETCA_SYNC.pushNow === 'function') window._SETCA_SYNC.pushNow(); else if(window._SETCA_SYNC && typeof window._SETCA_SYNC.push === 'function') window._SETCA_SYNC.push(); }catch(_){ }
+    try{
+      if(typeof window.__SETCA_publishServerPauseNow === 'function')
+        Promise.resolve(window.__SETCA_publishServerPauseNow(true,pauseChangedAt)).catch(error=>console.warn('SETCA: error al publicar la pausa inicial',error));
+      else if(window._SETCA_SYNC && typeof window._SETCA_SYNC.pushNow === 'function') window._SETCA_SYNC.pushNow();
+    }catch(_){ }
     const note = $('#setcaGlobalPauseBootNote') || (function(){ const n=document.createElement('div'); n.id='setcaGlobalPauseBootNote'; document.body.appendChild(n); return n; })();
     note.textContent = 'PAUSA GLOBAL INICIAL · DOMINIO DEL INSTRUCTOR';
     note.style.display = 'block';
