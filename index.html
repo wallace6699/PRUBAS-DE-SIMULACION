@@ -295,8 +295,6 @@
   const __setcaExcsRenderMotion = new Map();
   const __setcaVisualPlaneSamples = new Map();
   const __setcaVisualPositionSamples = new Map();
-  const __setcaHeadingCommandCues = new Map();
-  const __setcaObservedHeadingTargets = new Map();
   const __SETCA_VISUAL_POSITION_MS = 1000;
   const __SETCA_EXCS_POSITION_BROADCAST_MS = 1000;
   const __SETCA_EXCS_RENDER_TRANSITION_MS = 180;
@@ -326,25 +324,6 @@
   window.__SETCA_refreshPlaneVisualPosition = function(p){
     if(!p || !p.id) return;
     __setcaVisualPositionSamples.set(String(p.id),{x:p.x,y:p.y,at:performance.now()});
-  };
-  window.__SETCA_noteHeadingCommandVisual = function(p){
-    if(!p || !p.id || !Number.isFinite(Number(p.tgtHdg))) return;
-    const id=String(p.id);
-    __setcaObservedHeadingTargets.set(id,Number(p.tgtHdg));
-    __setcaHeadingCommandCues.set(id,{target:Number(p.tgtHdg),at:performance.now()});
-  };
-  window.__SETCA_getHeadingCommandVisual = function(p){
-    if(!p || !p.id) return null;
-    const id=String(p.id), target=Number(p.tgtHdg);
-    const observed=__setcaObservedHeadingTargets.get(id);
-    if(Number.isFinite(target) && observed!==undefined && Math.abs((((target-observed)+540)%360)-180)>0.5)
-      window.__SETCA_noteHeadingCommandVisual(p);
-    else if(observed===undefined && Number.isFinite(target)) __setcaObservedHeadingTargets.set(id,target);
-    const cue=__setcaHeadingCommandCues.get(id);
-    if(!cue) return null;
-    const age=performance.now()-cue.at;
-    if(age>1500 || age<0){ __setcaHeadingCommandCues.delete(id); return null; }
-    return {target:cue.target,opacity:Math.min(1,(1500-age)/450)};
   };
   window.__SETCA_interpolatedPlane = function(p){
     if(!p || (window.st && (st.localPause || (st.serverPause && st.serverPause.active)))) return p;
@@ -1224,11 +1203,7 @@
         if(at<=Math.max(Number(p.__liveAt)||0,Number(__setcaLiveRecent.get(id)?.at)||0)) continue;
         const patch=__SETCA_cleanLivePatch(update.patch);
         if(!Object.keys(patch).length) continue;
-        const previousTarget=Number(p.tgtHdg);
         Object.assign(p,patch);
-        if(Object.prototype.hasOwnProperty.call(patch,'tgtHdg') &&
-           (!Number.isFinite(previousTarget) || Math.abs((((Number(p.tgtHdg)-previousTarget)+540)%360)-180)>0.5))
-          window.__SETCA_noteHeadingCommandVisual(p);
         p.__liveAt=at;
         p.__cmdAt=Math.max(Number(p.__cmdAt)||0,at);
         __setcaLiveRecent.set(id,{at,patch,receivedAt:Date.now()});
@@ -15737,28 +15712,6 @@ function drawPlane(p){
   if(!isKillConfirm){
     ctx.beginPath();ctx.moveTo(s.x,s.y);ctx.lineTo(s.x+Math.cos(lr)*headingLen,s.y+Math.sin(lr)*headingLen);ctx.strokeStyle=color;ctx.lineWidth=headingStroke;ctx.stroke();
   }
-  // Confirmación visual inmediata de una orden recibida. La línea sólida
-  // conserva el rumbo real; esta guía breve muestra el rumbo mandado.
-  const __headingCue=!isKillConfirm && window.__SETCA_isOwnTeam(__livePlaneRef) && window.__SETCA_getHeadingCommandVisual
-    ? window.__SETCA_getHeadingCommandVisual(__livePlaneRef) : null;
-  if(__headingCue){
-    const targetRad=(__headingCue.target-90)*Math.PI/180;
-    const cueLen=Math.max(headingLen+8,28*planeVisualScale);
-    ctx.save();
-    ctx.globalAlpha=0.85*__headingCue.opacity;
-    ctx.strokeStyle='#4de6ff';
-    ctx.fillStyle='#4de6ff';
-    ctx.lineWidth=Math.max(1.1,1.3*planeVisualScale);
-    ctx.setLineDash([4*planeVisualScale,3*planeVisualScale]);
-    ctx.beginPath();
-    ctx.moveTo(s.x,s.y);
-    ctx.lineTo(s.x+Math.cos(targetRad)*cueLen,s.y+Math.sin(targetRad)*cueLen);
-    ctx.stroke();
-    ctx.setLineDash([]);
-    ctx.font=`${Math.max(9,10*planeVisualScale)}px monospace`;
-    ctx.fillText(`ORD ${String(Math.round(__headingCue.target)%360).padStart(3,'0')}°`,s.x+Math.cos(targetRad)*(cueLen+9),s.y+Math.sin(targetRad)*(cueLen+9));
-    ctx.restore();
-  }
   if(!isKillConfirm && st.predMin>0){
     const tSec = st.predMin * 60;
     const nmps = (Math.max(0, Number.isFinite(+p.spd) ? +p.spd : 0) / NM2KM) / 3600;
@@ -21569,7 +21522,6 @@ function __SETCA_setCommandHdg(p, value, publishLive=true){
   if(cancelsArrival) p.flightProcedure = null;
   p.tgtHdg = hdg;
   try{ if(window.__SETCA_markAircraftDirty) window.__SETCA_markAircraftDirty(p); }catch(_){ }
-  if(changesHeading) try{ if(window.__SETCA_noteHeadingCommandVisual) window.__SETCA_noteHeadingCommandVisual(p); }catch(_){ }
   if(publishLive) try{ if(window.__SETCA_publishAircraftLive) window.__SETCA_publishAircraftLive(p,{tgtHdg:hdg}); }catch(_){ }
   if(__SETCA_isImmediatePlanningMode()){
     p.hdg = hdg;
@@ -34712,7 +34664,12 @@ import { getDatabase, ref, get, set } from "https://www.gstatic.com/firebasejs/1
     arwyHoverSince: 0,
     arwyHoverProgress: 0,
     arwyReadyId: null,
-    arwyHoverName: ''
+    arwyHoverName: '',
+    startClientX: 0,
+    startClientY: 0,
+    hasMoved: false,
+    sentHeading: null,
+    sentBias: null
   };
 
   const CAP_HOVER_MS = 2000;
@@ -34853,6 +34810,11 @@ import { getDatabase, ref, get, set } from "https://www.gstatic.com/firebasejs/1
     state.planeId = p.id;
     state.clientX = e.clientX;
     state.clientY = e.clientY;
+    state.startClientX = e.clientX;
+    state.startClientY = e.clientY;
+    state.hasMoved = false;
+    state.sentHeading = null;
+    state.sentBias = null;
     const curHdg = normDeg(Number.isFinite(p.hdg) ? p.hdg : (p.tgtHdg || 0));
     state.targetHdg = curHdg;
     state.turnBias = null;
@@ -34865,19 +34827,44 @@ import { getDatabase, ref, get, set } from "https://www.gstatic.com/firebasejs/1
     requestGuideOverlay();
     return true;
   }
+  function applyHeadingDuringDrag(p,force){
+    if(!p || !state.hasMoved || !Number.isFinite(state.targetHdg)) return false;
+    const headingChanged=state.sentHeading===null ||
+      Math.abs((((state.targetHdg-state.sentHeading)+540)%360)-180)>0.5;
+    const biasChanged=state.sentBias!==state.turnBias;
+    if(!force && !headingChanged && !biasChanged) return false;
+    if(typeof window.__SETCA_setCommandHdg === 'function') window.__SETCA_setCommandHdg(p,state.targetHdg,false);
+    else p.tgtHdg=normDeg(state.targetHdg);
+    p.turnBias=state.turnBias || null;
+    p.routeManualUntil=nowMs()+14000;
+    try{ if(window.__SETCA_markAircraftDirty) window.__SETCA_markAircraftDirty(p); }catch(_){ }
+    // La primera dirección, una inversión de giro y la posición final salen ya;
+    // los demás movimientos se agrupan como máximo durante 100 ms.
+    try{ if(window.__SETCA_publishAircraftLive) window.__SETCA_publishAircraftLive(p,
+      {tgtHdg:p.tgtHdg,turnBias:p.turnBias},force || state.sentHeading===null || biasChanged); }catch(_){ }
+    state.sentHeading=state.targetHdg;
+    state.sentBias=state.turnBias;
+    return true;
+  }
   function updateDrag(clientX, clientY){
     if(!state.active) return false;
     const p = getPlane();
     if(!p) return false;
     state.clientX = clientX;
     state.clientY = clientY;
+    if(Math.hypot(clientX-state.startClientX,clientY-state.startClientY)<4){
+      requestGuideOverlay();
+      return true;
+    }
+    state.hasMoved = true;
     const hdg = bearingFromPlaneToClient(p, clientX, clientY);
     if(!Number.isFinite(hdg)) return false;
     state.targetHdg = normDeg(hdg);
     state.turnBias = resolveTurnBias(Number.isFinite(p.hdg) ? p.hdg : (p.tgtHdg || 0), state.targetHdg);
     updateCapHover(clientX,clientY);
-    // Mantener el arrastre fluido: durante CTRL+drag solo se actualiza la guía local.
-    // El rumbo real se aplica y sincroniza una sola vez al soltar el click.
+    // El instructor gobierna el rumbo durante el gesto, no al terminarlo.
+    // Una nueva dirección sustituye al destino anterior aunque siga virando.
+    applyHeadingDuringDrag(p,false);
     requestGuideOverlay();
     return true;
   }
@@ -34903,26 +34890,22 @@ import { getDatabase, ref, get, set } from "https://www.gstatic.com/firebasejs/1
           assignedToPath = !!window.__SETCA_assignPlaneToArwy(p,arwy);
         }
         if(!assignedToPath){
-          if(Number.isFinite(state.targetHdg)){
-            if(typeof window.__SETCA_setCommandHdg === 'function') window.__SETCA_setCommandHdg(p, state.targetHdg, false);
-            else p.tgtHdg = normDeg(state.targetHdg);
-          }
-          p.turnBias = state.turnBias || null;
-          p.routeManualUntil = nowMs() + 14000;
-          try{ if(window.__SETCA_markAircraftDirty) window.__SETCA_markAircraftDirty(p); }catch(_){ }
-          // CTRL+arrastre es solo una guía local hasta soltar. Al soltar,
-          // enviar rumbo y sentido de giro juntos por el canal rápido.
+          applyHeadingDuringDrag(p,true);
+        }else{
           try{ if(window.__SETCA_publishAircraftLive) window.__SETCA_publishAircraftLive(p,{tgtHdg:p.tgtHdg,turnBias:p.turnBias},true); }catch(_){ }
         }
       }
       refreshPanels();
-      // La orden ligera de rumbo sale ya; el respaldo completo va después.
+      // El respaldo completo conserva CAP/ARWY y demás datos; no retrasa el giro.
       setTimeout(pushSync,250);
     }
     state.active = false;
     state.planeId = null;
     state.targetHdg = null;
     state.turnBias = null;
+    state.hasMoved = false;
+    state.sentHeading = null;
+    state.sentBias = null;
     resetCapHover();
     clearGuideOverlay();
     if(guideRaf){ cancelAnimationFrame(guideRaf); guideRaf = 0; }
