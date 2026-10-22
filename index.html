@@ -294,17 +294,65 @@
   let __setcaExcsPilotQueued = false;
   const __setcaExcsRenderMotion = new Map();
   const __setcaVisualPlaneSamples = new Map();
+  const __setcaVisualPositionSamples = new Map();
+  const __setcaHeadingCommandCues = new Map();
+  const __setcaObservedHeadingTargets = new Map();
+  const __SETCA_VISUAL_POSITION_MS = 1000;
   const __SETCA_EXCS_POSITION_BROADCAST_MS = 1000;
   const __SETCA_EXCS_RENDER_TRANSITION_MS = 180;
   window.__SETCA_EXCS_POSITION_BROADCAST_MS = __SETCA_EXCS_POSITION_BROADCAST_MS;
   window.__SETCA_EXCS_RENDER_TRANSITION_MS = __SETCA_EXCS_RENDER_TRANSITION_MS;
+  window.__SETCA_VISUAL_POSITION_MS = __SETCA_VISUAL_POSITION_MS;
+  // La posición se presenta por muestras de un segundo. El rumbo mostrado
+  // sigue la cinemática actual sin esperar esa muestra visual.
+  function __SETCA_sampleVisualPosition(source,visual){
+    const id=String(source && source.id || '');
+    if(!id || !visual) return visual;
+    const now=performance.now();
+    if(window.__SETCA_aircraftDragActive && window.__SETCA_aircraftDragPlaneId===id){
+      __setcaVisualPositionSamples.set(id,{x:visual.x,y:visual.y,at:now});
+      return visual;
+    }
+    let sample=__setcaVisualPositionSamples.get(id);
+    const ageMs=sample?Math.max(0,now-sample.at):0;
+    const expectedTravel=((Math.abs(Number(source.spd)||0)+Math.abs(Number(st.windKmh)||0))/1.852/3600)*(ageMs/1000);
+    const jumped=sample && Math.hypot((Number(source.x)||0)-sample.x,(Number(source.y)||0)-sample.y)>Math.max(0.35,expectedTravel+0.15);
+    if(!sample || ageMs>=__SETCA_VISUAL_POSITION_MS || jumped){
+      sample={x:visual.x,y:visual.y,at:now};
+      __setcaVisualPositionSamples.set(id,sample);
+    }
+    return {...visual,x:sample.x,y:sample.y};
+  }
+  window.__SETCA_refreshPlaneVisualPosition = function(p){
+    if(!p || !p.id) return;
+    __setcaVisualPositionSamples.set(String(p.id),{x:p.x,y:p.y,at:performance.now()});
+  };
+  window.__SETCA_noteHeadingCommandVisual = function(p){
+    if(!p || !p.id || !Number.isFinite(Number(p.tgtHdg))) return;
+    const id=String(p.id);
+    __setcaObservedHeadingTargets.set(id,Number(p.tgtHdg));
+    __setcaHeadingCommandCues.set(id,{target:Number(p.tgtHdg),at:performance.now()});
+  };
+  window.__SETCA_getHeadingCommandVisual = function(p){
+    if(!p || !p.id) return null;
+    const id=String(p.id), target=Number(p.tgtHdg);
+    const observed=__setcaObservedHeadingTargets.get(id);
+    if(Number.isFinite(target) && observed!==undefined && Math.abs((((target-observed)+540)%360)-180)>0.5)
+      window.__SETCA_noteHeadingCommandVisual(p);
+    else if(observed===undefined && Number.isFinite(target)) __setcaObservedHeadingTargets.set(id,target);
+    const cue=__setcaHeadingCommandCues.get(id);
+    if(!cue) return null;
+    const age=performance.now()-cue.at;
+    if(age>1500 || age<0){ __setcaHeadingCommandCues.delete(id); return null; }
+    return {target:cue.target,opacity:Math.min(1,(1500-age)/450)};
+  };
   window.__SETCA_interpolatedPlane = function(p){
     if(!p || (window.st && (st.localPause || (st.serverPause && st.serverPause.active)))) return p;
     // La réplica ya avanza su propia cinemática; predecir también al dibujar
     // duplicaría el movimiento y produciría saltos al recibir una muestra.
-    if(window.__SETCA_replicaMotionRunning) return p;
+    if(window.__SETCA_replicaMotionRunning) return __SETCA_sampleVisualPosition(p,p);
     const excs=__SETCA_isExcsSharedRoom();
-    if(excs ? window.__SETCA_isExcsWhiteController() : __SETCA_isInstructorAuthority()) return p;
+    if(excs ? window.__SETCA_isExcsWhiteController() : __SETCA_isInstructorAuthority()) return __SETCA_sampleVisualPosition(p,p);
     const id=String(p.id || '');
     const now=performance.now();
     const sig=[p.x,p.y,p.hdg,p.spd,p.tgtHdg,p.turn,p.turnBias].join('|');
@@ -321,14 +369,14 @@
       const hdgDelta=((motion.to.hdg-motion.from.hdg+540)%360)-180;
       base={...p,x:motion.from.x+(motion.to.x-motion.from.x)*t,y:motion.from.y+(motion.to.y-motion.from.y)*t,
         hdg:(motion.from.hdg+hdgDelta*t+360)%360};
-      if(t<1) return base;
+      if(t<1) return __SETCA_sampleVisualPosition(p,base);
       ageMs=Math.max(0,now-motion.at-__SETCA_EXCS_RENDER_TRANSITION_MS);
     }
     // Predicción solo visual entre muestras: nunca cambia el estado de vuelo,
     // el cálculo de impactos ni GTC/ODT/SAM. La autoridad corrige cada muestra.
-    if(p.flightProcedure || p.routeEnabled) return base;
+    if(p.flightProcedure || p.routeEnabled) return __SETCA_sampleVisualPosition(p,base);
     const age=Math.min(0.9,Math.max(0,ageMs/1000));
-    if(age<=0) return base;
+    if(age<=0) return __SETCA_sampleVisualPosition(p,base);
     const speed=Math.max(0,Number(p.spd)||0);
     const heading=Number(base.hdg)||0;
     const target=Number.isFinite(+p.tgtHdg)?+p.tgtHdg:heading;
@@ -339,8 +387,8 @@
     const distance=(speed/1.852/3600)*age;
     const windRadians=((Number(st.windDir)||0)-90)*Math.PI/180;
     const windDistance=((Number(st.windKmh)||0)/1.852/3600)*age;
-    return {...base,x:(Number(base.x)||0)+Math.cos(radians)*distance+Math.cos(windRadians)*windDistance,
-      y:(Number(base.y)||0)+Math.sin(radians)*distance+Math.sin(windRadians)*windDistance,hdg:nextHeading};
+    return __SETCA_sampleVisualPosition(p,{...base,x:(Number(base.x)||0)+Math.cos(radians)*distance+Math.cos(windRadians)*windDistance,
+      y:(Number(base.y)||0)+Math.sin(radians)*distance+Math.sin(windRadians)*windDistance,hdg:nextHeading});
   };
   function __SETCA_isExcsSharedRoom(){ return ROOM_ID.toLowerCase() === 'excs' && !__localOnlyMode; }
   let __setcaServerTimeOffsetMs = 0;
@@ -1176,12 +1224,18 @@
         if(at<=Math.max(Number(p.__liveAt)||0,Number(__setcaLiveRecent.get(id)?.at)||0)) continue;
         const patch=__SETCA_cleanLivePatch(update.patch);
         if(!Object.keys(patch).length) continue;
+        const previousTarget=Number(p.tgtHdg);
         Object.assign(p,patch);
+        if(Object.prototype.hasOwnProperty.call(patch,'tgtHdg') &&
+           (!Number.isFinite(previousTarget) || Math.abs((((Number(p.tgtHdg)-previousTarget)+540)%360)-180)>0.5))
+          window.__SETCA_noteHeadingCommandVisual(p);
         p.__liveAt=at;
         p.__cmdAt=Math.max(Number(p.__cmdAt)||0,at);
         __setcaLiveRecent.set(id,{at,patch,receivedAt:Date.now()});
         __setcaExcsRenderMotion.delete(id);
         __setcaVisualPlaneSamples.delete(id);
+        if(Object.prototype.hasOwnProperty.call(patch,'x') || Object.prototype.hasOwnProperty.call(patch,'y'))
+          window.__SETCA_refreshPlaneVisualPosition(p);
         if(Object.keys(patch).some(key=>key!=='x'&&key!=='y')) commandChanged=true;
       }
     }
@@ -15683,6 +15737,28 @@ function drawPlane(p){
   if(!isKillConfirm){
     ctx.beginPath();ctx.moveTo(s.x,s.y);ctx.lineTo(s.x+Math.cos(lr)*headingLen,s.y+Math.sin(lr)*headingLen);ctx.strokeStyle=color;ctx.lineWidth=headingStroke;ctx.stroke();
   }
+  // Confirmación visual inmediata de una orden recibida. La línea sólida
+  // conserva el rumbo real; esta guía breve muestra el rumbo mandado.
+  const __headingCue=!isKillConfirm && window.__SETCA_isOwnTeam(__livePlaneRef) && window.__SETCA_getHeadingCommandVisual
+    ? window.__SETCA_getHeadingCommandVisual(__livePlaneRef) : null;
+  if(__headingCue){
+    const targetRad=(__headingCue.target-90)*Math.PI/180;
+    const cueLen=Math.max(headingLen+8,28*planeVisualScale);
+    ctx.save();
+    ctx.globalAlpha=0.85*__headingCue.opacity;
+    ctx.strokeStyle='#4de6ff';
+    ctx.fillStyle='#4de6ff';
+    ctx.lineWidth=Math.max(1.1,1.3*planeVisualScale);
+    ctx.setLineDash([4*planeVisualScale,3*planeVisualScale]);
+    ctx.beginPath();
+    ctx.moveTo(s.x,s.y);
+    ctx.lineTo(s.x+Math.cos(targetRad)*cueLen,s.y+Math.sin(targetRad)*cueLen);
+    ctx.stroke();
+    ctx.setLineDash([]);
+    ctx.font=`${Math.max(9,10*planeVisualScale)}px monospace`;
+    ctx.fillText(`ORD ${String(Math.round(__headingCue.target)%360).padStart(3,'0')}°`,s.x+Math.cos(targetRad)*(cueLen+9),s.y+Math.sin(targetRad)*(cueLen+9));
+    ctx.restore();
+  }
   if(!isKillConfirm && st.predMin>0){
     const tSec = st.predMin * 60;
     const nmps = (Math.max(0, Number.isFinite(+p.spd) ? +p.spd : 0) / NM2KM) / 3600;
@@ -19662,20 +19738,21 @@ cvs.addEventListener('mousedown',e=>{
   if(best){
     draggingPlane=best;
     window.__SETCA_aircraftDragActive=true;
+    window.__SETCA_aircraftDragPlaneId=String(best.id);
     dragStart={x:e.clientX,y:e.clientY,planeX:Number(best.x||0),planeY:Number(best.y||0)};
     if(Array.isArray(st.sel)) st.sel=[best.id];
     try{ if(window.__SETCA_setClipboardFocus) window.__SETCA_setClipboardFocus('aircraft'); }catch(_){ }
   }
 });
 addEventListener('mousemove',e=>{
-  if(window.st && window.st.modoObservador){ draggingPlane=null; draggingDrawing=null; dragStart=null; window.__SETCA_aircraftDragActive=false; return; }
+  if(window.st && window.st.modoObservador){ draggingPlane=null; draggingDrawing=null; dragStart=null; window.__SETCA_aircraftDragActive=false; window.__SETCA_aircraftDragPlaneId=null; return; }
   if(draggingDrawing){
   const dx=(e.clientX-dragStart.x)/(zoom*PX_PER_NM), dy=(e.clientY-dragStart.y)/(zoom*PX_PER_NM);
   __translateDrawingGeometry(draggingDrawing, dx, dy);
   dragStart={x:e.clientX,y:e.clientY};
 }
   if(draggingPlane){
-  if(typeof __SETCA_canInstructorMovePlanes === 'function' && !__SETCA_canInstructorMovePlanes()){ draggingPlane=null; dragStart=null; window.__SETCA_aircraftDragActive=false; return; }
+  if(typeof __SETCA_canInstructorMovePlanes === 'function' && !__SETCA_canInstructorMovePlanes()){ draggingPlane=null; dragStart=null; window.__SETCA_aircraftDragActive=false; window.__SETCA_aircraftDragPlaneId=null; return; }
   if(window.__SETCA_shouldRouteAircraftCommand && window.__SETCA_shouldRouteAircraftCommand()) return;
   const r=cvs.getBoundingClientRect();const w=toWorld(e.clientX-r.left,e.clientY-r.top);const sw=toWorld(dragStart.x-r.left,dragStart.y-r.top);draggingPlane.x+=w.x-sw.x;draggingPlane.y+=w.y-sw.y;
   try{
@@ -19689,6 +19766,7 @@ addEventListener('mouseup',(e)=>{
   const movedPlaneStart = dragStart;
   draggingPlane=null; draggingDrawing=null; dragStart=null;
   window.__SETCA_aircraftDragActive=false;
+  window.__SETCA_aircraftDragPlaneId=null;
   if((movedPlane||movedDrawing)){
     if(typeof repaintNav==='function') repaintNav();
     if(movedPlane && movedPlaneStart && window.__SETCA_shouldRouteAircraftCommand && window.__SETCA_shouldRouteAircraftCommand()){
@@ -19704,6 +19782,7 @@ addEventListener('mouseup',(e)=>{
     if(movedDrawing) try{ if(window.__saveLocalDrawingsSoon) window.__saveLocalDrawingsSoon(); }catch(_){ }
     if(movedPlane){
       // Un movimiento terminado es una orden puntual: publicarlo sin esperar el ciclo de 1 s.
+      try{ if(window.__SETCA_refreshPlaneVisualPosition) window.__SETCA_refreshPlaneVisualPosition(movedPlane); }catch(_){ }
       try{ if(window.__SETCA_publishAircraftLive) window.__SETCA_publishAircraftLive(movedPlane,{x:movedPlane.x,y:movedPlane.y},true); }catch(_){ }
       try{ e.__setcaFastAircraftSync = true; }catch(_){ }
       // Dar prioridad al mensaje pequeño antes de la instantánea completa.
@@ -19720,6 +19799,7 @@ addEventListener('blur',()=>{
   draggingPlane=null;
   dragStart=null;
   window.__SETCA_aircraftDragActive=false;
+  window.__SETCA_aircraftDragPlaneId=null;
 });
 
 
@@ -21473,7 +21553,7 @@ function __SETCA_routeAircraftPatchToInstructor(p, patch, kind, role){
   }catch(_){ }
   return false;
 }
-function __SETCA_setCommandHdg(p, value){
+function __SETCA_setCommandHdg(p, value, publishLive=true){
   if(!p) return 0;
   if(!window.__SETCA_isOwnTeam(p)) return Number(p.hdg) || 0;
   const hdg = ((Number(value) || 0) % 360 + 360) % 360;
@@ -21489,7 +21569,8 @@ function __SETCA_setCommandHdg(p, value){
   if(cancelsArrival) p.flightProcedure = null;
   p.tgtHdg = hdg;
   try{ if(window.__SETCA_markAircraftDirty) window.__SETCA_markAircraftDirty(p); }catch(_){ }
-  try{ if(window.__SETCA_publishAircraftLive) window.__SETCA_publishAircraftLive(p,{tgtHdg:hdg}); }catch(_){ }
+  if(changesHeading) try{ if(window.__SETCA_noteHeadingCommandVisual) window.__SETCA_noteHeadingCommandVisual(p); }catch(_){ }
+  if(publishLive) try{ if(window.__SETCA_publishAircraftLive) window.__SETCA_publishAircraftLive(p,{tgtHdg:hdg}); }catch(_){ }
   if(__SETCA_isImmediatePlanningMode()){
     p.hdg = hdg;
     try{ if(isAwacsPlane(p) && p.awacsCoverage !== false) p.awacsSweepAng = hdg; }catch(_){ }
@@ -34823,7 +34904,7 @@ import { getDatabase, ref, get, set } from "https://www.gstatic.com/firebasejs/1
         }
         if(!assignedToPath){
           if(Number.isFinite(state.targetHdg)){
-            if(typeof window.__SETCA_setCommandHdg === 'function') window.__SETCA_setCommandHdg(p, state.targetHdg);
+            if(typeof window.__SETCA_setCommandHdg === 'function') window.__SETCA_setCommandHdg(p, state.targetHdg, false);
             else p.tgtHdg = normDeg(state.targetHdg);
           }
           p.turnBias = state.turnBias || null;
@@ -39077,4 +39158,3 @@ import { getDatabase, ref, onValue, set } from "https://www.gstatic.com/firebase
 
 </body>
 </html>
-BY WALLACE
