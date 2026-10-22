@@ -301,14 +301,14 @@
   window.__SETCA_EXCS_POSITION_BROADCAST_MS = __SETCA_EXCS_POSITION_BROADCAST_MS;
   window.__SETCA_EXCS_RENDER_TRANSITION_MS = __SETCA_EXCS_RENDER_TRANSITION_MS;
   window.__SETCA_VISUAL_POSITION_MS = __SETCA_VISUAL_POSITION_MS;
-  // La posición se presenta por muestras de un segundo. El rumbo mostrado
-  // sigue la cinemática actual sin esperar esa muestra visual.
+  // Símbolo y palito usan una sola muestra visual de posición y rumbo cada
+  // segundo. La orden y la física se aplican al instante, independientemente.
   function __SETCA_sampleVisualPosition(source,visual){
     const id=String(source && source.id || '');
     if(!id || !visual) return visual;
     const now=performance.now();
     if(window.__SETCA_aircraftDragActive && window.__SETCA_aircraftDragPlaneId===id){
-      __setcaVisualPositionSamples.set(id,{x:visual.x,y:visual.y,at:now});
+      __setcaVisualPositionSamples.set(id,{x:visual.x,y:visual.y,hdg:visual.hdg,at:now});
       return visual;
     }
     let sample=__setcaVisualPositionSamples.get(id);
@@ -316,14 +316,14 @@
     const expectedTravel=((Math.abs(Number(source.spd)||0)+Math.abs(Number(st.windKmh)||0))/1.852/3600)*(ageMs/1000);
     const jumped=sample && Math.hypot((Number(source.x)||0)-sample.x,(Number(source.y)||0)-sample.y)>Math.max(0.35,expectedTravel+0.15);
     if(!sample || ageMs>=__SETCA_VISUAL_POSITION_MS || jumped){
-      sample={x:visual.x,y:visual.y,at:now};
+      sample={x:visual.x,y:visual.y,hdg:visual.hdg,at:now};
       __setcaVisualPositionSamples.set(id,sample);
     }
-    return {...visual,x:sample.x,y:sample.y};
+    return {...visual,x:sample.x,y:sample.y,hdg:sample.hdg};
   }
   window.__SETCA_refreshPlaneVisualPosition = function(p){
     if(!p || !p.id) return;
-    __setcaVisualPositionSamples.set(String(p.id),{x:p.x,y:p.y,at:performance.now()});
+    __setcaVisualPositionSamples.set(String(p.id),{x:p.x,y:p.y,hdg:p.hdg,at:performance.now()});
   };
   window.__SETCA_interpolatedPlane = function(p){
     if(!p || (window.st && (st.localPause || (st.serverPause && st.serverPause.active)))) return p;
@@ -1161,6 +1161,8 @@
   const __setcaLiveFields = new Set(['x','y','hdg','spd','alt','tgtHdg','tgtSpd','tgtAlt','turn','turnBias']);
   const __setcaLivePending = new Map();
   const __setcaLiveRecent = new Map();
+  const __setcaLiveAwaitingPlane = new Map();
+  const __setcaMotionAwaitingPlane = new Map();
   let __setcaLiveTimer = null;
   let __setcaLiveLastSendAt = 0;
   const __SETCA_LIVE_SEND_MS = 100;
@@ -1221,8 +1223,13 @@
     const id=String(update.id||'');
     const at=Number(update.at||0);
     if(!id || !Number.isFinite(at) || at<=0) return;
-    const p=st.planes.find(p=>p && String(p.id)===id);
-    if(!p || String(window.__SETCA_entityTeam(p)||'').toLowerCase()!==team) return;
+    const p=st.planes.find(p=>p && String(p.id)===id && String(window.__SETCA_entityTeam(p)||'').toLowerCase()===team);
+    if(!p){
+      const pendingKey=team+'/'+id;
+      const previous=__setcaLiveAwaitingPlane.get(pendingKey);
+      if(!previous || at>Number(previous.update.at||0)) __setcaLiveAwaitingPlane.set(pendingKey,{team,update});
+      return;
+    }
     if(at<=Math.max(Number(p.__liveAt)||0,Number(__setcaLiveRecent.get(id)?.at)||0)) return;
     const patch=__SETCA_cleanLivePatch(update.patch);
     if(!Object.keys(patch).length) return;
@@ -1236,6 +1243,66 @@
     if(Object.prototype.hasOwnProperty.call(patch,'x') || Object.prototype.hasOwnProperty.call(patch,'y'))
       window.__SETCA_refreshPlaneVisualPosition(p);
     if(Object.keys(patch).some(key=>key!=='x'&&key!=='y')) __setcaSchedulePlanePanelRefresh(80,false);
+  }
+
+  // La carga completa define el escenario. Durante el vuelo solo viajan
+  // muestras pequeñas por equipo; las órdenes discretas usan aircraftLive.
+  let __setcaLastMotionTeams = new Set();
+  window.__SETCA_publishAircraftMotion = function(){
+    if(__localOnlyMode || window.__SETCA_SCENE_LOADING || window.__SETCA_aircraftDragActive ||
+       !__setcaStateHydrated || !__SETCA_canWriteSharedState()) return false;
+    const byTeam=new Map();
+    const at=Date.now();
+    for(const p of (st.planes||[])){
+      if(!p || !p.id || !window.__SETCA_isOwnTeam(p)) continue;
+      const team=String(window.__SETCA_entityTeam(p)||'').toLowerCase();
+      if(!['blue','red','white'].includes(team)) continue;
+      if(!byTeam.has(team)) byTeam.set(team,{});
+      const key=encodeURIComponent(String(p.id)).replace(/[.#$\[\]/]/g,ch=>'%'+ch.charCodeAt(0).toString(16).toUpperCase());
+      byTeam.get(team)[key]={id:String(p.id),at,x:Number(p.x)||0,y:Number(p.y)||0,
+        hdg:Number(p.hdg)||0,spd:Number(p.spd)||0,alt:Number(p.alt)||0,
+        fuel:Number.isFinite(+p.fuel)?+p.fuel:null,
+        payloadMissiles:Number.isFinite(+p.payloadMissiles)?+p.payloadMissiles:null,
+        byClient:__setcaStateClientId,byRole:__SETCA_getSharedWriteRole()};
+    }
+    for(const team of new Set([...__setcaLastMotionTeams,...byTeam.keys()])){
+      set(ref(db,`rooms/${ROOM_ID}/aircraftMotion/${team}`),byTeam.get(team)||null)
+        .catch(error=>console.warn('SETCA: error al enviar vuelos en vivo',error));
+    }
+    __setcaLastMotionTeams=new Set(byTeam.keys());
+    return true;
+  };
+  function __SETCA_applyAircraftMotion(team,update){
+    if(!window.st || !Array.isArray(st.planes) || !update || typeof update!=='object') return;
+    if(!__SETCA_isExcsSharedRoom() && __setcaInstructorLocksReady && !__setcaTeamInstructorActive(team)) return;
+    if(update.byClient===__setcaStateClientId ||
+       !(update.byRole==='default' || (__SETCA_isExcsSharedRoom() && update.byRole==='white'))) return;
+    const id=String(update.id||''),at=Number(update.at||0);
+    if(!id || !Number.isFinite(at) || at<=0 || Date.now()+__setcaServerTimeOffsetMs-at>15000) return;
+    const p=st.planes.find(p=>p && String(p.id)===id && String(window.__SETCA_entityTeam(p)||'').toLowerCase()===team);
+    if(!p){
+      const pendingKey=team+'/'+id;
+      const previous=__setcaMotionAwaitingPlane.get(pendingKey);
+      if(!previous || at>Number(previous.update.at||0)) __setcaMotionAwaitingPlane.set(pendingKey,{team,update});
+      return;
+    }
+    const firstSample=!(Number(p.__motionAt)>0);
+    if(at<=Math.max(Number(p.__motionAt)||0,Number(p.__liveAt)||0)) return;
+    p.__motionAt=at;
+    for(const key of ['fuel','payloadMissiles']) if(update[key]!==null && Number.isFinite(+update[key])) p[key]=+update[key];
+    // La réplica ya cumple la orden localmente. Corregir solo una divergencia
+    // real evita que una muestra de red tardía haga rebotar el símbolo.
+    const age=Math.min(5,Math.max(0,(Date.now()+__setcaServerTimeOffsetMs-at)/1000));
+    const speed=Math.max(Number(p.spd)||0,Number(update.spd)||0);
+    const distance=Math.hypot((Number(update.x)||0)-(Number(p.x)||0),(Number(update.y)||0)-(Number(p.y)||0));
+    const expected=(speed/1.852/3600)*(age+1)+0.12;
+    const turnGap=Math.abs((((Number(update.hdg)||0)-(Number(p.hdg)||0)+540)%360)-180);
+    // BLUE/RED en EXCS no ejecutan la física; WHITE les entrega cada muestra.
+    const excsPilot=__SETCA_isExcsSharedRoom() && !window.__SETCA_isExcsWhiteController() && __SETCA_getSharedWriteRole()==='default';
+    if(firstSample || excsPilot || distance>Math.max(0.35,expected) || turnGap>Math.max(5,(Number(p.turn)||2)*(age+1))){
+      for(const key of ['x','y','hdg','spd','alt']) if(Number.isFinite(+update[key])) p[key]=+update[key];
+      window.__SETCA_refreshPlaneVisualPosition(p);
+    }
   }
 
   function __setcaPlaneCmdAt(p){
@@ -2204,6 +2271,20 @@ let __setcaLastAppliedRemoteTs = 0;
         }
         planesChanged = !__setcaSameArrayRefs(st.planes, nextPlanes);
         if(planesChanged) st.planes = nextPlanes;
+        // Al entrar a una sala, los canales ligeros pueden llegar antes que
+        // la única carga de escena. Aplicarlos cuando aparezca cada avión.
+        for(const [key,row] of __setcaLiveAwaitingPlane){
+          if((st.planes||[]).some(p=>p && String(p.id)===String(row.update.id) && String(window.__SETCA_entityTeam(p)||'').toLowerCase()===row.team)){
+            __setcaLiveAwaitingPlane.delete(key);
+            __SETCA_applyAircraftLive(row.team,row.update);
+          }
+        }
+        for(const [key,row] of __setcaMotionAwaitingPlane){
+          if((st.planes||[]).some(p=>p && String(p.id)===String(row.update.id) && String(window.__SETCA_entityTeam(p)||'').toLowerCase()===row.team)){
+            __setcaMotionAwaitingPlane.delete(key);
+            __SETCA_applyAircraftMotion(row.team,row.update);
+          }
+        }
       }
 
       if (v.roles) {
@@ -2461,6 +2542,13 @@ let __setcaLastAppliedRemoteTs = 0;
       };
       onChildAdded(livePlanesRef,receive);
       onChildChanged(livePlanesRef,receive);
+      const motionRef=ref(db,`rooms/${ROOM_ID}/aircraftMotion/${team}`);
+      const receiveMotion=snap=>{
+        const update=snap.val();
+        if(update) __SETCA_applyAircraftMotion(team,update);
+      };
+      onChildAdded(motionRef,receiveMotion);
+      onChildChanged(motionRef,receiveMotion);
     }
     if(!__SETCA_isExcsSharedRoom()){
       const refreshInstructorTeams=()=>{
@@ -19823,12 +19911,7 @@ addEventListener('mouseup',(e)=>{
       try{ if(window.__SETCA_refreshPlaneVisualPosition) window.__SETCA_refreshPlaneVisualPosition(movedPlane); }catch(_){ }
       try{ if(window.__SETCA_publishAircraftLive) window.__SETCA_publishAircraftLive(movedPlane,{x:movedPlane.x,y:movedPlane.y},true); }catch(_){ }
       try{ e.__setcaFastAircraftSync = true; }catch(_){ }
-      // Dar prioridad al mensaje pequeño antes de la instantánea completa.
-      setTimeout(()=>{
-        if(window._SETCA_SYNC && typeof window._SETCA_SYNC.pushNow === 'function')
-          Promise.resolve(window._SETCA_SYNC.pushNow()).catch(error=>console.warn('SETCA: no se pudo sincronizar el movimiento', error));
-        else if(typeof window.__SETCA_scheduleAircraftSync1s === 'function') window.__SETCA_scheduleAircraftSync1s();
-      },250);
+      // aircraftLive ya contiene la posición final; no reenviar la escena.
     }
     if(movedDrawing && movedDrawing.visibility === 'global' && window._SETCA_SYNC && typeof window._SETCA_SYNC.push==='function') window._SETCA_SYNC.push();
   }
@@ -21552,13 +21635,15 @@ function __SETCA_pushInstructorCommandNow(plane=null,livePatch=null){
     // Una orden concreta sale una sola vez y solo para su avión; el estado
     // completo permanece como respaldo para los demás datos de la escena.
     const targets=plane?[plane]:(Array.isArray(st.sel)?st.sel:[]).map(id=>(st.planes||[]).find(p=>p && String(p.id)===String(id)));
+    let sentLive=false;
     for(const p of targets){
-      if(p && window.__SETCA_publishAircraftLive) window.__SETCA_publishAircraftLive(p,{
+      if(p && window.__SETCA_publishAircraftLive) sentLive=window.__SETCA_publishAircraftLive(p,{
         ...(livePatch || {tgtHdg:p.tgtHdg,tgtSpd:p.tgtSpd,tgtAlt:p.tgtAlt,turn:p.turn,turnBias:p.turnBias})
-      });
+      },true) || sentLive;
     }
-    // Rumbo, velocidad y altitud son órdenes discretas: no esperar al ciclo
-    // periódico de publicación, que añadía aproximadamente un segundo.
+    // La orden ligera ya salió: no duplicarla con una transacción de la escena.
+    if(sentLive) return true;
+    // Respaldo para clientes sin canal ligero.
     if(typeof window.flushSync === 'function') return window.flushSync();
     if(window._SETCA_SYNC && typeof window._SETCA_SYNC.pushNow === 'function') return window._SETCA_SYNC.pushNow();
     if(window._SETCA_SYNC && typeof window._SETCA_SYNC.push === 'function') return window._SETCA_SYNC.push();
@@ -21722,6 +21807,8 @@ function __SETCA_isAuthoritativeSimulationHost(){
 }
 function __SETCA_publishAuthoritativeTick(){
   try{
+    // El pulso de vuelo no reenvía la escena completa cada segundo.
+    if(window.__SETCA_publishAircraftMotion) return window.__SETCA_publishAircraftMotion();
     if(window._SETCA_SYNC && typeof window._SETCA_SYNC.pushNow === 'function') return window._SETCA_SYNC.pushNow();
     if(typeof window.__SETCA_scheduleAircraftSync1s === 'function') return window.__SETCA_scheduleAircraftSync1s();
     if(window._SETCA_SYNC && typeof window._SETCA_SYNC.push === 'function') return window._SETCA_SYNC.push();
@@ -22964,21 +23051,26 @@ requestAnimationFrame(()=>{ repaintPlanesList(); repaintNav(); repaintStudent();
   function __SETCA_sharedStateSignature(){
     try{
       const q = (n, d=2)=>Number.isFinite(+n) ? Math.round(+n * Math.pow(10,d)) / Math.pow(10,d) : 0;
+      const safeJson = value=>{ try{ return JSON.stringify(value); }catch(_){ return ''; } };
       const planes = (Array.isArray(st.planes) ? st.planes : []).map(p=>p ? [
         String(p.id||''), String(p.name||''), String(p.tipo||''), String(p.xpdr||''), String(p.team||''),
-        q(p.x,2), q(p.y,2), q(p.hdg,1), q(p.tgtHdg,1), q(p.spd,1), q(p.tgtSpd,1), q(p.alt,0), q(p.tgtAlt,0),
-        q(p.turn,2), String(p.turnBias||'')
+        safeJson(p.fail||{}), q(p.payloadMax,0)
       ] : null);
       const missiles = (Array.isArray(st.missiles) ? st.missiles : [])
         .filter(m=>!(window.__SETCA_isLocalGtcMissile && window.__SETCA_isLocalGtcMissile(m)))
-        .map(m=>m ? [String(m.id||''), q(m.x,2), q(m.y,2), q(m.hdg,1), q(m.alt,0), q(m.spd,1), String(m.targetId||m.target||'')] : null);
+        .map(m=>m ? [String(m.id||''), String(m.status||''), String(m.targetId||m.target||'')] : null);
       return JSON.stringify({
         planes,
         roles: st.roles || {},
         contingencies: (typeof __SETCA_cleanContingenciesForSync === 'function') ? __SETCA_cleanContingenciesForSync(st.contingencies || {}) : (st.contingencies || {}),
         gtc: Array.isArray(st.gtc) ? st.gtc.map(unit=>{
           try{
-            if(window.__SETCA_cleanGtcForGlobalSync) return window.__SETCA_cleanGtcForGlobalSync(unit);
+            if(window.__SETCA_cleanGtcForGlobalSync){
+              const clean=window.__SETCA_cleanGtcForGlobalSync(unit);
+              if(!clean) return null;
+              for(const key of ['runtimeUpdatedAt','missileShotsFired','missileSalvoShots','missileLastLaunchAt','missileNextLaunchAt','missileReloadUntil']) delete clean[key];
+              return clean;
+            }
           }catch(_){ }
           if(!unit || typeof unit !== 'object') return unit;
           const clean = {...unit};
@@ -23079,13 +23171,20 @@ requestAnimationFrame(()=>{ repaintPlanesList(); repaintNav(); repaintStudent();
   // Solo un gesto iniciado en el radar puede necesitar este respaldo general.
   // Un mouseup sobre botones o paneles no es otra orden de sincronización.
   let __setcaRadarMouseDown = false;
-  addEventListener('mousedown', e=>{ __setcaRadarMouseDown = !!(e.target && e.target.id === 'radar'); }, true);
+  let __setcaRadarModifiedGesture = false;
+  addEventListener('mousedown', e=>{
+    __setcaRadarMouseDown = !!(e.target && e.target.id === 'radar');
+    __setcaRadarModifiedGesture = __setcaRadarMouseDown && !!(e.ctrlKey || e.altKey);
+  }, true);
   addEventListener('mouseup', e=>{
     const wasRadarGesture = __setcaRadarMouseDown;
+    const wasModified = __setcaRadarModifiedGesture || !!(e.ctrlKey || e.altKey);
     __setcaRadarMouseDown = false;
-    if(wasRadarGesture && !e.__setcaFastAircraftSync) scheduleSync(__SETCA_SYNC_DEBOUNCE_MS);
+    __setcaRadarModifiedGesture = false;
+    // CTRL rumbo/CAP y ALT arrastre tienen su propio canal y respaldo.
+    if(wasRadarGesture && !wasModified && !e.__setcaFastAircraftSync) scheduleSync(__SETCA_SYNC_DEBOUNCE_MS);
   }, {passive:true});
-  addEventListener('blur', ()=>{ __setcaRadarMouseDown = false; });
+  addEventListener('blur', ()=>{ __setcaRadarMouseDown = false; __setcaRadarModifiedGesture = false; });
 
   // ENTER en navegación/vuelos => aplicar change y FLUSH inmediato
   addEventListener('keydown', (e)=>{
@@ -33561,6 +33660,7 @@ import { getAuth } from "https://www.gstatic.com/firebasejs/10.12.3/firebase-aut
     });
     await Promise.all([
       set(ref(db, `rooms/${room}/aircraftLive/${team}`),null),
+      set(ref(db, `rooms/${room}/aircraftMotion/${team}`),null),
       set(ref(db, `rooms/${room}/teamContacts/${team}`),null)
     ]);
   }
@@ -35032,12 +35132,11 @@ import { getDatabase, ref, get, set } from "https://www.gstatic.com/firebasejs/1
           commitHeading(p);
         }else{
           try{ if(window.__SETCA_publishAircraftLive) window.__SETCA_publishAircraftLive(p,{tgtHdg:p.tgtHdg,turnBias:p.turnBias},true); }catch(_){ }
+          // CAP/ARWY también modifica el plan estructural del vuelo.
+          scheduleHeadingBackup();
         }
       }
       requestAnimationFrame(refreshPanels);
-      // El respaldo completo conserva CAP/ARWY y demás datos, agrupando una
-      // serie de maniobras sin competir con sus mensajes inmediatos.
-      scheduleHeadingBackup();
     }
     state.active = false;
     state.planeId = null;
