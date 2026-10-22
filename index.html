@@ -1153,7 +1153,9 @@
     if(!patch || typeof patch!=='object') return clean;
     for(const key of __setcaLiveFields){
       if(!Object.prototype.hasOwnProperty.call(patch,key)) continue;
-      if(key==='turnBias') clean[key]=patch[key]==='L'||patch[key]==='R'?patch[key]:null;
+      // Firebase elimina propiedades null: usar cadena vacía en el mensaje
+      // para que "quitar sesgo" no deje vigente el giro anterior.
+      if(key==='turnBias') clean[key]=patch[key]==='L'||patch[key]==='R'?patch[key]:'';
       else if(Number.isFinite(Number(patch[key]))) clean[key]=Number(patch[key]);
     }
     return clean;
@@ -1180,7 +1182,10 @@
     plane.__liveAt=at;
     plane.__cmdAt=Math.max(Number(plane.__cmdAt)||0,at);
     if(!__setcaLivePending.has(team)) __setcaLivePending.set(team,new Map());
-    __setcaLivePending.get(team).set(String(plane.id),{id:String(plane.id),at,patch:clean});
+    const pending=__setcaLivePending.get(team);
+    const id=String(plane.id);
+    const previous=pending.get(id);
+    pending.set(id,{id,at,patch:{...(previous && previous.patch || {}),...clean}});
     const wait=force?0:Math.max(0,__SETCA_LIVE_SEND_MS-(Date.now()-__setcaLiveLastSendAt));
     if(wait===0) __SETCA_flushAircraftLive();
     else if(!__setcaLiveTimer) __setcaLiveTimer=setTimeout(__SETCA_flushAircraftLive,wait);
@@ -1203,6 +1208,7 @@
         if(at<=Math.max(Number(p.__liveAt)||0,Number(__setcaLiveRecent.get(id)?.at)||0)) continue;
         const patch=__SETCA_cleanLivePatch(update.patch);
         if(!Object.keys(patch).length) continue;
+        if(Object.prototype.hasOwnProperty.call(patch,'turnBias') && patch.turnBias==='') patch.turnBias=null;
         Object.assign(p,patch);
         p.__liveAt=at;
         p.__cmdAt=Math.max(Number(p.__cmdAt)||0,at);
@@ -19966,6 +19972,7 @@ function paintAlerts(force=false){
       (typeof __setcaIsActiveMissile === 'function' ? __setcaIsActiveMissile(m) : (!m.status || m.status==='fly')));
 
   if(!missiles.length){
+    if(wrap.childElementCount===1 && wrap.firstElementChild.classList.contains('missileEmpty')) return;
     const d=document.createElement('div');
     d.className='missileEmpty';
     d.textContent='NO HAY MISILES SALIENTES';
@@ -21656,6 +21663,7 @@ function __SETCA_publishAuthoritativeTick(){
   return false;
 }
 let __SETCA_EXCS_PUBLISH_ACC=0;
+let __SETCA_NAV_RECORD_ACC=0;
 function loop(ts){
   // Conservar el siguiente fotograma incluso si un elemento importado falla al pintar.
   requestAnimationFrame(loop);
@@ -21736,10 +21744,7 @@ function loop(ts){
   }else{
     __SETCA_LOCAL_GTC_TICK_ACC = 0;
   }
-  if(!planningMode && !(st && st.localPause)){
-    try{ __refreshLocalDelaySnapshot(false); }catch(_){ }
-  }
-  else if(planningMode){
+  if(planningMode){
     st.planes.forEach(p=>{
       if(!p) return;
       const nextHdg = normDeg(Number.isFinite(p.tgtHdg) ? p.tgtHdg : (p.hdg || 0));
@@ -21752,7 +21757,13 @@ function loop(ts){
     });
     updatePairs();
   }
-  try{ if(!planningMode && typeof __navRecordAll === 'function') __navRecordAll(false); }catch(_){ }
+  if(!planningMode){
+    __SETCA_NAV_RECORD_ACC+=Math.min(dt,0.25);
+    if(__SETCA_NAV_RECORD_ACC>=0.1){
+      __SETCA_NAV_RECORD_ACC=0;
+      try{ if(typeof __navRecordAll === 'function') __navRecordAll(false); }catch(_){ }
+    }
+  }else __SETCA_NAV_RECORD_ACC=0;
 
 // Indicador GTC (botón verde/rojo) según contacto dentro de R y H
 try{
@@ -21764,7 +21775,6 @@ try{
   }
 }catch(e){}
 
-  try{ if(window.__SETCA_refreshAircraftVisibilityUI) window.__SETCA_refreshAircraftVisibilityUI(); }catch(_){ }
   const __liveState = st;
   const __delayActive = false;
   const __renderState = (__liveState.localPause && __liveState.pauseSnapshot)
@@ -21812,7 +21822,6 @@ try{
       const midX=(rA.x+rB.x)/2,midY=(rA.y+rB.y)/2;ctx.save();ctx.font='14px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace';ctx.textAlign='center';ctx.textBaseline='middle';const __rw=Math.max(92,ctx.measureText(lbl).width+16),__rh=22,__rx=midX-__rw/2,__ry=midY-31;ctx.fillStyle='rgba(1,10,6,.84)';ctx.fillRect(__rx,__ry,__rw,__rh);ctx.strokeStyle='rgba(46,231,79,.72)';ctx.lineWidth=1;ctx.strokeRect(__rx,__ry,__rw,__rh);ctx.fillStyle='#b9ffd0';ctx.fillText(lbl,midX,__ry+__rh/2);ctx.restore();
     }
     paintAlerts();
-    try{ __SETCA_drawRadarFailureOverlay && __SETCA_drawRadarFailureOverlay(); }catch(_){ }
   } finally {
     if(st !== __liveState) st = __liveState;
   }
@@ -34935,6 +34944,9 @@ import { getDatabase, ref, get, set } from "https://www.gstatic.com/firebasejs/1
   addEventListener('mouseup', function(e){
     if(!state.active) return;
     stopDrag(true);
+    // El gesto ya envía una única copia completa diferida; evitar el
+    // sincronizador global de mouseup que duplicaba esa misma escritura.
+    if(e) e.__setcaFastAircraftSync = true;
     if(e && e.preventDefault) e.preventDefault();
     if(e && e.stopImmediatePropagation) e.stopImmediatePropagation();
     else if(e && e.stopPropagation) e.stopPropagation();
