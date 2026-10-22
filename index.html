@@ -1265,6 +1265,18 @@
         payloadMissiles:Number.isFinite(+p.payloadMissiles)?+p.payloadMissiles:null,
         byClient:__setcaStateClientId,byRole:__SETCA_getSharedWriteRole()};
     }
+    // El reloj comparte el paquete ligero de vuelo: no vuelve a publicar
+    // ni a reconstruir la escena completa en los puestos de los alumnos.
+    const clockTeam=__SETCA_isExcsSharedRoom()
+      ? (byTeam.keys().next().value || 'white')
+      : String(window.__SETCA_getCurrentTeam()||'').toLowerCase();
+    if(['blue','red','white'].includes(clockTeam)){
+      if(!byTeam.has(clockTeam)) byTeam.set(clockTeam,{});
+      byTeam.get(clockTeam).__clock={elapsed:Number(st.elapsed)||0,paused:!!(st.serverPause&&st.serverPause.active),
+        atServer:serverTimestamp(),at:Date.now()+__setcaServerTimeOffsetMs,
+        byClient:__setcaStateClientId,byRole:__SETCA_getSharedWriteRole()};
+      if(!__SETCA_isExcsSharedRoom()) __setcaLastMotionTeamAt.set(clockTeam,Date.now()+__setcaServerTimeOffsetMs);
+    }
     for(const team of new Set([...__setcaLastMotionTeams,...byTeam.keys()])){
       set(ref(db,`rooms/${ROOM_ID}/aircraftMotion/${team}`),byTeam.get(team)||null)
         .catch(error=>console.warn('SETCA: error al enviar vuelos en vivo',error));
@@ -1272,6 +1284,26 @@
     __setcaLastMotionTeams=new Set(byTeam.keys());
     return true;
   };
+  function __SETCA_applyRoomClock(team,update){
+    if(!update || update.byClient===__setcaStateClientId || !window.st) return;
+    const excs=__SETCA_isExcsSharedRoom();
+    if(excs ? update.byRole!=='white' :
+       (update.byRole!=='default' || team!==String(window.__SETCA_getCurrentTeam()||'').toLowerCase())) return;
+    const at=Number(update.atServer ?? update.at), elapsed=Number(update.elapsed);
+    if(!Number.isFinite(at) || !Number.isFinite(elapsed) || elapsed<0) return;
+    if(Math.abs(Date.now()+__setcaServerTimeOffsetMs-at)>15000) return;
+    // La marca del servidor se resuelve al llegar el paquete (después de subirlo).
+    // El tiempo de vuelo fue muestreado al enviarlo: usar esa marca calibrada
+    // evita que el reloj del alumno quede atrasado por la subida a Firebase.
+    const sampledAt=Number(update.at);
+    const anchorAt=Number.isFinite(sampledAt) && Math.abs(at-sampledAt)<2000 ? sampledAt : at;
+    if(!excs) __setcaLastMotionTeamAt.set(team,Date.now()+__setcaServerTimeOffsetMs);
+    const previous=window.__SETCA_roomClock;
+    if(previous && at<previous.wireAt) return;
+    window.__SETCA_roomClock={elapsed,atServer:anchorAt,wireAt:at,offset:__setcaServerTimeOffsetMs,
+      paused:!!update.paused,receivedAt:Date.now()};
+    if(update.paused) st.elapsed=elapsed;
+  }
   function __SETCA_applyAircraftMotion(team,update){
     if(!window.st || !Array.isArray(st.planes) || !update || typeof update!=='object') return;
     if(!__SETCA_isExcsSharedRoom() && __setcaInstructorLocksReady && !__setcaTeamInstructorActive(team)) return;
@@ -1301,7 +1333,6 @@
     const excsPilot=__SETCA_isExcsSharedRoom() && !window.__SETCA_isExcsWhiteController() && __SETCA_getSharedWriteRole()==='default';
     if(firstSample || excsPilot || distance>Math.max(0.35,expected) || turnGap>Math.max(5,(Number(p.turn)||2)*(age+1))){
       for(const key of ['x','y','hdg','spd','alt']) if(Number.isFinite(+update[key])) p[key]=+update[key];
-      window.__SETCA_refreshPlaneVisualPosition(p);
     }
   }
 
@@ -1978,12 +2009,25 @@
 let __setcaLastAppliedRemoteTs = 0;
   let __setcaInstructorLocksReady = false;
   let __setcaInstructorLocks = {};
+  const __setcaInstructorLastActive = new Map();
+  const __setcaLastMotionTeamAt = new Map();
   let __setcaLastRawCloudState = null;
   let __setcaActiveInstructorTeams = null;
   function __setcaTeamInstructorActive(team){
     if(__SETCA_isExcsSharedRoom()) return true;
-    const lock=__setcaInstructorLocks[String(team||'').toLowerCase()];
-    return !!(lock && lock.callsign && Number(lock.expiresAt||0)>Date.now()+__setcaServerTimeOffsetMs);
+    const key=String(team||'').toLowerCase();
+    const lock=__setcaInstructorLocks[key];
+    if(!lock || !lock.callsign){
+      __setcaInstructorLastActive.delete(key);
+      __setcaLastMotionTeamAt.delete(key);
+      return false;
+    }
+    const now=Date.now()+__setcaServerTimeOffsetMs;
+    if(Number(lock.expiresAt||0)>now){ __setcaInstructorLastActive.set(key,now); return true; }
+    // Una renovación de presencia puede tardar más que el TTL durante una
+    // interrupción de red. No vaciar una sala activa por un único vencimiento.
+    return now-Number(__setcaInstructorLastActive.get(key)||0)<20000 ||
+      now-Number(__setcaLastMotionTeamAt.get(key)||0)<5000;
   }
   function __setcaFilterInactiveTeamState(source){
     if(__SETCA_isExcsSharedRoom() || !__setcaInstructorLocksReady || !source) return source;
@@ -2543,12 +2587,16 @@ let __setcaLastAppliedRemoteTs = 0;
       onChildAdded(livePlanesRef,receive);
       onChildChanged(livePlanesRef,receive);
       const motionRef=ref(db,`rooms/${ROOM_ID}/aircraftMotion/${team}`);
-      const receiveMotion=snap=>{
-        const update=snap.val();
-        if(update) __SETCA_applyAircraftMotion(team,update);
-      };
-      onChildAdded(motionRef,receiveMotion);
-      onChildChanged(motionRef,receiveMotion);
+      // Una notificación por paquete/equipo, no una por cada aeronave.
+      // El canal aircraftLive sí conserva eventos individuales e inmediatos.
+      onValue(motionRef,snap=>{
+        const rows=snap.val();
+        if(!rows || typeof rows!=='object') return;
+        if(rows.__clock) __SETCA_applyRoomClock(team,rows.__clock);
+        for(const [key,update] of Object.entries(rows)){
+          if(key!=='__clock' && update) __SETCA_applyAircraftMotion(team,update);
+        }
+      });
     }
     if(!__SETCA_isExcsSharedRoom()){
       const refreshInstructorTeams=()=>{
@@ -13241,6 +13289,7 @@ function __toggleInstructorServerPause(){
       ? window.__SETCA_noteServerPauseChange()
       : (st.serverPauseChangedAt = Date.now());
     __setLocalPauseUI();
+    try{ window.__SETCA_publishAircraftMotion && window.__SETCA_publishAircraftMotion(); }catch(_){ }
     try{
       if(typeof window.__SETCA_publishServerPauseNow === 'function'){
         Promise.resolve(window.__SETCA_publishServerPauseNow(__SETCA_isServerPaused(), pauseChangedAt))
@@ -21833,6 +21882,14 @@ function loop(ts){
   window.__SETCA_replicaMotionRunning=!authHost && !excsPilotWriter && !planningMode && !serverPaused && !st.localPause && !window.__SETCA_SCENE_LOADING;
   if(excsSession && st.excsClock){
     st.elapsed=Number(st.excsClock.elapsed||0)+(serverPaused?0:Math.max(0,Date.now()-Number(st.excsClock.startedAt||Date.now())));
+    st.t0=performance.now()-st.elapsed;
+  }
+  // Los puestos no autoritativos mantienen el mismo reloj del instructor
+  // usando la marca del servidor; la pausa congela la muestra ya visible.
+  if(!authHost && !planningMode && window.__SETCA_roomClock){
+    const clock=window.__SETCA_roomClock;
+    const age=(serverPaused||clock.paused) ? 0 : Math.max(0,Math.min(15000,Date.now()+clock.offset-clock.atServer));
+    st.elapsed=clock.elapsed+age;
     st.t0=performance.now()-st.elapsed;
   }
   if(!planningMode && !serverPaused){
@@ -32628,6 +32685,7 @@ import { getAuth } from "https://www.gstatic.com/firebasejs/10.12.3/firebase-aut
         st.globalStarted = !paused;
         st.excsClock = {elapsed,startedAt:now};
         st.paused = false;
+        st.elapsed = elapsed;
         if(st.localPause){
           st.localPause = false;
           try{ if(typeof __clearLocalPauseSnapshot === 'function') __clearLocalPauseSnapshot(); }catch(_){ }
@@ -32636,6 +32694,7 @@ import { getAuth } from "https://www.gstatic.com/firebasejs/10.12.3/firebase-aut
           try{ st.t0 = performance.now() - (Number(st.elapsed || 0) || 0); }catch(_){ }
         }
         if(typeof __setLocalPauseUI === 'function') __setLocalPauseUI();
+        try{ window.__SETCA_publishAircraftMotion && window.__SETCA_publishAircraftMotion(); }catch(_){ }
       }
     }catch(_){ }
     const result = await runTransaction(ref(db, `rooms/${EXCS_ROOM_ID}/state`), current=>{
