@@ -2688,22 +2688,13 @@ let __setcaLastAppliedRemoteTs = 0;
   })();
 </script>
 <script>
-(function(){
-  const __setcaNormalizeMissileStatsImpl = function(src){
-    const raw = (src && typeof src === 'object') ? src : {};
-    const aircraft = Number.isFinite(+raw.aircraft) ? Math.max(0, (+raw.aircraft|0)) : 0;
-    const dart = Number.isFinite(+raw.dart) ? Math.max(0, (+raw.dart|0)) : 0;
-    return { aircraft, dart };
-  };
-  window.__normalizeMissileStats = __setcaNormalizeMissileStatsImpl;
-  window.__SETCA_normalizeMissileStats = __setcaNormalizeMissileStatsImpl;
-})();
 function __normalizeMissileStats(src){
   const raw = (src && typeof src === 'object') ? src : {};
   const aircraft = Number.isFinite(+raw.aircraft) ? Math.max(0, (+raw.aircraft|0)) : 0;
   const dart = Number.isFinite(+raw.dart) ? Math.max(0, (+raw.dart|0)) : 0;
   return { aircraft, dart };
 }
+window.__SETCA_normalizeMissileStats = __normalizeMissileStats;
 </script>
 
  <style>
@@ -21188,6 +21179,13 @@ function repaintVuelos(){
   wrap.appendChild(table);
 }
 
+function __SETCA_repaintManeuverPanels(){
+  // repaintNav ya actualiza VUELOS: no reconstruirlo dos veces por orden.
+  try{ repaintNav(); }catch(_){ }
+  try{ repaintPlanesList(); }catch(_){ }
+  try{ repaintAlt(); }catch(_){ }
+  try{ repaintPairs(); }catch(_){ }
+}
 function repaintNav(){
   repaintVuelos();
   const wrap=$('#navCards');
@@ -21300,9 +21298,9 @@ function repaintNav(){
     c.querySelectorAll('button[data-hdg]').forEach(btn=>{
       btn.onclick = ()=>{
         const delta = parseFloat(btn.getAttribute('data-hdg')) || 0;
-        __SETCA_setCommandHdg(p, (Number(p.tgtHdg) || 0) + delta);
+        __SETCA_setCommandHdg(p, (Number(p.tgtHdg) || 0) + delta, false);
         repaintNav();
-        __SETCA_pushInstructorCommandNow();
+        __SETCA_pushInstructorCommandNow(p,{tgtHdg:p.tgtHdg});
       };
     });
 
@@ -21316,7 +21314,7 @@ function repaintNav(){
         p.turnBias = (p.turnBias===b) ? null : b;
         try{ if(window.__SETCA_markAircraftDirty) window.__SETCA_markAircraftDirty(p); }catch(_){ }
         repaintNav();
-        __SETCA_pushInstructorCommandNow();
+        __SETCA_pushInstructorCommandNow(p,{turnBias:p.turnBias});
       };
     });
 
@@ -21328,15 +21326,9 @@ function repaintNav(){
         const base = Number.isFinite(+p.tgtSpd) ? +p.tgtSpd : (+p.spd || 0);
         const next = Math.max(0, base + cambio);
         if(__SETCA_routeAircraftPatchToInstructor(p, {tgtSpd:next}, 'speed')){ repaintNav(); return; }
-        p.tgtSpd = next;
-        if(!Number.isFinite(+p.spd)) p.spd = next;
-        try{ if(window.__SETCA_markAircraftDirty) window.__SETCA_markAircraftDirty(p); }catch(_){ }
-        try{ if(typeof repaintVuelos==='function') repaintVuelos(); }catch(_){ }
-        try{ if(typeof repaintPlanesList==='function') repaintPlanesList(); }catch(_){ }
-        try{ if(typeof repaintNav==='function') repaintNav(); }catch(_){ }
-        try{ if(typeof repaintAlt==='function') repaintAlt(); }catch(_){ }
-        try{ if(typeof repaintPairs==='function') repaintPairs(); }catch(_){ }
-        try{ __SETCA_pushInstructorCommandNow(); }catch(_){ }
+        __SETCA_setCommandSpd(p,next,false);
+        __SETCA_repaintManeuverPanels();
+        try{ __SETCA_pushInstructorCommandNow(p,{tgtSpd:p.tgtSpd}); }catch(_){ }
       };
     });
 
@@ -21347,13 +21339,9 @@ function repaintNav(){
         const cambio = st.metric ? (delta / FT2M) : delta;
         const base = Number.isFinite(+p.tgtAlt) ? +p.tgtAlt : (+p.alt || 0);
         const next = Math.max(0, base + cambio);
-        __SETCA_setCommandAlt(p, next);
-        try{ if(typeof repaintVuelos==='function') repaintVuelos(); }catch(_){ }
-        try{ if(typeof repaintPlanesList==='function') repaintPlanesList(); }catch(_){ }
-        try{ if(typeof repaintNav==='function') repaintNav(); }catch(_){ }
-        try{ if(typeof repaintAlt==='function') repaintAlt(); }catch(_){ }
-        try{ if(typeof repaintPairs==='function') repaintPairs(); }catch(_){ }
-        try{ __SETCA_pushInstructorCommandNow(); }catch(_){ }
+        __SETCA_setCommandAlt(p, next, false);
+        __SETCA_repaintManeuverPanels();
+        try{ __SETCA_pushInstructorCommandNow(p,{tgtAlt:p.tgtAlt}); }catch(_){ }
       };
     });
 
@@ -21366,38 +21354,28 @@ function repaintNav(){
         p.turn = nextTurn;
         try{ if(window.__SETCA_markAircraftDirty) window.__SETCA_markAircraftDirty(p); }catch(_){ }
         repaintNav();
-        __SETCA_pushInstructorCommandNow();
+        __SETCA_pushInstructorCommandNow(p,{turn:p.turn});
       };
     });
 
     // Cambios manuales en campos
-    c.querySelector('#hdg-'+id).onchange = e => { __SETCA_setCommandHdg(p, parseFloat(e.target.value) || 0); repaintNav(); __SETCA_pushInstructorCommandNow(); };
+    c.querySelector('#hdg-'+id).onchange = e => { __SETCA_setCommandHdg(p, parseFloat(e.target.value) || 0, false); repaintNav(); __SETCA_pushInstructorCommandNow(p,{tgtHdg:p.tgtHdg}); };
     c.querySelector('#spd-'+id).onchange = e => {
       const val = +e.target.value || 0;
       const next = st.metric ? val : val * KTS2KMH;
       if(__SETCA_routeAircraftPatchToInstructor(p, {tgtSpd:Math.max(0, next)}, 'speed')){ repaintNav(); return; }
-      p.tgtSpd = Math.max(0, next);
-      if(!Number.isFinite(+p.spd)) p.spd = Math.max(0, next);
-      try{ if(window.__SETCA_markAircraftDirty) window.__SETCA_markAircraftDirty(p); }catch(_){ }
-      try{ if(typeof repaintVuelos==='function') repaintVuelos(); }catch(_){ }
-      try{ if(typeof repaintPlanesList==='function') repaintPlanesList(); }catch(_){ }
-      try{ if(typeof repaintNav==='function') repaintNav(); }catch(_){ }
-      try{ if(typeof repaintAlt==='function') repaintAlt(); }catch(_){ }
-      try{ if(typeof repaintPairs==='function') repaintPairs(); }catch(_){ }
-      try{ __SETCA_pushInstructorCommandNow(); }catch(_){ }
+      __SETCA_setCommandSpd(p,Math.max(0,next),false);
+      __SETCA_repaintManeuverPanels();
+      try{ __SETCA_pushInstructorCommandNow(p,{tgtSpd:p.tgtSpd}); }catch(_){ }
     };
     c.querySelector('#alt-'+id).onchange = e => {
       const val = +e.target.value || 0;
       const next = st.metric ? (val / FT2M) : val;
-      __SETCA_setCommandAlt(p, next);
-      try{ if(typeof repaintVuelos==='function') repaintVuelos(); }catch(_){ }
-      try{ if(typeof repaintPlanesList==='function') repaintPlanesList(); }catch(_){ }
-      try{ if(typeof repaintNav==='function') repaintNav(); }catch(_){ }
-      try{ if(typeof repaintAlt==='function') repaintAlt(); }catch(_){ }
-      try{ if(typeof repaintPairs==='function') repaintPairs(); }catch(_){ }
-      try{ __SETCA_pushInstructorCommandNow(); }catch(_){ }
+      __SETCA_setCommandAlt(p, next, false);
+      __SETCA_repaintManeuverPanels();
+      try{ __SETCA_pushInstructorCommandNow(p,{tgtAlt:p.tgtAlt}); }catch(_){ }
     };
-    c.querySelector('#tr-'+id).onchange = e => { const nextTurn = +e.target.value || 2; if(__SETCA_routeAircraftPatchToInstructor(p, {turn:nextTurn}, 'turn-rate')){ repaintNav(); return; } p.turn = nextTurn; try{ if(window.__SETCA_markAircraftDirty) window.__SETCA_markAircraftDirty(p); }catch(_){ } __SETCA_pushInstructorCommandNow(); };
+    c.querySelector('#tr-'+id).onchange = e => { const nextTurn = +e.target.value || 2; if(__SETCA_routeAircraftPatchToInstructor(p, {turn:nextTurn}, 'turn-rate')){ repaintNav(); return; } p.turn = nextTurn; try{ if(window.__SETCA_markAircraftDirty) window.__SETCA_markAircraftDirty(p); }catch(_){ } __SETCA_pushInstructorCommandNow(p,{turn:p.turn}); };
 
     // Rol (estado global)
     const role=c.querySelector('#role-'+id); 
@@ -21454,8 +21432,6 @@ function repaintNav(){
       flash(ev.currentTarget);
     });
   });
-  try{ if(window.__saveLocalDrawingsSoon) window.__saveLocalDrawingsSoon(); }catch(_){}
-  try{ if(window.renderDrawingScopePanel) window.renderDrawingScopePanel(); }catch(_){}
 }
 function repaintStudent(){
   const box=$('#studentInfo');
@@ -21481,19 +21457,21 @@ function __SETCA_isLocalPlanningLike(){
 function __SETCA_isImmediatePlanningMode(){
   try{ return !!(window.__SETCA_isPlanningMode && window.__SETCA_isPlanningMode()); }catch(_){ return false; }
 }
-function __SETCA_pushInstructorCommandNow(){
+function __SETCA_pushInstructorCommandNow(plane=null,livePatch=null){
   try{
     if(__SETCA_isLocalPlanningLike()) return false;
-    // Publicar solo los campos de maniobra del avión seleccionado por el
-    // canal ligero; la transacción completa permanece como respaldo.
-    for(const id of (Array.isArray(st.sel)?st.sel:[])){
-      const p=(st.planes||[]).find(p=>p && String(p.id)===String(id));
+    if(window.__SETCA_shouldRouteAircraftCommand && window.__SETCA_shouldRouteAircraftCommand()) return false;
+    // Una orden concreta sale una sola vez y solo para su avión; el estado
+    // completo permanece como respaldo para los demás datos de la escena.
+    const targets=plane?[plane]:(Array.isArray(st.sel)?st.sel:[]).map(id=>(st.planes||[]).find(p=>p && String(p.id)===String(id)));
+    for(const p of targets){
       if(p && window.__SETCA_publishAircraftLive) window.__SETCA_publishAircraftLive(p,{
-        tgtHdg:p.tgtHdg,tgtSpd:p.tgtSpd,tgtAlt:p.tgtAlt,turn:p.turn,turnBias:p.turnBias
+        ...(livePatch || {tgtHdg:p.tgtHdg,tgtSpd:p.tgtSpd,tgtAlt:p.tgtAlt,turn:p.turn,turnBias:p.turnBias})
       });
     }
     // Rumbo, velocidad y altitud son órdenes discretas: no esperar al ciclo
     // periódico de publicación, que añadía aproximadamente un segundo.
+    if(typeof window.flushSync === 'function') return window.flushSync();
     if(window._SETCA_SYNC && typeof window._SETCA_SYNC.pushNow === 'function') return window._SETCA_SYNC.pushNow();
     if(window._SETCA_SYNC && typeof window._SETCA_SYNC.push === 'function') return window._SETCA_SYNC.push();
     if(typeof scheduleSync === 'function') return scheduleSync(0);
@@ -21536,7 +21514,7 @@ function __SETCA_setCommandHdg(p, value, publishLive=true){
   }
   return hdg;
 }
-function __SETCA_setCommandSpd(p, value){
+function __SETCA_setCommandSpd(p, value, publishLive=true){
   if(!p) return 0;
   if(!window.__SETCA_isOwnTeam(p)) return Number(p.spd) || 0;
   const spd = Math.max(0, Number(value) || 0);
@@ -21548,7 +21526,7 @@ function __SETCA_setCommandSpd(p, value){
   }
   p.tgtSpd = spd;
   try{ if(window.__SETCA_markAircraftDirty) window.__SETCA_markAircraftDirty(p); }catch(_){ }
-  try{ if(window.__SETCA_publishAircraftLive) window.__SETCA_publishAircraftLive(p,{tgtSpd:spd}); }catch(_){ }
+  if(publishLive) try{ if(window.__SETCA_publishAircraftLive) window.__SETCA_publishAircraftLive(p,{tgtSpd:spd}); }catch(_){ }
   if(__SETCA_isImmediatePlanningMode()){
     p.spd = spd;
     p.speedRateKmhps = 0;
@@ -21557,7 +21535,7 @@ function __SETCA_setCommandSpd(p, value){
   }
   return spd;
 }
-function __SETCA_setCommandAlt(p, value){
+function __SETCA_setCommandAlt(p, value, publishLive=true){
   if(!p) return 0;
   if(!window.__SETCA_isOwnTeam(p)) return Number(p.alt) || 0;
   const alt = Math.max(0, Number(value) || 0);
@@ -21569,7 +21547,7 @@ function __SETCA_setCommandAlt(p, value){
   }
   p.tgtAlt = alt;
   try{ if(window.__SETCA_markAircraftDirty) window.__SETCA_markAircraftDirty(p); }catch(_){ }
-  try{ if(window.__SETCA_publishAircraftLive) window.__SETCA_publishAircraftLive(p,{tgtAlt:alt}); }catch(_){ }
+  if(publishLive) try{ if(window.__SETCA_publishAircraftLive) window.__SETCA_publishAircraftLive(p,{tgtAlt:alt}); }catch(_){ }
   if(__SETCA_isImmediatePlanningMode()){
     p.alt = alt;
     p.vsFpm = 0;
@@ -22880,6 +22858,9 @@ requestAnimationFrame(()=>{ repaintPlanesList(); repaintNav(); repaintStudent();
   function __setcaPushNow(){
     if(!__SETCA_canUseSharedSync()) return false;
     try{
+      // El pulso de 1 s no debe volver a enviar el mismo estado que acaba
+      // de salir por una orden inmediata.
+      __setcaLastSharedSig = __SETCA_sharedStateSignature();
       if(window._SETCA_SYNC && typeof window._SETCA_SYNC.pushNow === 'function') return window._SETCA_SYNC.pushNow();
       if(window._SETCA_SYNC && typeof window._SETCA_SYNC.push === 'function') return window._SETCA_SYNC.push();
     }catch(e){}
@@ -23007,8 +22988,16 @@ requestAnimationFrame(()=>{ repaintPlanesList(); repaintNav(); repaintStudent();
     }
   });
 
-  // Cuando se suelta el mouse (mover aviones o dibujos)
-  addEventListener('mouseup', e=>{ if(!e.__setcaFastAircraftSync) scheduleSync(__SETCA_SYNC_DEBOUNCE_MS); }, {passive:true});
+  // Solo un gesto iniciado en el radar puede necesitar este respaldo general.
+  // Un mouseup sobre botones o paneles no es otra orden de sincronización.
+  let __setcaRadarMouseDown = false;
+  addEventListener('mousedown', e=>{ __setcaRadarMouseDown = !!(e.target && e.target.id === 'radar'); }, true);
+  addEventListener('mouseup', e=>{
+    const wasRadarGesture = __setcaRadarMouseDown;
+    __setcaRadarMouseDown = false;
+    if(wasRadarGesture && !e.__setcaFastAircraftSync) scheduleSync(__SETCA_SYNC_DEBOUNCE_MS);
+  }, {passive:true});
+  addEventListener('blur', ()=>{ __setcaRadarMouseDown = false; });
 
   // ENTER en navegación/vuelos => aplicar change y FLUSH inmediato
   addEventListener('keydown', (e)=>{
@@ -23029,7 +23018,8 @@ requestAnimationFrame(()=>{ repaintPlanesList(); repaintNav(); repaintStudent();
         // forzar onchange (en algunos navegadores Enter no dispara change)
         t.dispatchEvent(new Event('change', {bubbles:true}));
       }catch(_){}
-      flushSync();
+      // Los controles de maniobra ya hicieron su envío inmediato en onchange.
+      if(!/^(hdg|spd|alt|tr)-/.test(id)) flushSync();
     }
   }, true);
 
@@ -23054,6 +23044,7 @@ requestAnimationFrame(()=>{ repaintPlanesList(); repaintNav(); repaintStudent();
   addEventListener('input', (e)=>{
     const t = e.target;
     if(!__setcaAffectsSharedState(t)) return;
+    if(/^(hdg|spd|alt|tr)-/.test(t.id || '')) return;
     // Esperar al final del tick por si otro handler actualiza el estado primero
     setTimeout(()=>scheduleSync(__SETCA_SYNC_INPUT_MS), 0);
   }, true);
@@ -23062,6 +23053,7 @@ requestAnimationFrame(()=>{ repaintPlanesList(); repaintNav(); repaintStudent();
   addEventListener('change', (e)=>{
     const t = e.target;
     if(!__setcaAffectsSharedState(t)) return;
+    if(/^(hdg|spd|alt|tr)-/.test(t.id || '')) return;
     setTimeout(()=>scheduleSync(__SETCA_SYNC_CHANGE_MS), 0);
   }, true);
 
@@ -23070,7 +23062,7 @@ requestAnimationFrame(()=>{ repaintPlanesList(); repaintNav(); repaintStudent();
     const btn = e.target && e.target.closest ? e.target.closest('#navCards button, #vuelosList button') : null;
     if(!btn) return;
     // Solo los botones con data- (los que realmente cambian estado compartido)
-    if(btn.matches('[data-hdg],[data-spd],[data-alt],[data-turn],[data-bias],[data-m]')){
+    if(btn.matches('[data-m]')){
       setTimeout(()=>scheduleSync(__SETCA_SYNC_CLICK_MS), 0);
     }
   }, true);
