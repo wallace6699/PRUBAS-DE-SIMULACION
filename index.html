@@ -253,7 +253,7 @@
 <script type="module">
   import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.3/firebase-app.js";
   import { getAuth, signInAnonymously, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/10.12.3/firebase-auth.js";
-  import { getDatabase, ref, onValue, onChildAdded, set, get, onDisconnect, serverTimestamp, runTransaction } from "https://www.gstatic.com/firebasejs/10.12.3/firebase-database.js";
+  import { getDatabase, ref, onValue, onChildAdded, onChildChanged, set, get, onDisconnect, serverTimestamp, runTransaction } from "https://www.gstatic.com/firebasejs/10.12.3/firebase-database.js";
 
   const firebaseConfig = {
   apiKey: "AIzaSyDy2QgqmWWJD1LjNCB2RcF6KU3PeLzkYlY",
@@ -275,7 +275,7 @@
   }
   const ROOM_ID = getRoomId();
   const stateRef = ref(db, `rooms/${ROOM_ID}/state`);
-  const aircraftLiveRef = ref(db, `rooms/${ROOM_ID}/aircraftLive`);
+  const instructorLocksRef = ref(db, `rooms/${ROOM_ID}/instructorLocks`);
   const ordersRef = ref(db, `rooms/${ROOM_ID}/orders`);
   const gtcValidationRef = ref(db, `rooms/${ROOM_ID}/gtcValidation`);
   const gtcRuntimeRef = ref(db, `rooms/${ROOM_ID}/gtcRuntime`);
@@ -697,6 +697,14 @@
         setTimeout(()=>__SETCA_applyGlobalGtcLaunch(event), 250);
         return false;
       }
+      if(!__SETCA_isExcsSharedRoom()){
+        if(!__setcaInstructorLocksReady){ setTimeout(()=>__SETCA_queueGlobalGtcLaunch(event),250); return false; }
+        const team=window.__SETCA_entityTeam(event.missile);
+        if(!__setcaTeamInstructorActive(team)) return false;
+        const sessionSince=Number(__setcaInstructorLocks[team]?.since||0);
+        const eventAt=Number(event.serverAt||event.publishedAt||0);
+        if(sessionSince && eventAt && eventAt<sessionSince) return false;
+      }
       const missileId = String(event.missileId || event.missile.id || '').trim();
       if(!missileId || String(event.sourceClientId || '') === __setcaGtcClientId) return false;
       const ttlMs = Math.max(30000, Math.min(900000, Number(event.ttlMs || 240000) || 240000));
@@ -909,6 +917,14 @@
       }
       if(String(event.sourceClientId || '') === __setcaGtcClientId) return false;
       if(String(event.byRole || '').toLowerCase() !== 'default') return false;
+      if(!__SETCA_isExcsSharedRoom()){
+        if(!__setcaInstructorLocksReady){ setTimeout(()=>__SETCA_queueAircraftAdded(event),250); return false; }
+        const team=window.__SETCA_entityTeam(event.plane);
+        if(!__setcaTeamInstructorActive(team)) return false;
+        const sessionSince=Number(__setcaInstructorLocks[team]?.since||0);
+        const eventAt=Number(event.serverAt||event.publishedAt||0);
+        if(sessionSince && eventAt && eventAt<sessionSince) return false;
+      }
       const planeId = String(event.planeId || event.plane.id || '').trim();
       if(!planeId || __setcaAppliedAircraftAddIds.has(planeId)) return false;
       const ttlMs = Math.max(10000, Math.min(180000, Number(event.ttlMs || __SETCA_AIRCRAFT_ADD_TTL_MS) || __SETCA_AIRCRAFT_ADD_TTL_MS));
@@ -1156,7 +1172,7 @@
       // Firebase elimina propiedades null: usar cadena vacía en el mensaje
       // para que "quitar sesgo" no deje vigente el giro anterior.
       if(key==='turnBias') clean[key]=patch[key]==='L'||patch[key]==='R'?patch[key]:'';
-      else if(Number.isFinite(Number(patch[key]))) clean[key]=Number(patch[key]);
+      else if(patch[key]!==null && patch[key]!=='' && Number.isFinite(Number(patch[key]))) clean[key]=Number(patch[key]);
     }
     return clean;
   }
@@ -1165,10 +1181,14 @@
     if(!__setcaLivePending.size) return;
     __setcaLiveLastSendAt=Date.now();
     for(const [team,items] of __setcaLivePending){
-      const updates=Array.from(items.values());
-      if(updates.length) set(ref(db,`rooms/${ROOM_ID}/aircraftLive/${team}`),{
-        updates,at:serverTimestamp(),byClient:__setcaStateClientId,byRole:__SETCA_getSharedWriteRole()
-      }).catch(error=>console.warn('SETCA: error al enviar movimiento en vivo',error));
+      for(const update of items.values()){
+        // Cada avión conserva su última orden en su propia ruta. Un segundo
+        // CTRL+click sobre otro avión ya no puede reemplazar el primer giro.
+        const key=encodeURIComponent(update.id).replace(/[.#$\[\]/]/g,ch=>'%'+ch.charCodeAt(0).toString(16).toUpperCase());
+        set(ref(db,`rooms/${ROOM_ID}/aircraftLive/${team}/planes/${key}`),{
+          ...update,atServer:serverTimestamp(),byClient:__setcaStateClientId,byRole:__SETCA_getSharedWriteRole()
+        }).catch(error=>console.warn('SETCA: error al enviar movimiento en vivo',error));
+      }
     }
     __setcaLivePending.clear();
   }
@@ -1191,36 +1211,31 @@
     else if(!__setcaLiveTimer) __setcaLiveTimer=setTimeout(__SETCA_flushAircraftLive,wait);
     return true;
   };
-  function __SETCA_applyAircraftLive(raw){
-    if(!window.st || !Array.isArray(st.planes) || !raw || typeof raw!=='object') return;
-    let commandChanged=false;
-    for(const [team,batch] of Object.entries(raw)){
-      if(!batch || batch.byClient===__setcaStateClientId ||
-        !(['default'].includes(batch.byRole) || (__SETCA_isExcsSharedRoom() && batch.byRole==='white'))) continue;
-      const age=(Date.now()+__setcaServerTimeOffsetMs)-Number(batch.at);
-      if(Number.isFinite(age) && age>15000) continue;
-      for(const update of (Array.isArray(batch.updates)?batch.updates:[])){
-        const id=String(update && update.id || '');
-        const at=Number(update && update.at || 0);
-        if(!id || !Number.isFinite(at) || at<=0) continue;
-        const p=st.planes.find(p=>p && String(p.id)===id);
-        if(!p || String(window.__SETCA_entityTeam(p)||'').toLowerCase()!==team) continue;
-        if(at<=Math.max(Number(p.__liveAt)||0,Number(__setcaLiveRecent.get(id)?.at)||0)) continue;
-        const patch=__SETCA_cleanLivePatch(update.patch);
-        if(!Object.keys(patch).length) continue;
-        if(Object.prototype.hasOwnProperty.call(patch,'turnBias') && patch.turnBias==='') patch.turnBias=null;
-        Object.assign(p,patch);
-        p.__liveAt=at;
-        p.__cmdAt=Math.max(Number(p.__cmdAt)||0,at);
-        __setcaLiveRecent.set(id,{at,patch,receivedAt:Date.now()});
-        __setcaExcsRenderMotion.delete(id);
-        __setcaVisualPlaneSamples.delete(id);
-        if(Object.prototype.hasOwnProperty.call(patch,'x') || Object.prototype.hasOwnProperty.call(patch,'y'))
-          window.__SETCA_refreshPlaneVisualPosition(p);
-        if(Object.keys(patch).some(key=>key!=='x'&&key!=='y')) commandChanged=true;
-      }
-    }
-    if(commandChanged) __setcaSchedulePlanePanelRefresh(80,false);
+  function __SETCA_applyAircraftLive(team,update){
+    if(!window.st || !Array.isArray(st.planes) || !update || typeof update!=='object') return;
+    if(!__SETCA_isExcsSharedRoom() && __setcaInstructorLocksReady && !__setcaTeamInstructorActive(team)) return;
+    if(update.byClient===__setcaStateClientId ||
+      !(update.byRole==='default' || (__SETCA_isExcsSharedRoom() && update.byRole==='white'))) return;
+    const age=(Date.now()+__setcaServerTimeOffsetMs)-Number(update.atServer ?? update.at);
+    if(Number.isFinite(age) && age>15000) return;
+    const id=String(update.id||'');
+    const at=Number(update.at||0);
+    if(!id || !Number.isFinite(at) || at<=0) return;
+    const p=st.planes.find(p=>p && String(p.id)===id);
+    if(!p || String(window.__SETCA_entityTeam(p)||'').toLowerCase()!==team) return;
+    if(at<=Math.max(Number(p.__liveAt)||0,Number(__setcaLiveRecent.get(id)?.at)||0)) return;
+    const patch=__SETCA_cleanLivePatch(update.patch);
+    if(!Object.keys(patch).length) return;
+    if(Object.prototype.hasOwnProperty.call(patch,'turnBias') && patch.turnBias==='') patch.turnBias=null;
+    Object.assign(p,patch);
+    p.__liveAt=at;
+    p.__cmdAt=Math.max(Number(p.__cmdAt)||0,at);
+    __setcaLiveRecent.set(id,{at,patch,receivedAt:Date.now()});
+    __setcaExcsRenderMotion.delete(id);
+    __setcaVisualPlaneSamples.delete(id);
+    if(Object.prototype.hasOwnProperty.call(patch,'x') || Object.prototype.hasOwnProperty.call(patch,'y'))
+      window.__SETCA_refreshPlaneVisualPosition(p);
+    if(Object.keys(patch).some(key=>key!=='x'&&key!=='y')) __setcaSchedulePlanePanelRefresh(80,false);
   }
 
   function __setcaPlaneCmdAt(p){
@@ -1894,6 +1909,35 @@
 
 
 let __setcaLastAppliedRemoteTs = 0;
+  let __setcaInstructorLocksReady = false;
+  let __setcaInstructorLocks = {};
+  let __setcaLastRawCloudState = null;
+  let __setcaActiveInstructorTeams = null;
+  function __setcaTeamInstructorActive(team){
+    if(__SETCA_isExcsSharedRoom()) return true;
+    const lock=__setcaInstructorLocks[String(team||'').toLowerCase()];
+    return !!(lock && lock.callsign && Number(lock.expiresAt||0)>Date.now()+__setcaServerTimeOffsetMs);
+  }
+  function __setcaFilterInactiveTeamState(source){
+    if(__SETCA_isExcsSharedRoom() || !__setcaInstructorLocksReady || !source) return source;
+    const filtered={...source};
+    const keys=['planes','gtc','drawings','pairs','missiles','impactMarks'];
+    for(const key of keys){
+      const items=Array.isArray(source[key])?source[key]:Object.values(source[key]||{});
+      filtered[key]=items.filter(item=>item && __setcaTeamInstructorActive(window.__SETCA_entityTeam(item)));
+    }
+    const ids=new Set(filtered.planes.map(p=>String(p.id||'')));
+    filtered.roles=Object.fromEntries(Object.entries(source.roles||{}).filter(([id])=>ids.has(String(id))));
+    const contingencies=source.contingencies && typeof source.contingencies==='object' ? source.contingencies : {};
+    filtered.contingencies={
+      ...contingencies,
+      delayLag:Object.fromEntries(Object.entries(contingencies.delayLag||{}).filter(([id])=>ids.has(String(id)))),
+      fadeLost:Object.fromEntries(Object.entries(contingencies.fadeLost||{}).filter(([id])=>ids.has(String(id)))),
+      fakePlots:Object.fromEntries(Object.entries(contingencies.fakePlots||{}).filter(([team])=>__setcaTeamInstructorActive(team)))
+    };
+    if(!__setcaTeamInstructorActive('blue') && !__setcaTeamInstructorActive('red')) filtered.serverPause=null;
+    return filtered;
+  }
 
   function __setcaSafeJson(value){
     try{ return JSON.stringify(value); }catch(_){ return String(value); }
@@ -1978,6 +2022,10 @@ let __setcaLastAppliedRemoteTs = 0;
   function applyCloudState(v, opts={}) {
     if (!v) return false;
     try {
+      if(!__SETCA_isExcsSharedRoom()){
+        if(!__setcaInstructorLocksReady) return false;
+        v=__setcaFilterInactiveTeamState(v);
+      }
       const remoteStamp = Number(v.lastUpdate || 0);
       const force = !!(opts && opts.force);
       if(window.__SETCA_SCENE_LOADING && !force) return false;
@@ -2385,25 +2433,65 @@ let __setcaLastAppliedRemoteTs = 0;
 
   const __SETCA_REMOTE_APPLY_DELAY_MS = (__SETCA_SYNC_STAGING && __SETCA_SYNC_STAGING.remoteApplyMs) || 24;
   let __setcaRemoteStateQueued = null;
+  let __setcaRemoteStateForce = false;
   let __setcaRemoteApplyTimer = null;
 
-  function __scheduleRemoteStateApply(v){
+  function __scheduleRemoteStateApply(v,force=false){
     __setcaRemoteStateQueued = v;
+    __setcaRemoteStateForce = __setcaRemoteStateForce || force;
     if(__setcaRemoteApplyTimer) return;
     __setcaRemoteApplyTimer = setTimeout(()=>{
       __setcaRemoteApplyTimer = null;
       const next = __setcaRemoteStateQueued;
+      const applyForce = __setcaRemoteStateForce;
       __setcaRemoteStateQueued = null;
-      if(next) requestAnimationFrame(()=>applyCloudState(next));
+      __setcaRemoteStateForce = false;
+      if(next) requestAnimationFrame(()=>applyCloudState(next,{force:applyForce}));
     }, __SETCA_REMOTE_APPLY_DELAY_MS);
   }
 
   if(!__localOnlyMode){
-    onValue(aircraftLiveRef,snap=>__SETCA_applyAircraftLive(snap.val()));
+    // Escuchar solo el avión que cambió evita reconstruir el lote entero
+    // cuando el instructor ordena varios giros consecutivos.
+    for(const team of ['blue','red','white']){
+      const livePlanesRef=ref(db,`rooms/${ROOM_ID}/aircraftLive/${team}/planes`);
+      const receive=snap=>{
+        const update=snap.val();
+        if(update) __SETCA_applyAircraftLive(team,update);
+      };
+      onChildAdded(livePlanesRef,receive);
+      onChildChanged(livePlanesRef,receive);
+    }
+    if(!__SETCA_isExcsSharedRoom()){
+      const refreshInstructorTeams=()=>{
+        if(!__setcaInstructorLocksReady) return;
+        const active=['blue','red'].filter(__setcaTeamInstructorActive).join(',');
+        if(active===__setcaActiveInstructorTeams) return;
+        __setcaActiveInstructorTeams=active;
+        // Si un instructor se fue o expiró, quitar sus objetos locales ya;
+        // no esperar a la siguiente escritura de la escena compartida.
+        (st.planes||[]).forEach(p=>{
+          if(p && !__setcaTeamInstructorActive(window.__SETCA_entityTeam(p))){
+            const id=String(p.id||'');
+            __setcaPendingAircraftFallbackUntil.delete(id);
+            __setcaLiveRecent.delete(id);
+            __setcaVisualPlaneSamples.delete(id);
+          }
+        });
+        if(__setcaLastRawCloudState) __scheduleRemoteStateApply(__setcaLastRawCloudState,true);
+      };
+      onValue(instructorLocksRef,snap=>{
+        __setcaInstructorLocks=snap.val()||{};
+        __setcaInstructorLocksReady=true;
+        refreshInstructorTeams();
+      },error=>console.warn('SETCA: no se pudo leer presencia de instructores',error));
+      setInterval(refreshInstructorTeams,1000);
+    }
     onValue(stateRef, (snap) => {
-      const v = snap.val();
+      const v = snap.val() || {};
+      __setcaLastRawCloudState=v;
       __setcaStateHydrated = true;
-      if (!v) return;
+      if(!__SETCA_isExcsSharedRoom() && !__setcaInstructorLocksReady) return;
       if(v.lastWriteClient === __setcaStateClientId){
         const remotePaused = !!(v.serverPause && v.serverPause.active);
         const localPaused = !!(window.st && st.serverPause && st.serverPause.active);
@@ -29993,10 +30081,16 @@ document.querySelectorAll('#pCmdBody .btn').forEach(btn=>{
         activeProcedure.manualVerticalRateAt = Date.now();
       }
     }
-    if(Number.isFinite(altVal)) __SETCA_setCommandAlt(p, altFromUi(altVal));
-    if(Number.isFinite(speedCommandKmh)) __SETCA_setCommandSpd(p, speedCommandKmh);
-    if(headingEdited) __SETCA_setCommandHdg(p, hdgVal);
+    const beforeCommand={tgtAlt:p.tgtAlt,tgtSpd:p.tgtSpd,tgtHdg:p.tgtHdg,turn:p.turn,turnBias:p.turnBias};
+    if(Number.isFinite(altVal)) __SETCA_setCommandAlt(p, altFromUi(altVal), false);
+    if(Number.isFinite(speedCommandKmh)) __SETCA_setCommandSpd(p, speedCommandKmh, false);
+    if(headingEdited) __SETCA_setCommandHdg(p, hdgVal, false);
     if(Number.isFinite(turnVal)) p.turn = Math.max(0, turnVal);
+    const liveCommand={};
+    for(const key of ['tgtAlt','tgtSpd','tgtHdg','turn','turnBias'])
+      if(p[key]!==beforeCommand[key]) liveCommand[key]=p[key];
+    if(Object.keys(liveCommand).length && window.__SETCA_publishAircraftLive)
+      window.__SETCA_publishAircraftLive(p,liveCommand,true);
     if(callsignVal) p.name = callsignVal; else p.name = String(p.id || '');
     p.tipo = tipoVal;
     const prevRoleCtx = normalizePlaneRole((st && st.roles && st.roles[p.id]) || 'Neutral');
@@ -33427,6 +33521,49 @@ import { getAuth } from "https://www.gstatic.com/firebasejs/10.12.3/firebase-aut
   function __roomInstructorLockPath(roomId, team){
     return `${__roomInstructorLocksPath(roomId)}/${window.__SETCA_participantTeam(team)}`;
   }
+  async function __clearPreviousInstructorTeamScene(room, team){
+    if(String(room).toLowerCase()==='excs') return;
+    const owned=item=>item && window.__SETCA_entityTeam(item)===team;
+    await runTransaction(ref(db, `rooms/${room}/state`), current=>{
+      if(!current || typeof current!=='object') return;
+      const next={...current};
+      let changed=false;
+      for(const key of ['planes','gtc','drawings','pairs','missiles','impactMarks']){
+        if(current[key]==null) continue;
+        const rows=Array.isArray(current[key])?current[key]:Object.values(current[key]);
+        const kept=rows.filter(item=>!owned(item));
+        if(kept.length!==rows.length){ next[key]=kept; changed=true; }
+      }
+      const ids=new Set((Array.isArray(next.planes)?next.planes:Object.values(next.planes||{}))
+        .filter(item=>item && item.id!=null).map(item=>String(item.id)));
+      if(current.roles && typeof current.roles==='object'){
+        const roles=Object.fromEntries(Object.entries(current.roles).filter(([id])=>ids.has(String(id))));
+        if(Object.keys(roles).length!==Object.keys(current.roles).length){ next.roles=roles; changed=true; }
+      }
+      if(current.contingencies && typeof current.contingencies==='object'){
+        const contingencies={...current.contingencies};
+        let contChanged=false;
+        for(const key of ['delayLag','fadeLost']){
+          const source=current.contingencies[key]||{};
+          const kept=Object.fromEntries(Object.entries(source).filter(([id])=>ids.has(String(id))));
+          if(Object.keys(kept).length!==Object.keys(source).length){ contingencies[key]=kept; contChanged=true; }
+        }
+        if(current.contingencies.fakePlots?.[team]){
+          contingencies.fakePlots={...current.contingencies.fakePlots};
+          delete contingencies.fakePlots[team];
+          contChanged=true;
+        }
+        if(contChanged){ next.contingencies=contingencies; changed=true; }
+      }
+      if(!changed) return;
+      next.lastUpdate=Math.max(Date.now(),Number(current.lastUpdate||0)+1);
+      return next;
+    });
+    await Promise.all([
+      set(ref(db, `rooms/${room}/aircraftLive/${team}`),null),
+      set(ref(db, `rooms/${room}/teamContacts/${team}`),null)
+    ]);
+  }
   async function __reserveInstructorLock(roomId, callsign, teamValue){
     const room = String(roomId || currentHashRoom() || 'sala-default');
     const team = window.__SETCA_participantTeam(teamValue);
@@ -33446,7 +33583,7 @@ import { getAuth } from "https://www.gstatic.com/firebasejs/10.12.3/firebase-aut
           role: 'default',
           team,
           room,
-          since: (owner === uid && cur && Number(cur.since || 0)) ? Number(cur.since || 0) : now,
+          since: (owner === uid && expiresAt > now && cur && Number(cur.since || 0)) ? Number(cur.since || 0) : now,
           updatedAt: now,
           expiresAt: now + __INSTRUCTOR_LOCK_TTL_MS
         };
@@ -33458,6 +33595,14 @@ import { getAuth } from "https://www.gstatic.com/firebasejs/10.12.3/firebase-aut
       __instructorLockRoom = room;
       __instructorLockUid = uid;
       __instructorLockTeam = team;
+      if(Number(val.since||0)===now && room.toLowerCase()!=='excs'){
+        try{ await __clearPreviousInstructorTeamScene(room,team); }
+        catch(err){
+          console.warn('No se pudo limpiar la sesión anterior del instructor',err);
+          await runTransaction(lockRef,current=>current && String(current.uid||'')===uid ? null : undefined).catch(()=>{});
+          return {ok:false,lock:null,message:'No se pudo preparar una sesión nueva del instructor. Revisa la conexión e inténtalo de nuevo.'};
+        }
+      }
       try{ sessionStorage.setItem('setca_instructor_lock_uid_v2', uid); }catch(_){ }
       return { ok:true, lock: val };
     }
@@ -33723,7 +33868,7 @@ import { getAuth } from "https://www.gstatic.com/firebasejs/10.12.3/firebase-aut
     const accessCallsign = gateState.callsign.trim();
     if(accessRole.toLowerCase() === 'default'){
       const reserved = await __reserveInstructorLock(chosenRoom, accessCallsign, team);
-      if(!reserved.ok){ setError(__formatInstructorLockError(reserved.lock, team)); return; }
+      if(!reserved.ok){ setError(reserved.message || __formatInstructorLockError(reserved.lock, team)); return; }
     }
 
     const access = {
@@ -33946,7 +34091,7 @@ import { getAuth } from "https://www.gstatic.com/firebasejs/10.12.3/firebase-aut
       if(__isInstructorAccess(saved)){
         try{
           const reserved = await __reserveInstructorLock(saved.room || currentHashRoom(), saved.callsign || 'INSTRUCTOR', saved.team);
-          if(!reserved.ok){ __openAccessGateFresh(__formatInstructorLockError(reserved.lock, saved.team)); return; }
+          if(!reserved.ok){ __openAccessGateFresh(reserved.message || __formatInstructorLockError(reserved.lock, saved.team)); return; }
         }catch(err){ console.warn('Instructor lock restore error', err); __openAccessGateFresh('No se pudo validar el instructor de la sala.'); return; }
       }
       unlockWithAccess(saved);
@@ -34668,9 +34813,7 @@ import { getDatabase, ref, get, set } from "https://www.gstatic.com/firebasejs/1
     arwyHoverName: '',
     startClientX: 0,
     startClientY: 0,
-    hasMoved: false,
-    sentHeading: null,
-    sentBias: null
+    hasMoved: false
   };
 
   const CAP_HOVER_MS = 2000;
@@ -34795,6 +34938,13 @@ import { getDatabase, ref, get, set } from "https://www.gstatic.com/firebasejs/1
     }catch(_){}
     return false;
   }
+  let headingBackupTimer=null;
+  function scheduleHeadingBackup(){
+    // Los giros consecutivos comparten un respaldo completo; la orden ligera
+    // se envía al soltar el click y nunca espera esta instantánea.
+    if(headingBackupTimer) clearTimeout(headingBackupTimer);
+    headingBackupTimer=setTimeout(()=>{ headingBackupTimer=null; pushSync(); },1000);
+  }
   function refreshPanels(){
     try{
       const p = getPlane();
@@ -34803,7 +34953,6 @@ import { getDatabase, ref, get, set } from "https://www.gstatic.com/firebasejs/1
     try{ if(typeof repaintNav === 'function') repaintNav(); }catch(_){}
     try{ if(typeof repaintPlanesList === 'function') repaintPlanesList(); }catch(_){}
     try{ if(typeof repaintAlt === 'function') repaintAlt(); }catch(_){}
-    try{ if(typeof repaintVuelos === 'function') repaintVuelos(); }catch(_){}
   }
   function startDrag(p, e){
     if(!p || !e) return false;
@@ -34814,8 +34963,6 @@ import { getDatabase, ref, get, set } from "https://www.gstatic.com/firebasejs/1
     state.startClientX = e.clientX;
     state.startClientY = e.clientY;
     state.hasMoved = false;
-    state.sentHeading = null;
-    state.sentBias = null;
     const curHdg = normDeg(Number.isFinite(p.hdg) ? p.hdg : (p.tgtHdg || 0));
     state.targetHdg = curHdg;
     state.turnBias = null;
@@ -34828,23 +34975,17 @@ import { getDatabase, ref, get, set } from "https://www.gstatic.com/firebasejs/1
     requestGuideOverlay();
     return true;
   }
-  function applyHeadingDuringDrag(p,force){
+  function commitHeading(p){
     if(!p || !state.hasMoved || !Number.isFinite(state.targetHdg)) return false;
-    const headingChanged=state.sentHeading===null ||
-      Math.abs((((state.targetHdg-state.sentHeading)+540)%360)-180)>0.5;
-    const biasChanged=state.sentBias!==state.turnBias;
-    if(!force && !headingChanged && !biasChanged) return false;
     if(typeof window.__SETCA_setCommandHdg === 'function') window.__SETCA_setCommandHdg(p,state.targetHdg,false);
     else p.tgtHdg=normDeg(state.targetHdg);
     p.turnBias=state.turnBias || null;
     p.routeManualUntil=nowMs()+14000;
     try{ if(window.__SETCA_markAircraftDirty) window.__SETCA_markAircraftDirty(p); }catch(_){ }
-    // La primera dirección, una inversión de giro y la posición final salen ya;
-    // los demás movimientos se agrupan como máximo durante 100 ms.
+    // Una sola orden al soltar CTRL+click; ningún rumbo intermedio del gesto
+    // compite con el destino definitivo en Firebase o en la réplica.
     try{ if(window.__SETCA_publishAircraftLive) window.__SETCA_publishAircraftLive(p,
-      {tgtHdg:p.tgtHdg,turnBias:p.turnBias},force || state.sentHeading===null || biasChanged); }catch(_){ }
-    state.sentHeading=state.targetHdg;
-    state.sentBias=state.turnBias;
+      {tgtHdg:p.tgtHdg,turnBias:p.turnBias},true); }catch(_){ }
     return true;
   }
   function updateDrag(clientX, clientY){
@@ -34863,9 +35004,6 @@ import { getDatabase, ref, get, set } from "https://www.gstatic.com/firebasejs/1
     state.targetHdg = normDeg(hdg);
     state.turnBias = resolveTurnBias(Number.isFinite(p.hdg) ? p.hdg : (p.tgtHdg || 0), state.targetHdg);
     updateCapHover(clientX,clientY);
-    // El instructor gobierna el rumbo durante el gesto, no al terminarlo.
-    // Una nueva dirección sustituye al destino anterior aunque siga virando.
-    applyHeadingDuringDrag(p,false);
     requestGuideOverlay();
     return true;
   }
@@ -34891,22 +35029,21 @@ import { getDatabase, ref, get, set } from "https://www.gstatic.com/firebasejs/1
           assignedToPath = !!window.__SETCA_assignPlaneToArwy(p,arwy);
         }
         if(!assignedToPath){
-          applyHeadingDuringDrag(p,true);
+          commitHeading(p);
         }else{
           try{ if(window.__SETCA_publishAircraftLive) window.__SETCA_publishAircraftLive(p,{tgtHdg:p.tgtHdg,turnBias:p.turnBias},true); }catch(_){ }
         }
       }
-      refreshPanels();
-      // El respaldo completo conserva CAP/ARWY y demás datos; no retrasa el giro.
-      setTimeout(pushSync,250);
+      requestAnimationFrame(refreshPanels);
+      // El respaldo completo conserva CAP/ARWY y demás datos, agrupando una
+      // serie de maniobras sin competir con sus mensajes inmediatos.
+      scheduleHeadingBackup();
     }
     state.active = false;
     state.planeId = null;
     state.targetHdg = null;
     state.turnBias = null;
     state.hasMoved = false;
-    state.sentHeading = null;
-    state.sentBias = null;
     resetCapHover();
     clearGuideOverlay();
     if(guideRaf){ cancelAnimationFrame(guideRaf); guideRaf = 0; }
