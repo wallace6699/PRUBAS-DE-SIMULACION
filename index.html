@@ -2,11 +2,11 @@
 <!-- SETCA v43.1: fix acceso instructor sala normal -->
 <!-- ESTE SIMULADOR SE ENCUENTRA EN FASE DE PRUEBA - PUEDEN OCURRIR ERRORES DURANTE EL FUNCIONAMIENTO 2.5.2 040326 -->
 <!-- Versión visible: 40.1 → 40.2 → … → 40.9 → 41 → 41.1 → … -->
-<html lang="es" data-setca-version="40.1">
+<html lang="es" data-setca-version="40.2">
 <head>
 <meta charset="utf-8"/>
 <meta name="viewport" content="width=device-width, initial-scale=1"/>
-<title>SETCA 40.1</title>
+<title>SETCA 40.2</title>
 <link rel="preconnect" href="https://cdn.jsdelivr.net" crossorigin>
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
 <script>
@@ -806,6 +806,18 @@
       }
       const safeId = missileId.replace(/[^a-z0-9_-]/gi, '_').slice(0, 110);
       const launchRef = ref(db, `rooms/${ROOM_ID}/gtcLaunches/${safeId}`);
+      if(__SETCA_isExcsSharedRoom()){
+        const source=(st.gtc||[]).find(u=>String(u.id)===String(missile.launcher));
+        const target=(st.planes||[]).find(p=>String(p.id)===String(missile.tgt));
+        const targetTeam=target && window.__SETCA_entityTeam(target);
+        if(source && ['blue','red'].includes(targetTeam)){
+          const key=encodeURIComponent(String(source.id)).replace(/[.#$\[\]/]/g,'_');
+          set(ref(db,`rooms/${ROOM_ID}/groundReveals/${targetTeam}/${key}`),{
+            id:String(source.id),name:String(source.name||source.id),team:window.__SETCA_entityTeam(source),
+            x:Number(source.x)||0,y:Number(source.y)||0,launchedAt:now
+          }).catch(error=>console.warn("SETCA: no se pudo registrar el emisor",error));
+        }
+      }
       const sourceIsInstructor = __SETCA_isExcsSharedRoom() ? window.__SETCA_isExcsWhiteController() : __SETCA_isInstructorAuthority();
       missile.__setcaGlobalGtcReplica = !sourceIsInstructor;
       missile.__setcaGlobalGtcAuthority = sourceIsInstructor;
@@ -1356,9 +1368,7 @@
     const distance=Math.hypot((Number(update.x)||0)-(Number(p.x)||0),(Number(update.y)||0)-(Number(p.y)||0));
     const expected=(speed/1.852/3600)*(age+1)+0.12;
     const turnGap=Math.abs((((Number(update.hdg)||0)-(Number(p.hdg)||0)+540)%360)-180);
-    // BLUE/RED en EXCS no ejecutan la física; WHITE les entrega cada muestra.
-    const excsPilot=__SETCA_isExcsSharedRoom() && !window.__SETCA_isExcsWhiteController() && __SETCA_getSharedWriteRole()==='default';
-    if(firstSample || excsPilot || distance>Math.max(0.35,expected) || turnGap>Math.max(5,(Number(p.turn)||2)*(age+1))){
+    if(firstSample || distance>Math.max(0.35,expected) || turnGap>Math.max(5,(Number(p.turn)||2)*(age+1))){
       for(const key of ['x','y','hdg','spd','alt']) if(Number.isFinite(+update[key])) p[key]=+update[key];
     }
   }
@@ -1845,6 +1855,7 @@
     const collect=(items,baselines,fields,isPlane=false)=> (Array.isArray(items)?items:[]).filter(window.__SETCA_isOwnTeam).map(entity=>{
       const patch=__setcaExcsDiff(entity,baselines.get(String(entity.id)),fields);
       if(isPlane){
+        for(const key of ['x','y','hdg','spd','alt','vsFpm','speedRateKmhps']) delete patch[key];
         const live=__setcaExcsLiveSent.get(String(entity.id))||{};
         for(const key of Object.keys(patch))
           if(Object.prototype.hasOwnProperty.call(live,key) && __setcaSafeJson(patch[key])===__setcaSafeJson(live[key])) delete patch[key];
@@ -2620,6 +2631,9 @@ let __setcaLastAppliedRemoteTs = 0;
   }
 
   if(!__localOnlyMode){
+    if(__SETCA_isExcsSharedRoom()) onValue(ref(db,`rooms/${ROOM_ID}/groundReveals`),snap=>{
+      window.__SETCA_groundReveals=snap.val()||{};
+    });
     // Escuchar solo el avión que cambió evita reconstruir el lote entero
     // cuando el instructor ordena varios giros consecutivos.
     for(const team of ['blue','red','white']){
@@ -2669,6 +2683,23 @@ let __setcaLastAppliedRemoteTs = 0;
     }
     onValue(stateRef, (snap) => {
       const v = snap.val() || {};
+      if(v.sceneResetAt && v.sceneResetAt!==window.__SETCA_sceneResetAt){
+        window.__SETCA_sceneResetAt=v.sceneResetAt;
+        for(const key of ['planes','gtc','missiles','drawings','pairs','impactMarks']) v[key]=[];
+        v.roles={};
+        if(window.st){
+          for(const key of ['planes','gtc','missiles','drawings','pairs','impactMarks']) st[key]=[];
+          st.roles={};st.sel=[];
+        }
+        __setcaLastRawCloudState=v;
+        __setcaLiveRecent.clear(); __setcaLiveFieldVersions.clear();
+        __setcaLiveAwaitingPlane.clear(); __setcaMotionAwaitingPlane.clear();
+        __setcaExcsLiveSent.clear(); __setcaExcsPlaneBaseline.clear();
+        __setcaLivePending.clear();
+        __setcaStateHydrated=true;
+        applyCloudState(v,{force:true});
+        return;
+      }
       __setcaLastRawCloudState=v;
       __setcaStateHydrated = true;
       if(!__SETCA_isExcsSharedRoom() && !__setcaInstructorLocksReady) return;
@@ -2842,6 +2873,20 @@ let __setcaLastAppliedRemoteTs = 0;
   try{ window.__SETCA_startAircraftOrderListener = __SETCA_startAircraftOrderListener; }catch(_){ }
 
   window._SETCA_SYNC = {
+    resetExcs: async()=>{
+      if(!__SETCA_isExcsSharedRoom() || !window.__SETCA_isExcsWhiteController()) return false;
+      const now=Date.now();
+      const result=await runTransaction(ref(db,`rooms/${ROOM_ID}`),room=>{
+        const next={...(room||{})};
+        for(const key of ['aircraftLive','aircraftMotion','gtcLaunches','gtcRuntime','gtcValidation','groundReveals','aircraftOrders','teamContacts']) delete next[key];
+        next.state={planes:[],gtc:[],missiles:[],drawings:[],roles:{},pairs:[],impactMarks:[],
+          elapsed:0,globalStarted:false,excsClock:{elapsed:0,startedAt:now},
+          serverPause:{active:true,at:now,byRole:'white'},sceneResetAt:now,
+          lastUpdate:serverTimestamp(),lastWriteRole:'white',instructorAuthority:true};
+        return next;
+      });
+      return !!result.committed;
+    },
     pushNow: () => __localOnlyMode ? false : pushStateToCloud(st),
     push: () => __localOnlyMode ? false : pushStateToCloud(st),
     pull: async (opts={}) => {
@@ -16598,11 +16643,24 @@ function __SETCA_clearAircraftWeaponLock(launcher,reason='manual'){
 function __SETCA_canAcquireGroundTarget(target,launcher){
   if(!target||target._hit||!launcher) return false;
   if(window.__SETCA_canSeeOwnedEntity&&window.__SETCA_canSeeOwnedEntity(target)) return true;
+  const team=window.__SETCA_entityTeam(launcher);
+  if(Object.values((window.__SETCA_groundReveals||{})[team]||{}).some(row=>String(row.id)===String(target.id))) return true;
   if(target.enabled===false||target.active===false||target.radarOn===false) return false;
   const radius=Number(target.covR),ceiling=Number(target.covH),altitude=Number(launcher.alt);
   if(!(Number.isFinite(radius)&&radius>0&&Number.isFinite(ceiling)&&ceiling>0&&Number.isFinite(altitude)&&altitude<=ceiling)) return false;
   const distance=Math.hypot(Number(launcher.x||0)-Number(target.x||0),Number(launcher.y||0)-Number(target.y||0));
   return Number.isFinite(distance)&&distance<=radius;
+}
+function __SETCA_drawRevealedGround(){
+  const team=window.__SETCA_getCurrentTeam();
+  for(const row of Object.values((window.__SETCA_groundReveals||{})[team]||{})){
+    const source=(st.gtc||[]).find(u=>String(u.id)===String(row.id));
+    if(!source || source._hit || window.__SETCA_isOwnTeam(source)) continue;
+    const p=toScreen(Number(row.x)||0,Number(row.y)||0);
+    ctx.save();ctx.strokeStyle='#ff6655';ctx.fillStyle='#ff9988';ctx.lineWidth=1.5;
+    ctx.strokeRect(p.x-6,p.y-6,12,12);ctx.font='11px monospace';
+    ctx.fillText('G · '+String(row.name||row.id),p.x+10,p.y-7);ctx.restore();
+  }
 }
 function __SETCA_beginAircraftWeaponLock(launcher,targetId,type){
   if(!launcher || !window.__SETCA_isOwnTeam(launcher)) return {ok:false,message:'Aeronave no autorizada.'};
@@ -19943,6 +20001,7 @@ addEventListener('mouseup',e=>{
 cvs.addEventListener('mousedown',e=>{
   if(window.st && window.st.modoObservador) return;
   if(e.button!==0 || !e.altKey) return;
+  if(String((window.__setcaAccess||{}).room||'').toLowerCase()==='excs') return;
   if(typeof __SETCA_canInstructorMovePlanes === 'function' && !__SETCA_canInstructorMovePlanes()) return;
   const r=cvs.getBoundingClientRect();const wx=toWorld(e.clientX-r.left,e.clientY-r.top).x;const wy=toWorld(e.clientX-r.left,e.clientY-r.top).y;
   const hit=null; // ALT: solo mover aeronaves, no dibujos if(hit){st.selectedDrawing=hit;draggingDrawing=st.drawings.find(d=>d.id===hit);dragStart={x:e.clientX,y:e.clientY};return;}
@@ -21919,10 +21978,8 @@ function loop(ts){
   const serverPaused = __SETCA_isServerPaused();
   const excsSession=String((window.__setcaAccess||{}).room||'').toLowerCase()==='excs';
   const simStep=excsSession ? 0.05 : 0.1;
-  // El instructor BLUE/RED en EXCS envía diferencias de aviones a WHITE:
-  // nunca predecir en su estado, o publicaría esa predicción como una orden.
-  const excsPilotWriter=excsSession && String((window.__setcaAccess||{}).role||'').toLowerCase()==='default';
-  window.__SETCA_replicaMotionRunning=!authHost && !excsPilotWriter && !planningMode && !serverPaused && !st.localPause && !window.__SETCA_SCENE_LOADING;
+  // Los instructores también animan su réplica; el colector excluye la física local de las órdenes.
+  window.__SETCA_replicaMotionRunning=!authHost && !planningMode && !serverPaused && !st.localPause && !window.__SETCA_SCENE_LOADING;
   if(excsSession && st.excsClock){
     st.elapsed=Number(st.excsClock.elapsed||0)+(serverPaused?0:Math.max(0,Date.now()-Number(st.excsClock.startedAt||Date.now())));
     st.t0=performance.now()-st.elapsed;
@@ -22037,7 +22094,7 @@ try{
   try{
     ctx.clearRect(0,0,W,H);
     drawGrid();
-    drawPeruMap(); drawAirports(); try{ if(window.__SETCA_drawPeruAirways) window.__SETCA_drawPeruAirways(); }catch(_){ } drawGTC(); drawFlightProcedureGuidance();
+    drawPeruMap(); drawAirports(); try{ if(window.__SETCA_drawPeruAirways) window.__SETCA_drawPeruAirways(); }catch(_){ } drawGTC(); __SETCA_drawRevealedGround(); drawFlightProcedureGuidance();
 
     // Trajectory visualization
     if(st.showTraj){
@@ -26386,7 +26443,7 @@ document.addEventListener('keydown', (ev)=>{
     <div class="setca-gate-head">
       <div>
         <div class="setca-gate-kicker-row"><button type="button" id="setcaGodDot" class="setca-god-dot" aria-label="Abrir ADMINISTRATOR" title="ADMINISTRATOR">A</button><div class="setca-gate-kicker">Acceso inicial obligatorio</div></div>
-        <h2 id="gateHeading">SETCA 40.1</h2>
+        <h2 id="gateHeading">SETCA 40.2</h2>
         <p id="gateDescription" hidden></p>
       </div>
       <div class="setca-gate-badge-wrap"><div id="setcaGateRoomBadge" class="setca-gate-badge">SIN SALA</div></div>
@@ -39503,5 +39560,30 @@ import { getDatabase, ref, onValue, set } from "https://www.gstatic.com/firebase
 })();
 </script>
 
+
+<script>
+(function(){
+  function installReset(){
+    const white=!!(window.__SETCA_isExcsWhiteController&&window.__SETCA_isExcsWhiteController());
+    let button=document.getElementById('excsResetMap');
+    if(!white){if(button)button.hidden=true;return;}
+    if(button){button.hidden=false;return;}
+    const pause=document.getElementById('pause');if(!pause)return;
+    button=document.createElement('button');button.id='excsResetMap';button.type='button';
+    button.className='btn focusable';button.textContent='REINICIAR MAPA';
+    pause.insertAdjacentElement('afterend',button);
+    button.addEventListener('click',async()=>{
+      if(!window.__SETCA_isExcsWhiteController())return;
+      if(!confirm('¿Reiniciar el mapa de EXCS? Se borrará toda la misión de ambos bandos.'))return;
+      if(!confirm('CONFIRMACIÓN FINAL: ¿Eliminar aeronaves, unidades terrestres, misiles y dibujos de la misión?'))return;
+      button.disabled=true;
+      try{if(!await window._SETCA_SYNC.resetExcs())throw new Error('No se pudo reiniciar la misión.');}
+      catch(error){alert(error.message||'No se pudo reiniciar la misión.');}
+      finally{button.disabled=false;}
+    });
+  }
+  setInterval(installReset,1000);installReset();
+})();
+</script>
 </body>
 </html>
