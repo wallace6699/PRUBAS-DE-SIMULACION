@@ -2,11 +2,11 @@
 <!-- SETCA v43.1: fix acceso instructor sala normal -->
 <!-- ESTE SIMULADOR SE ENCUENTRA EN FASE DE PRUEBA - PUEDEN OCURRIR ERRORES DURANTE EL FUNCIONAMIENTO 2.5.2 040326 -->
 <!-- Versión visible: 40.1 → 40.2 → … → 40.9 → 41 → 41.1 → … -->
-<html lang="es" data-setca-version="40.4">
+<html lang="es" data-setca-version="40.5">
 <head>
 <meta charset="utf-8"/>
 <meta name="viewport" content="width=device-width, initial-scale=1"/>
-<title>SETCA 40.4</title>
+<title>SETCA 40.5</title>
 <link rel="preconnect" href="https://cdn.jsdelivr.net" crossorigin>
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
 <script>
@@ -12162,7 +12162,7 @@ window.__SETCA_formatLocalPlaneAltitude = (planeOrId, altitudeFt)=>{
   if(window.__SETCA_getLocalPlaneAltitudeFormat(planeOrId) === 'fl'){
     return String(Math.round(ft / 100)).padStart(3, '0');
   }
-  return `${Math.round(ft)}ft`;
+  return `${Math.round(ft / 100) * 100}ft`;
 };
 const __SETCA_LOCAL_SPEED_FORMATS = (()=>{
   const src = (__localPrefs && __localPrefs.planeSpeedFormats && typeof __localPrefs.planeSpeedFormats === 'object')
@@ -12249,7 +12249,7 @@ window.__SETCA_formatLocalPlaneSpeed = (planeOrId, speedKmh, altitudeFt)=>{
   if(window.__SETCA_getLocalPlaneSpeedFormat(planeOrId) === 'mach'){
     return `M ${window.__SETCA_speedKmhToMach(kmh, altitudeFt).toFixed(2)}`;
   }
-  return `${Math.round(kmh * KMH2KTS)} kts`;
+  return `${Math.round(kmh * KMH2KTS / 10) * 10} kts`;
 };
 const __SETCA_LABEL_FIELDS_DEFAULT = Object.freeze({
   callsign:true,
@@ -26453,7 +26453,7 @@ document.addEventListener('keydown', (ev)=>{
     <div class="setca-gate-head">
       <div>
         <div class="setca-gate-kicker-row"><button type="button" id="setcaGodDot" class="setca-god-dot" aria-label="Abrir ADMINISTRATOR" title="ADMINISTRATOR">A</button><div class="setca-gate-kicker">Acceso inicial obligatorio</div></div>
-        <h2 id="gateHeading">SETCA 40.4</h2>
+        <h2 id="gateHeading">SETCA 40.5</h2>
         <p id="gateDescription" hidden></p>
       </div>
       <div class="setca-gate-badge-wrap"><div id="setcaGateRoomBadge" class="setca-gate-badge">SIN SALA</div></div>
