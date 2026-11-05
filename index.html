@@ -2,11 +2,11 @@
 <!-- SETCA v43.1: fix acceso instructor sala normal -->
 <!-- ESTE SIMULADOR SE ENCUENTRA EN FASE DE PRUEBA - PUEDEN OCURRIR ERRORES DURANTE EL FUNCIONAMIENTO 2.5.2 040326 -->
 <!-- Versión visible: 40.1 → 40.2 → … → 40.9 → 41 → 41.1 → … -->
-<html lang="es" data-setca-version="40.2">
+<html lang="es" data-setca-version="40.4">
 <head>
 <meta charset="utf-8"/>
 <meta name="viewport" content="width=device-width, initial-scale=1"/>
-<title>SETCA 40.2</title>
+<title>SETCA 40.4</title>
 <link rel="preconnect" href="https://cdn.jsdelivr.net" crossorigin>
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
 <script>
@@ -1171,7 +1171,7 @@
 
   // Canal ligero para órdenes y posición final. El arrastre intermedio queda
   // solo en la pantalla del instructor; el estado completo sigue siendo autoridad.
-  const __setcaLiveFields = new Set(['x','y','hdg','spd','alt','tgtHdg','tgtSpd','tgtAlt','turn','turnBias']);
+  const __setcaLiveFields = new Set(['x','y','hdg','spd','alt','tgtHdg','tgtSpd','tgtAlt','turn','turnBias','verticalRateFpm','flightProcedure']);
   const __setcaLivePending = new Map();
   const __setcaLiveRecent = new Map();
   const __setcaLiveFieldVersions = new Map();
@@ -1188,7 +1188,12 @@
       if(!Object.prototype.hasOwnProperty.call(patch,key)) continue;
       // Firebase elimina propiedades null: usar cadena vacía en el mensaje
       // para que "quitar sesgo" no deje vigente el giro anterior.
-      if(key==='turnBias') clean[key]=patch[key]==='L'||patch[key]==='R'?patch[key]:'';
+      if(key==='flightProcedure'){
+        const procedure=patch[key];
+        if(procedure===null || procedure===false) clean[key]=false;
+        else if(procedure && ['scramble','departure','arrival'].includes(procedure.mode))
+          clean[key]=JSON.parse(JSON.stringify(procedure));
+      }else if(key==='turnBias') clean[key]=patch[key]==='L'||patch[key]==='R'?patch[key]:'';
       else if(patch[key]!==null && patch[key]!=='' && Number.isFinite(Number(patch[key]))) clean[key]=Number(patch[key]);
     }
     return clean;
@@ -1267,7 +1272,7 @@
     __setcaLiveFieldVersions.set(id,versions);
     if(!Object.keys(patch).length) return;
     if(Object.prototype.hasOwnProperty.call(patch,'turnBias') && patch.turnBias==='') patch.turnBias=null;
-    Object.assign(p,patch);
+    __SETCA_applyFlightTargets(p,patch);
     p.__liveAt=Math.max(Number(p.__liveAt)||0,at);
     p.__cmdAt=Math.max(Number(p.__cmdAt)||0,at);
     const recent=__setcaLiveRecent.get(id);
@@ -1296,6 +1301,8 @@
       byTeam.get(team)[key]={id:String(p.id),at,x:Number(p.x)||0,y:Number(p.y)||0,
         hdg:Number(p.hdg)||0,spd:Number(p.spd)||0,alt:Number(p.alt)||0,
         cmdAt:Number(p.__cmdAt)||0,
+        ...(p.flightProcedure || p.__procedureMotion ? {flightProcedure:p.flightProcedure||false,
+          tgtHdg:p.tgtHdg,tgtAlt:p.tgtAlt,tgtSpd:p.tgtSpd} : {}),
         fuel:Number.isFinite(+p.fuel)?+p.fuel:null,
         payloadMissiles:Number.isFinite(+p.payloadMissiles)?+p.payloadMissiles:null,
         byClient:__setcaStateClientId,byRole:__SETCA_getSharedWriteRole()};
@@ -1360,6 +1367,12 @@
     // muestra anterior de WHITE; de otro modo RED/BLUE quedarían congelados.
     if(at<=Number(p.__motionAt||0) || Number(p.__liveAt||0)>Number(update.cmdAt||0)) return;
     p.__motionAt=at;
+    const procedureEnded=!!p.flightProcedure && update.flightProcedure===false;
+    if(Object.prototype.hasOwnProperty.call(update,'flightProcedure')){
+      p.__procedureMotion=true;
+      p.flightProcedure=update.flightProcedure||null;
+      for(const key of ['tgtHdg','tgtAlt','tgtSpd']) if(Number.isFinite(update[key])) p[key]=update[key];
+    }
     for(const key of ['fuel','payloadMissiles']) if(update[key]!==null && Number.isFinite(+update[key])) p[key]=+update[key];
     // La réplica ya cumple la orden localmente. Corregir solo una divergencia
     // real evita que una muestra de red tardía haga rebotar el símbolo.
@@ -1368,7 +1381,7 @@
     const distance=Math.hypot((Number(update.x)||0)-(Number(p.x)||0),(Number(update.y)||0)-(Number(p.y)||0));
     const expected=(speed/1.852/3600)*(age+1)+0.12;
     const turnGap=Math.abs((((Number(update.hdg)||0)-(Number(p.hdg)||0)+540)%360)-180);
-    if(firstSample || distance>Math.max(0.35,expected) || turnGap>Math.max(5,(Number(p.turn)||2)*(age+1))){
+    if(firstSample || procedureEnded || update.flightProcedure?.phase==='rollout' || distance>Math.max(0.35,expected) || turnGap>Math.max(5,(Number(p.turn)||2)*(age+1))){
       for(const key of ['x','y','hdg','spd','alt']) if(Number.isFinite(+update[key])) p[key]=+update[key];
     }
   }
@@ -1856,6 +1869,9 @@
       const patch=__setcaExcsDiff(entity,baselines.get(String(entity.id)),fields);
       if(isPlane){
         for(const key of ['x','y','hdg','spd','alt','vsFpm','speedRateKmhps']) delete patch[key];
+        if(entity.flightProcedure || entity.__procedureMotion){
+          for(const key of ['flightProcedure','tgtHdg','tgtAlt','tgtSpd','turnBias']) delete patch[key];
+        }
         const live=__setcaExcsLiveSent.get(String(entity.id))||{};
         for(const key of Object.keys(patch))
           if(Object.prototype.hasOwnProperty.call(live,key) && __setcaSafeJson(patch[key])===__setcaSafeJson(live[key])) delete patch[key];
@@ -2238,6 +2254,11 @@ let __setcaLastAppliedRemoteTs = 0;
               q.__motionAt=Math.max(Number(q.__motionAt)||0,Number(local.__motionAt)||0);
             }
           }
+          if(!force && !white && local?.__procedureMotion){
+            for(const field of ['flightProcedure','__procedureMotion','tgtHdg','tgtAlt','tgtSpd']) q[field]=local[field];
+            q.__liveAt=Math.max(Number(q.__liveAt)||0,Number(local.__liveAt)||0);
+            q.__motionAt=Math.max(Number(q.__motionAt)||0,Number(local.__motionAt)||0);
+          }
           if(white) __setcaExcsPlaneBaseline.set(id,JSON.parse(JSON.stringify(q)));
           if(!white && local){
             const from=window.__SETCA_interpolatedPlane(local);
@@ -2321,13 +2342,13 @@ let __setcaLastAppliedRemoteTs = 0;
             __setcaLiveRecent.delete(id);
             return;
           }
-          Object.assign(p,live.patch);
+          __SETCA_applyFlightTargets(p,live.patch);
           p.__liveAt=live.at;
           p.__cmdAt=Math.max(Number(p.__cmdAt)||0,live.at);
         });
         // Los puestos alumnos ya están avanzando la misma orden entre muestras.
         // Una instantánea enviada segundos antes no debe devolverlos hacia atrás.
-        if(!force && !(excs ? (white || __SETCA_getSharedWriteRole()==='default') : __SETCA_isInstructorAuthority()) &&
+        if(!force && !(excs ? white : __SETCA_isInstructorAuthority()) &&
            !(v.serverPause && v.serverPause.active) && !(st.serverPause && st.serverPause.active) && !st.localPause){
           const previousById=new Map((Array.isArray(st.planes)?st.planes:[]).filter(p=>p&&p.id).map(p=>[String(p.id),p]));
           const sampleAge=remoteStamp ? Math.min(12,Math.max(0,((Date.now()+__setcaServerTimeOffsetMs)-remoteStamp)/1000)) : 0;
@@ -15451,6 +15472,28 @@ function getPlaneFlightProcedure(p){
   const mode = String(fp.mode || '').toLowerCase();
   return (mode === 'scramble' || mode === 'departure' || mode === 'arrival') ? fp : null;
 }
+function __SETCA_applyFlightTargets(p,patch){
+  const active=getPlaneFlightProcedure(p);
+  if(Object.prototype.hasOwnProperty.call(patch,'flightProcedure')){
+    const procedure=patch.flightProcedure;
+    if(procedure){
+      window.__SETCA_clearPlaneCapAssignment?.(p);
+      window.__SETCA_clearPlaneArwyAssignment?.(p);
+      Object.assign(p,{routeEnabled:false,routeManualUntil:0,turnBias:null});
+    }
+    Object.assign(p,patch,{flightProcedure:procedure ? {...procedure} : null,__procedureMotion:true});
+    return;
+  }
+  if(active?.mode==='arrival' && (Number.isFinite(patch.tgtAlt) ||
+    (Number.isFinite(patch.tgtHdg) && Math.abs((((patch.tgtHdg-p.tgtHdg)+540)%360)-180)>0.5))){
+    Object.assign(p,{flightProcedure:null,tgtAlt:p.alt,tgtSpd:p.spd,tgtHdg:p.hdg,__procedureMotion:true});
+  }else if(active){
+    if(Number.isFinite(patch.tgtSpd)) active.manualSpeedKmh=patch.tgtSpd;
+    if(Number.isFinite(patch.tgtAlt)) active.manualAltFt=patch.tgtAlt;
+    if(Number.isFinite(patch.verticalRateFpm)) active.manualVerticalRateFpm=patch.verticalRateFpm;
+  }
+  Object.assign(p,patch);
+}
 function getPlaneProcedureSpeedProfile(p){
   const fp = getPlaneFlightProcedure(p);
   if(!fp) return null;
@@ -15603,17 +15646,17 @@ function updatePlaneAltitude(p,dt){
 function setcaProcedureBearing(from, to){
   return ((Math.atan2((+to.x || 0)-(+from.x || 0),-((+to.y || 0)-(+from.y || 0)))*180/Math.PI)%360+360)%360;
 }
-function updatePlaneFlightProcedure(p){
+function updatePlaneFlightProcedure(p,replica=false){
   const fp = getPlaneFlightProcedure(p);
   if(!fp) return false;
+  p.__procedureMotion=true;
 
   if(fp.mode === 'scramble' || fp.mode === 'departure'){
     const profile = SETCA_FLIGHT_PROCEDURE_PROFILES[fp.mode];
     if(!profile){ p.flightProcedure = null; return false; }
-    const targetSpeed = profile.targetSpeedKts * KTS2KMH;
+    const targetSpeed = fp.manualSpeedKmh ?? profile.targetSpeedKts * KTS2KMH;
+    const targetAlt = fp.manualAltFt ?? profile.targetAltFt;
     const rotateSpeed = profile.rotateKts * KTS2KMH;
-    fp.targetAltFt = profile.targetAltFt;
-    fp.targetSpeedKts = profile.targetSpeedKts;
     fp.verticalRateFpm = profile.climbFpm;
     p.tgtSpd = targetSpeed;
     if(String(fp.phase || 'ground') === 'ground'){
@@ -15621,18 +15664,15 @@ function updatePlaneFlightProcedure(p){
       if((+p.spd || 0) >= rotateSpeed){
         fp.phase = 'climb';
         fp.rotatedAt = Date.now();
-        p.tgtAlt = profile.targetAltFt;
+        p.tgtAlt = targetAlt;
       }
     }else{
       fp.phase = 'climb';
-      p.tgtAlt = profile.targetAltFt;
+      p.tgtAlt = targetAlt;
     }
-    if((+p.alt || 0) >= profile.targetAltFt - 15 && (+p.spd || 0) >= targetSpeed - 2){
-      p.alt = profile.targetAltFt;
-      p.tgtAlt = profile.targetAltFt;
-      p.tgtSpd = targetSpeed;
+    if(fp.phase === 'climb' && Math.abs((+p.alt || 0)-targetAlt)<=1){
       p.flightProcedure = null;
-      try{ if(typeof logEvent === 'function') logEvent(`${profile.label} COMPLETADO: ${p.name || p.id}`); }catch(_){ }
+      if(!replica && typeof logEvent==='function') logEvent(`${profile.label} COMPLETADO: ${p.name || p.id}`);
     }
     return false;
   }
@@ -15656,7 +15696,7 @@ function updatePlaneFlightProcedure(p){
       p.vsFpm = 0;
       p.speedRateKmhps = 0;
       p.flightProcedure = null;
-      try{ if(typeof logEvent === 'function') logEvent(`ARR COMPLETADO: ${p.name || p.id}`); }catch(_){ }
+      if(!replica && typeof logEvent==='function') logEvent(`ARR COMPLETADO: ${p.name || p.id}`);
     }
     return true;
   }
@@ -15665,31 +15705,20 @@ function updatePlaneFlightProcedure(p){
   const dy = ty - (+p.y || 0);
   const distanceNm = Math.hypot(dx,dy);
   const speedKts = Math.max(1,(+p.spd || +p.tgtSpd || 0) * KMH2KTS);
-  const glideAltFt = Math.max(0,distanceNm * 300);
   const currentAltFt = Math.max(0,+p.alt || 0);
-  const desiredAltFt = Math.min(currentAltFt,glideAltFt);
-  const defaultSpeedKmh = (distanceNm > 20 ? 250 : distanceNm > 10 ? 210 : distanceNm > 3 ? 170 : distanceNm > 0.7 ? 145 : 130) * KTS2KMH;
-  const manualAltFt = Number(fp.manualAltFt);
-  const manualSpeedKmh = Number(fp.manualSpeedKmh);
-  const commandedAltFt = Number.isFinite(manualAltFt) ? Math.max(0,manualAltFt) : desiredAltFt;
-  const commandedSpeedKmh = Number.isFinite(manualSpeedKmh) ? Math.max(0,manualSpeedKmh) : defaultSpeedKmh;
-  const minutesToTarget = Math.max(0.35,distanceNm / Math.max(120,speedKts) * 60);
-  const altitudeToResolveFt = Number.isFinite(manualAltFt)
-    ? Math.abs(currentAltFt-commandedAltFt)
-    : currentAltFt;
-  const requiredFpm = Math.max(500,Math.min(6000,altitudeToResolveFt / minutesToTarget));
-
+  if(!Number.isFinite(fp.glideFtPerNm)) fp.glideFtPerNm=Math.min(300,currentAltFt/Math.max(.1,distanceNm));
+  const glideAltFt=Math.max(0,distanceNm*fp.glideFtPerNm-20);
+  const approachKts = distanceNm > 20 ? 250 : distanceNm > 10 ? 210 : distanceNm > 3 ? 170 : distanceNm > 0.7 ? 145 : 130;
+  const minutesToTarget = Math.max(0.15,distanceNm * 60 / Math.max(90,speedKts));
+  const descentLimit = distanceNm > 3 ? 6000 : 3000;
+  const descentRate = Math.max(500,Math.min(descentLimit,currentAltFt / minutesToTarget * 1.08));
+  const descentSpeed = Math.max(105,distanceNm * 60 * descentRate / Math.max(100,currentAltFt));
   fp.phase = distanceNm > 20 ? 'arrival' : distanceNm > 3 ? 'approach' : 'final';
   fp.distanceNm = distanceNm;
-  fp.verticalRateFpm = commandedAltFt <= 1000
-    ? Math.max(500,Math.min(1000,requiredFpm))
-    : Math.max(900,requiredFpm);
-  p.routeEnabled = false;
-  p.routeManualUntil = 0;
-  p.turnBias = null;
+  fp.verticalRateFpm = descentRate;
   p.tgtHdg = setcaProcedureBearing(p,target);
-  p.tgtAlt = commandedAltFt;
-  p.tgtSpd = commandedSpeedKmh;
+  p.tgtAlt = Math.min(currentAltFt,glideAltFt);
+  p.tgtSpd = Math.min(fp.manualSpeedKmh ?? approachKts*KTS2KMH,descentSpeed*KTS2KMH);
 
   if(distanceNm <= 0.10 && currentAltFt <= 100){
     fp.phase = 'rollout';
@@ -15763,6 +15792,23 @@ try{
   window.__SETCA_consumeAircraftPayload=__SETCA_consumeAircraftPayload;
   window.__SETCA_updatePlaneFuel=__SETCA_updatePlaneFuel;
 }catch(_){ }
+function __SETCA_stepPlaneHeading(p,dt){
+  const heading=Number.isFinite(+p.hdg)?+p.hdg:0;
+  const target=Number.isFinite(+p.tgtHdg)?+p.tgtHdg:heading;
+  const cw=(target-heading+360)%360,ccw=(heading-target+360)%360;
+  if(Math.min(cw,ccw)<=0.1) return;
+  let rate=Number.isFinite(+p.turn)?Math.max(0,+p.turn):2;
+  const procedure=getPlaneFlightProcedure(p);
+  if(procedure?.mode==='arrival'){
+    // Al acortarse la final, limitar el radio de giro para interceptar
+    // el punto en vez de quedar orbitando alrededor de él.
+    const radius=Math.max(0.04,(Number(procedure.distanceNm)||0)*0.35);
+    rate=Math.max(rate,Math.min(30,(Number(p.spd)||0)/NM2KM/3600/radius*180/Math.PI));
+  }
+  const step=rate*Math.max(0,Number(dt)||0);
+  const left=p.turnBias==='L' || (p.turnBias!=='R' && cw>180);
+  p.hdg=(heading+(left?-Math.min(ccw,step):Math.min(cw,step))+360)%360;
+}
 function updatePlane(p,dt){
   if(!p || typeof p !== 'object') return;
   if(!Array.isArray(p.ghosts)) p.ghosts=[];
@@ -15780,28 +15826,12 @@ function updatePlane(p,dt){
     const capGuided = typeof window.__SETCA_applyCapGuidance === 'function' && window.__SETCA_applyCapGuidance(p,dt);
     if(!capGuided && typeof window.__SETCA_applyArwyGuidance === 'function') window.__SETCA_applyArwyGuidance(p,dt);
   }catch(_){ }
-// Giro hacia rumbo objetivo (con sesgo opcional I/D)
-const diffCW  = (p.tgtHdg - p.hdg + 360) % 360;   // giro a la derecha (clockwise)
-const diffCCW = (p.hdg - p.tgtHdg + 360) % 360;   // giro a la izquierda (counterclockwise)
-if (Math.min(diffCW, diffCCW) > 0.1) {
-  const turnRateDegPerSec = Number.isFinite(+p.turn) ? Math.max(0, +p.turn) : 2;
-  const tr = turnRateDegPerSec * Math.max(0, Number(dt) || 0);
-  if (p.turnBias === 'L') {
-    p.hdg -= Math.min(diffCCW, tr);
-  } else if (p.turnBias === 'R') {
-    p.hdg += Math.min(diffCW, tr);
-  } else {
-    // Por defecto: giro más corto
-    if (diffCW > 180) p.hdg -= Math.min(diffCCW, tr);
-    else p.hdg += Math.min(diffCW, tr);
-  }
-  p.hdg = (p.hdg + 360) % 360;
-}
+  __SETCA_stepPlaneHeading(p,dt);
   updatePlaneAltitude(p,dt);
   const nmps=(p.spd/NM2KM)/3600;
   const vrad=(st.windDir-90)*Math.PI/180,wnd=(st.windKmh/NM2KM)/3600;
   const hrad=(p.hdg-90)*Math.PI/180;
-  if(!procedureHoldsPosition){
+  if(!procedureHoldsPosition && (p.alt>1 || p.spd>1)){
     p.x+=Math.cos(hrad)*nmps*dt+Math.cos(vrad)*wnd*dt;
     p.y+=Math.sin(hrad)*nmps*dt+Math.sin(vrad)*wnd*dt;
   }
@@ -15815,20 +15845,12 @@ function __SETCA_stepReplicaPlane(p,dt){
   if(!p || isPlaneKillConfirmed(p)) return;
   const step=Math.min(0.25,Math.max(0,Number(dt)||0));
   if(!step) return;
-  const fp=p.flightProcedure;
-  if(fp && fp.mode==='arrival' && fp.phase==='rollout') return;
+  const procedureHoldsPosition=updatePlaneFlightProcedure(p,true);
   updatePlaneSpeed(p,step);
   updatePlaneAltitude(p,step);
-  let heading=Number.isFinite(+p.hdg)?+p.hdg:(Number(p.tgtHdg)||0);
-  const target=Number.isFinite(+p.tgtHdg)?+p.tgtHdg:heading;
-  const cw=(target-heading+360)%360,ccw=(heading-target+360)%360;
-  if(Math.min(cw,ccw)>0.1){
-    const turn=(Number.isFinite(+p.turn)?Math.max(0,+p.turn):2)*step;
-    if(p.turnBias==='L' || (p.turnBias!=='R' && cw>180)) heading-=Math.min(ccw,turn);
-    else heading+=Math.min(cw,turn);
-    heading=(heading+360)%360;
-    p.hdg=heading;
-  }
+  __SETCA_stepPlaneHeading(p,step);
+  if(procedureHoldsPosition || (p.alt<=1 && p.spd<=1)) return;
+  const heading=Number.isFinite(+p.hdg)?+p.hdg:0;
   const speed=Math.max(0,Number(p.spd)||0);
   const radians=(heading-90)*Math.PI/180;
   const windRadians=((Number(st.windDir)||0)-90)*Math.PI/180;
@@ -16628,8 +16650,7 @@ function __SETCA_validateAircraftWeaponLock(launcher,target,type,now=Date.now())
 function __SETCA_syncAircraftWeaponLock(launcher){
   try{ if(window.__SETCA_markAircraftDirty) window.__SETCA_markAircraftDirty(launcher); }catch(_){ }
   try{
-    if(typeof __SETCA_pushInstructorCommandNow === 'function') __SETCA_pushInstructorCommandNow();
-    else if(window._SETCA_SYNC && typeof window._SETCA_SYNC.push === 'function') window._SETCA_SYNC.push();
+    if(window._SETCA_SYNC && typeof window._SETCA_SYNC.pushNow === 'function') window._SETCA_SYNC.pushNow();
   }catch(_){ }
 }
 function __SETCA_clearAircraftWeaponLock(launcher,reason='manual'){
@@ -21828,8 +21849,7 @@ function __SETCA_setCommandHdg(p, value, publishLive=true){
   const patch = {tgtHdg:hdg};
   if(cancelsArrival) patch.flightProcedure = null;
   if(__SETCA_routeAircraftPatchToInstructor(p, patch, 'heading')) return hdg;
-  if(cancelsArrival) p.flightProcedure = null;
-  p.tgtHdg = hdg;
+  __SETCA_applyFlightTargets(p,{tgtHdg:hdg});
   try{ if(window.__SETCA_markAircraftDirty) window.__SETCA_markAircraftDirty(p); }catch(_){ }
   if(publishLive) try{ if(window.__SETCA_publishAircraftLive) window.__SETCA_publishAircraftLive(p,{tgtHdg:hdg}); }catch(_){ }
   if(__SETCA_isImmediatePlanningMode()){
@@ -21843,12 +21863,7 @@ function __SETCA_setCommandSpd(p, value, publishLive=true){
   if(!window.__SETCA_isOwnTeam(p)) return Number(p.spd) || 0;
   const spd = Math.max(0, Number(value) || 0);
   if(__SETCA_routeAircraftPatchToInstructor(p, {tgtSpd:spd}, 'speed')) return spd;
-  const activeProcedure = getPlaneFlightProcedure(p);
-  if(activeProcedure && activeProcedure.mode === 'arrival'){
-    activeProcedure.manualSpeedKmh = spd;
-    activeProcedure.manualSpeedAt = Date.now();
-  }
-  p.tgtSpd = spd;
+  __SETCA_applyFlightTargets(p,{tgtSpd:spd});
   try{ if(window.__SETCA_markAircraftDirty) window.__SETCA_markAircraftDirty(p); }catch(_){ }
   if(publishLive) try{ if(window.__SETCA_publishAircraftLive) window.__SETCA_publishAircraftLive(p,{tgtSpd:spd}); }catch(_){ }
   if(__SETCA_isImmediatePlanningMode()){
@@ -21864,12 +21879,7 @@ function __SETCA_setCommandAlt(p, value, publishLive=true){
   if(!window.__SETCA_isOwnTeam(p)) return Number(p.alt) || 0;
   const alt = Math.max(0, Number(value) || 0);
   if(__SETCA_routeAircraftPatchToInstructor(p, {tgtAlt:alt}, 'altitude')) return alt;
-  const activeProcedure = getPlaneFlightProcedure(p);
-  if(activeProcedure && activeProcedure.mode === 'arrival'){
-    activeProcedure.manualAltFt = alt;
-    activeProcedure.manualAltAt = Date.now();
-  }
-  p.tgtAlt = alt;
+  __SETCA_applyFlightTargets(p,{tgtAlt:alt});
   try{ if(window.__SETCA_markAircraftDirty) window.__SETCA_markAircraftDirty(p); }catch(_){ }
   if(publishLive) try{ if(window.__SETCA_publishAircraftLive) window.__SETCA_publishAircraftLive(p,{tgtAlt:alt}); }catch(_){ }
   if(__SETCA_isImmediatePlanningMode()){
@@ -26443,7 +26453,7 @@ document.addEventListener('keydown', (ev)=>{
     <div class="setca-gate-head">
       <div>
         <div class="setca-gate-kicker-row"><button type="button" id="setcaGodDot" class="setca-god-dot" aria-label="Abrir ADMINISTRATOR" title="ADMINISTRATOR">A</button><div class="setca-gate-kicker">Acceso inicial obligatorio</div></div>
-        <h2 id="gateHeading">SETCA 40.2</h2>
+        <h2 id="gateHeading">SETCA 40.4</h2>
         <p id="gateDescription" hidden></p>
       </div>
       <div class="setca-gate-badge-wrap"><div id="setcaGateRoomBadge" class="setca-gate-badge">SIN SALA</div></div>
@@ -29498,7 +29508,7 @@ document.querySelectorAll('#pCmdBody .btn').forEach(btn=>{
     try{ return !!(window.__SETCA_isPlanningMode && window.__SETCA_isPlanningMode()); }catch(_){ return false; }
   }
   function isGroundProcedureReady(p){
-    return !!(p && Math.max(0,+p.alt || 0) <= 5 && Math.max(0,+p.spd || 0) <= 5 * KTS2KMH);
+    return !!(p && Math.abs(Number(p.alt))<=1 && Math.abs(Number(p.spd))<=1);
   }
   function procedureCue(){
     let cue = document.getElementById('setcaArrivalPickCue');
@@ -29517,18 +29527,9 @@ document.querySelectorAll('#pCmdBody .btn').forEach(btn=>{
     cue.style.display = 'none';
     cue.textContent = '';
   }
-  function clearProcedureRouteConflicts(p){
-    if(!p) return;
-    try{ if(typeof window.__SETCA_clearPlaneCapAssignment === 'function') window.__SETCA_clearPlaneCapAssignment(p); }catch(_){ }
-    try{ if(typeof window.__SETCA_clearPlaneArwyAssignment === 'function') window.__SETCA_clearPlaneArwyAssignment(p); }catch(_){ }
-    p.routeEnabled = false;
-    p.routeManualUntil = 0;
-    p.turnBias = null;
-  }
   function commitFlightProcedure(p, procedure, kind){
-    if(!p || !procedure) return false;
-    clearProcedureRouteConflicts(p);
-    const patch = {
+    if(!p) return false;
+    const patch = procedure ? {
       flightProcedure:procedure,
       routeEnabled:false,
       routeManualUntil:0,
@@ -29539,23 +29540,39 @@ document.querySelectorAll('#pCmdBody .btn').forEach(btn=>{
       arwyTrackDirection:'',
       arwyAssignedAt:0,
       turnBias:''
+    } : {
+      flightProcedure:null,
+      tgtHdg:Number(p.hdg)||0,
+      tgtAlt:Number(p.alt)||0,
+      tgtSpd:Number(p.spd)||0,
+      turnBias:''
     };
+    if(Number.isFinite(procedure?.departureHeading)){
+      patch.hdg=procedure.departureHeading;
+      patch.tgtHdg=procedure.departureHeading;
+    }
     if(typeof __SETCA_routeAircraftPatchToInstructor === 'function' &&
       __SETCA_routeAircraftPatchToInstructor(p,patch,kind || 'flight-procedure')){
       return true;
     }
-    Object.assign(p,patch);
-    p.turnBias = null;
+    __SETCA_applyFlightTargets(p,patch);
     try{ if(typeof window.__SETCA_updatePlaneFlightProcedure === 'function') window.__SETCA_updatePlaneFlightProcedure(p,0); }catch(_){ }
     try{ if(window.__SETCA_markAircraftDirty) window.__SETCA_markAircraftDirty(p); }catch(_){ }
-    try{ if(typeof __SETCA_pushInstructorCommandNow === 'function') __SETCA_pushInstructorCommandNow(); else pushSync(); }catch(_){ }
+    try{ if(typeof __SETCA_pushInstructorCommandNow === 'function') __SETCA_pushInstructorCommandNow(p,patch); else pushSync(); }catch(_){ }
     repaintAll();
+    return true;
+  }
+  function cancelFlightProcedure(p,mode,label){
+    if(!commitFlightProcedure(p,null,`${mode}-cancel`)) return false;
+    try{ if(typeof logEvent === 'function') logEvent(`${label} CANCELADO: ${p.name || p.id}`); }catch(_){ }
+    populateMenu(p);
     return true;
   }
   function startDepartureProcedure(mode){
     const p = getTargetPlane();
     const profile = window.__SETCA_FLIGHT_PROCEDURE_PROFILES && window.__SETCA_FLIGHT_PROCEDURE_PROFILES[mode];
     if(!p || !profile || isPlanningAircraftContext()) return false;
+    if(getPlaneFlightProcedure(p)?.mode===mode) return cancelFlightProcedure(p,mode,profile.label);
     if(!isGroundProcedureReady(p)){
       alert(`${profile.label} requiere la aeronave en tierra: ALT 0 FT y VEL 0 KTS.`);
       return false;
@@ -29564,6 +29581,7 @@ document.querySelectorAll('#pCmdBody .btn').forEach(btn=>{
       mode,
       phase:'ground',
       startedAt:Date.now(),
+      departureHeading:Number(ensureMenu().querySelector('#setcaPlaneCtxHdg')?.value || p.tgtHdg || 0)%360,
       targetAltFt:profile.targetAltFt,
       targetSpeedKts:profile.targetSpeedKts,
       verticalRateFpm:profile.climbFpm
@@ -29587,17 +29605,8 @@ document.querySelectorAll('#pCmdBody .btn').forEach(btn=>{
       return true;
     }
     if(active && active.mode === 'arrival'){
-      const patch = {flightProcedure:null};
-      if(!(typeof __SETCA_routeAircraftPatchToInstructor === 'function' && __SETCA_routeAircraftPatchToInstructor(p,patch,'arrival-cancel'))){
-        p.flightProcedure = null;
-        try{ if(window.__SETCA_markAircraftDirty) window.__SETCA_markAircraftDirty(p); }catch(_){ }
-        try{ if(typeof __SETCA_pushInstructorCommandNow === 'function') __SETCA_pushInstructorCommandNow(); else pushSync(); }catch(_){ }
-      }
       stopArrivalSelection();
-      try{ if(typeof logEvent === 'function') logEvent(`ARR CANCELADO: ${p.name || p.id}`); }catch(_){ }
-      repaintAll();
-      populateMenu(p);
-      return true;
+      return cancelFlightProcedure(p,'arrival','ARR');
     }
     arrivalSelection = {planeId:String(p.id || ''), startedAt:Date.now()};
     document.body.classList.add('setca-arrival-pick');
@@ -30239,15 +30248,14 @@ document.querySelectorAll('#pCmdBody .btn').forEach(btn=>{
     const fireBtn = m.querySelector('button[data-act="fire"]');
     const groundReady = isGroundProcedureReady(p);
     if(procedureRow) procedureRow.classList.toggle('ctxHidden',planning);
-    if(scrambleBtn){
-      scrambleBtn.disabled = planning || (!groundReady && procedureLabel !== 'SCRAMBLE');
-      scrambleBtn.classList.toggle('is-active',procedureLabel === 'SCRAMBLE');
-      scrambleBtn.setAttribute('aria-pressed',procedureLabel === 'SCRAMBLE' ? 'true' : 'false');
-    }
-    if(departureBtn){
-      departureBtn.disabled = planning || (!groundReady && procedureLabel !== 'DPT');
-      departureBtn.classList.toggle('is-active',procedureLabel === 'DPT');
-      departureBtn.setAttribute('aria-pressed',procedureLabel === 'DPT' ? 'true' : 'false');
+    for(const [button,label,title] of [[scrambleBtn,'SCRAMBLE','Despegue táctico rápido'],[departureBtn,'DPT','Despegue controlado']]){
+      if(!button) continue;
+      const active=procedureLabel===label;
+      button.disabled=planning || (!groundReady && !active);
+      button.classList.toggle('is-active',active);
+      button.setAttribute('aria-pressed',String(active));
+      button.textContent=active ? `CANCEL ${label}` : label;
+      button.title=active ? `Cancelar ${label}` : title;
     }
     if(arrivalBtn){
       arrivalBtn.disabled = planning;
@@ -30259,7 +30267,8 @@ document.querySelectorAll('#pCmdBody .btn').forEach(btn=>{
       arrivalBtn.title = arrivalActive ? 'Cancelar ARRIVAL' : 'Seleccionar punto de llegada';
     }
     if(hint){
-      hint.textContent = aircraftDeferredLabel();
+      hint.textContent = groundReady && !planning
+        ? 'Para despegar, ajusta RUMBO y pulsa SCRAMBLE o DPT.' : aircraftDeferredLabel();
     }
     if(enemyContact){
       if(hint) hint.textContent = 'Clasificación compartida solo con ' + window.__SETCA_teamLabel(window.__SETCA_getCurrentTeam());
@@ -30346,22 +30355,23 @@ document.querySelectorAll('#pCmdBody .btn').forEach(btn=>{
       return true;
     }
 
-    if(edited(verticalRateIn) && Number.isFinite(verticalRateVal) && verticalRateVal > 0){
-      p.verticalRateFpm = verticalRateVal;
-      const activeProcedure = getPlaneFlightProcedure(p);
-      if(activeProcedure && activeProcedure.mode === 'arrival'){
-        activeProcedure.manualVerticalRateFpm = verticalRateVal;
-        activeProcedure.manualVerticalRateAt = Date.now();
-      }
-    }
+    const procedureBefore=getPlaneFlightProcedure(p);
+    const rateEdited=edited(verticalRateIn) && Number.isFinite(verticalRateVal) && verticalRateVal>0;
+    if(rateEdited) __SETCA_applyFlightTargets(p,{verticalRateFpm:verticalRateVal});
     const beforeCommand={tgtAlt:p.tgtAlt,tgtSpd:p.tgtSpd,tgtHdg:p.tgtHdg,turn:p.turn,turnBias:p.turnBias};
-    if(edited(altIn) && Number.isFinite(altVal)) __SETCA_setCommandAlt(p, altFromUi(altVal), false);
-    if(edited(spdIn) && Number.isFinite(speedCommandKmh)) __SETCA_setCommandSpd(p, speedCommandKmh, false);
+    const altitudeEdited=edited(altIn) && altIn.value.trim()!=='' && Number.isFinite(altVal);
+    const speedEdited=edited(spdIn) && spdIn.value.trim()!=='' && Number.isFinite(speedCommandKmh);
+    if(altitudeEdited) __SETCA_setCommandAlt(p, altFromUi(altVal), false);
+    if(speedEdited) __SETCA_setCommandSpd(p, speedCommandKmh, false);
     if(headingEdited) __SETCA_setCommandHdg(p, hdgVal, false);
     if(edited(turnIn) && Number.isFinite(turnVal)) p.turn = Math.max(0, turnVal);
     const liveCommand={};
     for(const key of ['tgtAlt','tgtSpd','tgtHdg','turn','turnBias'])
       if(p[key]!==beforeCommand[key]) liveCommand[key]=p[key];
+    if(procedureBefore && altitudeEdited) liveCommand.tgtAlt=p.tgtAlt;
+    if(procedureBefore && speedEdited) liveCommand.tgtSpd=p.tgtSpd;
+    if(procedureBefore && !getPlaneFlightProcedure(p)) liveCommand.flightProcedure=false;
+    if(rateEdited && procedureBefore) liveCommand.verticalRateFpm=p.verticalRateFpm;
     if(Object.keys(liveCommand).length && window.__SETCA_publishAircraftLive)
       window.__SETCA_publishAircraftLive(p,liveCommand,true);
     if(callsignVal) p.name = callsignVal; else p.name = String(p.id || '');
